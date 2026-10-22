@@ -1,0 +1,1038 @@
+{% extends "admin/base_site.html" %}
+{% block title %}Analytics{% endblock %}
+
+{% block content %}
+<style>
+  /* ── Page: top bar + content, as in the CRM lists and notifications ── */
+  body { overflow-x: hidden; }
+  #content > br.clear { display: none; }
+  .an-wrap { width: 100%; box-sizing: border-box; font-family: var(--font); font-size: 13px; color: #374151; }
+
+  /* Period bar - 53px, white, with a bottom line (like .ntf-bulkbar / .cl-bar).
+     Controls are the same .cl-top-btn buttons from base_site as "Add" in the lists,
+     and value selection is a dropdown with .fp-sort-row rows, as in column filters.
+     There are no native <select> elements in the CRM bars, so none are left here.
+   */
+  .an-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+            height: 53px; box-sizing: border-box; padding: 0 16px;
+            background: #fff; border-bottom: 1px solid #e5e7eb; }
+  .an-pick { gap: 6px; }
+  .an-pick-l { color: #9ca3af; font-weight: 400; }
+  .an-pick-v { color: #1f2937; }
+  .an-pick svg { display: block; width: 14px; height: 14px; margin-left: 2px; color: #9ca3af;
+                 transform: rotate(90deg); transition: transform .15s ease; }
+  .an-pick.on svg { transform: rotate(-90deg); }
+  .an-pick.on { background: #f3f4f6 !important; border-color: #9ca3af !important; }
+  /* Dropdown - the same picker as in the product/bundle forms: the .picker-popup container
+     is global (base_site), but the .picker-item rows are defined in each template - so the same
+     rules are also here.
+   */
+  .an-pop { display: none; position: fixed; min-width: 180px; width: auto; }
+  .an-pop.open { display: block; }
+  .an-pop .picker-popup-inner { max-height: 300px; overflow-y: auto; padding: 0; white-space: nowrap; }
+  .an-pop .picker-item { padding: 5px 14px; font-size: 13px; color: #374151; display: flex; align-items: center; }
+  .an-pop .picker-item-single { cursor: pointer; transition: background .12s; }
+  .an-pop .picker-item-single:hover { background: #f3f4f6; }
+  .an-pop .picker-item-single.is-selected { background: #e5e7eb; }
+  .an-pop .picker-item-single.is-selected:hover { background: #d1d5db; }
+  .an-pop .picker-item-single.is-selected > span { font-weight: 600; color: #111827; }
+
+  /* Blocks run continuously, with no margins or gaps - like a table in the CRM lists. */
+  .an-body { display: flex; flex-direction: column; }
+  /* Block pair: we do NOT equalize heights (otherwise an empty tail would remain under the shorter
+     one when its neighbour is expanded), and draw the vertical line separately - when wrapping
+     into a single column it disappears.
+   */
+  .an-cols { position: relative; display: grid;
+             grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); align-items: start; }
+  .an-cols > * { background: #fff; }
+  .an-cols::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%;
+                    width: 1px; background: #e5e7eb; }
+  @media (max-width: 900px) { .an-cols::after { display: none; } }
+
+  /* ── Block: header and lines are the same as in CRM tables ── */
+  .an-box { background: #fff; border-bottom: 1px solid #e5e7eb; }
+  /* Block title - grey strip, like .oi-group-header in order items. It has no bottom border of
+     its own: the column header with its own line follows right under it, and together
+     they read as a double outline.
+   */
+  .an-box-t { display: flex; align-items: center; height: 48px; padding: 0 16px;
+              background: #f3f4f6; font-size: 15px; font-weight: 700; color: #111827; }
+  /* Under the title the line is provided by whatever comes next: in a table - the column header,
+     here - the content itself (chart / "no data"). That is why .an-box-t has no
+     border of its own.
+   */
+  .an-box-b { padding: 12px 0; border-top: 1px solid #e5e7eb; }
+
+  /* ── Table: header, lines and zebra 1:1 with the CRM lists ── */
+  /* fixed: widths come from colgroup and do not depend on content - with "Show all"
+     the columns stay the same.
+   */
+  /* separate: the border belongs to the CELL, not the table. With collapse it is drawn on the
+     table seam, so inside a scroll box it was clipped by the container edge, and the sticky
+     header left lines behind - hence 'the outline disappears/shifts'.
+   */
+  .an-tbl { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+  .an-tbl thead th { background: #f9fafb; border-bottom: 1px solid #e5e7eb; border-left: 1px solid #e5e7eb;
+                     padding: 14px 16px; font-size: 10px; font-weight: 700; text-transform: uppercase;
+                     letter-spacing: .4px; color: #6b7280; text-align: left; white-space: nowrap; vertical-align: middle; }
+  .an-tbl thead th:first-child { border-left: none; }
+  .an-tbl thead th { border-top: 1px solid #e5e7eb; }
+  /* Everything is left-aligned, as in the CRM lists: numbers right-aligned in their columns
+     looked scattered - header at one end, value at the other.
+   */
+  .an-tbl thead th.r, .an-tbl td.r { text-align: left; }
+  /* No fixed height: a long name wraps to a second line instead of being cut off. */
+  .an-tbl tbody td { padding: 13px 16px; font-size: 13px; color: #374151; line-height: 1.35;
+                     border-left: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
+  .an-tbl tbody td:first-child { border-left: none; }
+  /* The last row has no border (the block's border plays its role), but without it
+     it became 1px shorter than the rest - we give this pixel back with padding.
+   */
+  .an-tbl tbody tr:last-child td { border-bottom: none; padding-bottom: 14px; }
+  .an-tbl tbody tr.row2 { background: #f9fafb; }
+  .an-tbl td.v { font-weight: 600; color: #1f2937; white-space: nowrap; }
+  /* Do NOT truncate the name - a long one wraps to the next line. */
+  .an-tbl td.name { white-space: normal; overflow-wrap: anywhere; }
+  .an-tbl th.r, .an-tbl td.r { white-space: nowrap; }
+  /* ── Column filters: the same mechanics as in the product lists ──
+     the th[data-col] header opens #an-flt-pop (its content is styled by filter-popup.css),
+     the active column is grey with a triangle, like .col-on in #pv-table.
+   */
+  .an-tbl thead th[data-col] { cursor: pointer; user-select: none; position: relative; padding-right: 26px; }
+  .an-tbl thead th[data-col]:hover, .an-tbl thead th[data-col].col-open { color: #1f2937; }
+  .an-tbl thead th[data-col].col-on { background: #d1d5db; color: #1f2937; }
+  .an-tbl .th-badge { position: absolute; right: 7px; top: 50%; transform: translateY(-50%);
+                      display: flex; align-items: center; pointer-events: none; }
+  .an-tbl td.an-none { color: #9ca3af; text-align: center; }
+  /* ── Category tree: look 1:1 with the "Categories" page ──
+     a separate 36px column with a chevron, 2px #d1d5db lines, a rounded elbow on the last
+     descendant (via gradient, not border: on Retina the border was blurry).
+   */
+  .an-tbl th.an-tgc, .an-tbl td.an-tgc { width: 36px; padding: 0; text-align: center; vertical-align: middle; }
+  .an-tbl th.an-tgc { cursor: pointer; }
+  .an-tg { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
+           background: none; border: none; padding: 0; cursor: pointer; color: #9ca3af; transition: color .12s; }
+  .an-tg:hover { color: #1f2937; }
+  .an-tg svg { display: block; width: 18px; height: 18px; transition: transform .15s ease; transform-origin: center; }
+  .an-tg.open svg { transform: rotate(90deg); }
+  /* Everything in the table bodies is one 13px size - the counter (12px) and "pcs" (10px) differed. */
+  .an-cnt { margin-left: 6px; color: #9ca3af; font-weight: 400; }
+  .an-tbl td.name { position: relative; overflow-x: clip; overflow-y: visible; }
+  .an-vline { position: absolute; top: -1px; bottom: -1px; width: 2px; background: #d1d5db; pointer-events: none; z-index: 2; }
+  .an-vline.is-first { top: 8px; }
+  /* Lead the horizontal line to the centre of the FIRST line of text, not the cell: in cells
+     the centre shifts as soon as the name wraps to two lines.
+     13px top padding + half a line (13px × 1.35).
+   */
+  .an-hline { position: absolute; top: calc(13px + 13px * 1.35 / 2); height: 2px; background: #d1d5db;
+              pointer-events: none; z-index: 2; transform: translateY(-1px); }
+  .an-elbow { position: absolute; pointer-events: none; z-index: 2;
+              background:
+                linear-gradient(#d1d5db, #d1d5db) left top / 2px calc(100% - 6px) no-repeat,
+                linear-gradient(#d1d5db, #d1d5db) right bottom / calc(100% - 6px) 2px no-repeat,
+                radial-gradient(circle 6px at top right, transparent 0 4px, #d1d5db 4px 6px, transparent 6px) left bottom / 6px 6px no-repeat; }
+  /* A table with data must be closed at the bottom: when a filler follows it,
+     we restore the border on the last row (without it content and zebra merge).
+   */
+  .an-tbl.has-fill tbody tr:last-child td { border-bottom: 1px solid #e5e7eb; padding-bottom: 13px; }
+  /* When a filter leaves few rows, the block must not 'collapse': we pad it with zebra to the same
+     height - the same technique as .tbl-pad-fill in the lists, only the row step is local (44px).
+     The stripes are explicit elements, not a gradient: the last one must stay WITHOUT a bottom
+     line,
+     otherwise it lies flush against the block border and reads as a double outline.
+     The vertical column lines are drawn by .an-fill i - following the real headers.
+   */
+  .an-fill { position: relative; width: 100%; box-sizing: border-box; pointer-events: none; overflow: hidden; }
+  .an-fill b { display: block; box-sizing: border-box; }
+  .an-fill i { position: absolute; top: 0; bottom: 0; width: 1px; background: #e5e7eb; }
+  .an-tbl td.num { white-space: nowrap; color: #6b7280; }
+  /* "Show all" - not a button in the footer, but the last table row across the full width. */
+  .an-more { display: flex; align-items: center; justify-content: center; gap: 6px;
+             width: 100%; height: 44px; padding: 0; margin: 0;
+             background: #fff; border: 0; border-top: 1px solid #e5e7eb;
+             font-family: inherit; font-size: 12px; font-weight: 600; color: #6b7280;
+             letter-spacing: .2px; cursor: pointer; }
+  .an-more:hover { background: #f9fafb; color: #1f2937; }
+  /* The arrow is the same as in CRM trees (.cat-toggle / .cs-toggle): "›" with rotation. */
+  .an-more svg { display: block; width: 16px; height: 16px; color: #9ca3af;
+                 transform: rotate(90deg); transition: transform .15s ease; }
+  .an-more.is-open svg { transform: rotate(-90deg); }
+  /* "Show all" does not stretch the page: the full list lives in a scroll box
+     with the height of the collapsed state, the column header stands ABOVE it.
+   */
+  .an-scroll { max-height: 480px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+  .an-scroll[style*="height"] { max-height: none; }
+  .an-sw { position: relative; }
+  /* The scrollbar is the ordinary system one, we neither style it nor cover it with anything.
+     So that its gutter does not break the outline, the header is moved OUTSIDE the scroll box:
+     the wrapper draws the background and both lines across the full block width, and the header
+     table is narrowed by exactly the gutter (--an-sbw is measured by JS) - so the columns match
+     the body to the pixel, and the scrollbar starts below the header.
+   */
+  .an-head { background: #f9fafb; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb;
+             padding-right: var(--an-sbw, 0px); }
+  .an-head .an-tbl thead th { border-top: 0; border-bottom: 0; }
+  .an-empty { color: #9ca3af; font-size: 13px; padding: 14px 16px; border-top: 1px solid #e5e7eb;
+              text-align: center; }
+  .an-kind { color: #9ca3af; margin-left: 6px; font-weight: 400; }
+
+  /* ── KPI - tiles in the same frame, lines between them like between columns ── */
+  .an-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+             background: #fff; border-bottom: 1px solid #e5e7eb; }
+  .an-kpi { padding: 14px 16px 16px; border-left: 1px solid #e5e7eb; }
+  .an-kpi:first-child { border-left: 0; }
+  .an-kpi-l { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: #9ca3af; }
+  .an-kpi-v { font-size: 23px; font-weight: 600; color: #1f2937; margin-top: 9px; line-height: 1.1; }
+  .an-kpi-d { font-size: 11px; font-weight: 500; margin-top: 6px; }
+  .an-up { color: var(--ok-fg, #166534); } .an-down { color: var(--err-fg, #991b1b); } .an-flat { color: #9ca3af; }
+
+  .an-svg { display: block; }
+
+  /* Calendar popup - the same 'window' as the pickers above (.or-picker-popup): radius and shadow
+     come from the same variables so all three dropdowns of the bar look identical.
+     NOT id$="flt-pop" - otherwise the global wheel/click managers in base_site close it
+     on hover/scroll.
+     The content (.cal-*) is styled by filter-popup.css via classes.
+   */
+  #an-date-pop { display: none; position: fixed; z-index: 9999; background: #fff; border: 1px solid var(--border-color, #e5e7eb);
+                 border-radius: var(--radius-card, 6px); box-shadow: var(--shadow-popup, 0 4px 12px rgba(0,0,0,.1)); overflow: hidden; width: 230px; }
+  #an-date-pop.open { display: block; }
+</style>
+
+<div class="an-wrap">
+  <div class="an-bar">
+    <button type="button" class="cl-top-btn an-pick" id="an-period-btn" data-pop="an-period-pop">
+      <span class="an-pick-l">Period:</span>
+      <span class="an-pick-v">{% if data.period_key == 'custom' %}{{ data.from }} — {{ data.to }}{% else %}{% for k,lbl in periods %}{% if data.period_key == k %}{{ lbl }}{% endif %}{% endfor %}{% endif %}</span>
+      <svg viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button type="button" class="cl-top-btn an-pick" id="an-compare-btn" data-pop="an-compare-pop">
+      <span class="an-pick-l">Compare:</span>
+      <span class="an-pick-v">{% for ck,clbl in compare_options %}{% if data.compare_key == ck %}{{ clbl }}{% endif %}{% endfor %}</span>
+      <svg viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+  <!-- Dropdowns - CRM picker (.picker-popup / .picker-item-single), as in the product forms. -->
+  <div class="an-pop picker-popup" id="an-period-pop">
+    <div class="picker-popup-inner">
+      {% for k,lbl in periods %}
+        <div class="picker-item picker-item-single{% if data.period_key == k %} is-selected{% endif %}" data-v="{{ k }}"><span>{{ lbl }}</span></div>
+      {% endfor %}
+      <div class="picker-item picker-item-single{% if data.period_key == 'custom' %} is-selected{% endif %}" data-v="custom"><span>Custom range…</span></div>
+    </div>
+  </div>
+  <div class="an-pop picker-popup" id="an-compare-pop">
+    <div class="picker-popup-inner">
+      {% for ck,clbl in compare_options %}
+        <div class="picker-item picker-item-single{% if data.compare_key == ck %} is-selected{% endif %}" data-v="{{ ck }}"><span>{{ clbl }}</span></div>
+      {% endfor %}
+    </div>
+  </div>
+  <div id="an-date-pop"></div>
+  <!--
+    Column filters popup: id ending in "flt-pop" - picked up by both the filter-popup.css styles
+    and the global base_site behaviour (closing on mouse leave/scroll).
+  -->
+  <div id="an-flt-pop"></div>
+
+  <div class="an-body">
+    <div class="an-kpis" id="an-kpis"></div>
+    <div id="an-compare"></div>
+
+    <div class="an-box">
+      <div class="an-box-t">Revenue and orders over time</div>
+      <div class="an-box-b" id="an-line"></div>
+    </div>
+
+    <div id="an-monthly"></div>
+
+    <div class="an-cols">
+      <div id="an-top-products"></div>
+      <div id="an-top-cats"></div>
+    </div>
+
+    <div class="an-cols">
+      <div id="an-risers"></div>
+      <div id="an-fallers"></div>
+    </div>
+
+    <div id="an-retention"></div>
+    <div id="an-stock"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var D = {{ data_json|safe }};
+  var LINE = '#374151';
+  var nf = new Intl.NumberFormat('uk-UA', {maximumFractionDigits:0});
+  function uah(n){ return nf.format(Math.round(n||0)) + ' ₴'; }
+  function num(n){ return nf.format(n||0); }
+  function el(t,c,h){ var e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; }
+  var CHEV = '<svg viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" '+
+             'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+  /* Column widths are set explicitly (colgroup) - identical in collapsed and expanded state,
+     so the table does not 'float' on "Show all".
+   */
+  function box(title, headHtml, bodyHtml, footHtml, scroll, cols){
+    var cg = cols ? '<colgroup>' + cols.map(function(w){
+      return '<col' + (w ? ' style="width:' + w + '"' : '') + '>'; }).join('') + '</colgroup>' : '';
+    var tbl = '<table class="an-tbl">'+cg+'<thead><tr>'+headHtml+'</tr></thead><tbody>'+bodyHtml+'</tbody></table>';
+    /* In the scroll version the header is a separate table OUTSIDE the scroll box (see .an-head):
+       the same colgroup, so columns match, and the scrollbar stays ordinary
+       and does not cut the header lines.
+     */
+    var split = '<div class="an-sw">'+
+      '<div class="an-head"><table class="an-tbl">'+cg+'<thead><tr>'+headHtml+'</tr></thead></table></div>'+
+      '<div class="an-scroll"><table class="an-tbl">'+cg+'<tbody>'+bodyHtml+'</tbody></table></div></div>';
+    /* Empty title - a block without a title strip (for stock it duplicates the KPI above). */
+    return '<div class="an-box">' + (title ? '<div class="an-box-t">'+esc(title)+'</div>' : '') +
+      (bodyHtml === null
+        ? '<div class="an-empty">No data for the period</div>'
+        : (scroll ? split : tbl)) +
+      '<div class="an-fill"></div>' + (footHtml || '') + '</div>';
+  }
+
+  /* The expanded block stays the same height it had when collapsed. We equalize by BLOCK height,
+     not table height: in the scroll version the framing differs (box border, shadow instead of
+     the header border), and a one-pixel difference read as 'the height changed'.
+   */
+  function keepHeight(host, expanded){
+    var sc = host.querySelector('.an-scroll');
+    if(!sc) return;
+    if(!expanded || !host._collapsedBoxH){ sc.style.height = ''; return; }
+    var box = host.querySelector('.an-box');
+    var chrome = box.getBoundingClientRect().height - sc.getBoundingClientRect().height;
+    sc.style.height = Math.max(160, host._collapsedBoxH - chrome) + 'px';
+  }
+
+  /* Scrollbar gutter width - ONLY by measurement (0 where scrollbars are overlay), and the header
+     table is narrowed by exactly that so its columns match the body.
+   */
+  function syncHead(sw){
+    var sc = sw.querySelector('.an-scroll');
+    if(!sc) return;
+    sw.style.setProperty('--an-sbw', (sc.offsetWidth - sc.clientWidth) + 'px');
+  }
+  function syncHeads(root){
+    (root || document).querySelectorAll('.an-sw').forEach(syncHead);
+  }
+  var headRT;
+  window.addEventListener('resize', function(){
+    clearTimeout(headRT);
+    headRT = setTimeout(function(){ syncHeads(); }, 120);
+  });
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(function(){ syncHeads(); });
+
+  // ── KPI ──
+  function dHtml(d){
+    if(d===null||d===undefined) return '<div class="an-kpi-d an-flat">— vs previous period</div>';
+    var cls=d>0?'an-up':(d<0?'an-down':'an-flat'), a=d>0?'▲':(d<0?'▼':'•');
+    return '<div class="an-kpi-d '+cls+'">'+a+' '+Math.abs(d)+'%</div>';
+  }
+  var K=D.kpi, kw=document.getElementById('an-kpis');
+  [['Revenue',uah(K.revenue),K.d_revenue],['Orders',num(K.orders),K.d_orders],
+   ['Average order value',uah(K.avg_check),K.d_avg],['Items sold',num(K.items_sold),K.d_items],
+   ['New customers',num(K.new_customers),K.d_new],['Items / order',(K.avg_items||0).toFixed(1),null]
+  ].forEach(function(k){
+    var c=el('div','an-kpi'); c.appendChild(el('div','an-kpi-l',k[0]));
+    c.appendChild(el('div','an-kpi-v',k[1])); c.insertAdjacentHTML('beforeend',dHtml(k[2])); kw.appendChild(c);
+  });
+
+  // ── Period / Comparison: panel button + dropdown (like column filters) ──
+  var perBtn=document.getElementById('an-period-btn');
+  function initPick(btn, onPick){
+    var pop=document.getElementById(btn.dataset.pop);
+    function place(){
+      var r=btn.getBoundingClientRect();
+      pop.style.left=Math.min(r.left, window.innerWidth-pop.offsetWidth-8)+'px';
+      pop.style.top=(r.bottom+4)+'px';
+    }
+    function close(){ pop.classList.remove('open'); btn.classList.remove('on'); }
+    btn.onclick=function(e){
+      // stopPropagation prevents document listeners from firing, so we close the neighbouring
+      // dropdowns (the other picker and the calendar) explicitly here.
+      e.stopPropagation();
+      if(pop.classList.contains('open')){ close(); return; }
+      closePicks(); closeCal();   // closeCal - in the calendar section below (hoisted)
+      pop.classList.add('open'); btn.classList.add('on'); place();
+    };
+    pop.querySelectorAll('.picker-item-single').forEach(function(row){
+      // stopPropagation: otherwise the click on the row reaches the calendar's document listener
+      // and it closes the range popup that has just opened.
+      row.onclick=function(e){ e.stopPropagation(); close(); onPick(row.dataset.v); };
+    });
+    btn._closePick=close;
+    btn._placePick=function(){ if(pop.classList.contains('open')) place(); };
+  }
+  function closePicks(){
+    document.querySelectorAll('.an-bar .an-pick').forEach(function(b){ if(b._closePick) b._closePick(); });
+  }
+  function go(set){
+    var u=new URL(location.href);
+    set(u.searchParams);
+    location.href=u.toString();
+  }
+  initPick(perBtn, function(v){
+    if(v==='custom'){ openCal(); return; }  // openCal - in the calendar section below (hoisted)
+    go(function(q){ q.set('period', v); q.delete('from'); q.delete('to'); });
+  });
+  initPick(document.getElementById('an-compare-btn'), function(v){
+    go(function(q){ if(v) q.set('compare', v); else q.delete('compare'); });
+  });
+  document.addEventListener('click', function(e){
+    // A click inside the calendar is not counted as 'outside': otherwise the highlight would drop
+    // off the "Period" button while the calendar is open.
+    if(!e.target.closest) return;
+    if(e.target.closest('.an-pop') || e.target.closest('#an-date-pop')) return;
+    closePicks();
+  });
+  window.addEventListener('resize', function(){
+    document.querySelectorAll('.an-bar .an-pick').forEach(function(b){ if(b._placePick) b._placePick(); });
+  });
+  /* Any page scroll closes the dropdowns - they are position:fixed and would otherwise hang
+     detached from the button. We listen to both wheel (the global base_site handler removes
+     .open only from .picker-popup, so the button highlight and the calendar are handled here)
+     and scroll itself - because the scrollbar can be dragged with the mouse or scrolled with
+     the keyboard, and then wheel never fires.
+   */
+  /* The column filter popup is NOT included here: it follows the base_site convention (closes on
+     wheel and as soon as the mouse leaves it), and scroll also fires from focusing the search
+     field - the popup would vanish right after opening.
+   */
+  function closeOnScroll(e){
+    var t = e && e.target;
+    if(t && t.closest && t.closest('.an-pop, #an-date-pop, #an-flt-pop')) return;  // scroll inside the popup
+    closePicks(); closeCal();
+  }
+  window.addEventListener('wheel', closeOnScroll, { passive: true });
+  document.addEventListener('scroll', closeOnScroll, true);
+  if(D.compare){
+    var C=D.compare;
+    function pct(a,b){ if(!b) return '<span class="an-flat">—</span>';
+      var d=Math.round((a-b)/b*1000)/10, cls=d>0?'an-up':(d<0?'an-down':'an-flat');
+      return '<span class="'+cls+'">'+(d>0?'+':'')+d+'%</span>'; }
+    var R=[
+      ['Revenue', uah(K.revenue), uah(C.kpi.revenue), pct(K.revenue,C.kpi.revenue)],
+      ['Orders', num(K.orders), num(C.kpi.orders), pct(K.orders,C.kpi.orders)],
+      ['Average order value', uah(K.avg_check), uah(C.kpi.avg_check), pct(K.avg_check,C.kpi.avg_check)],
+      ['Items sold', num(K.items_sold), num(C.kpi.items_sold), pct(K.items_sold,C.kpi.items_sold)],
+      ['New customers', num(K.new_customers), num(C.kpi.new_customers), pct(K.new_customers,C.kpi.new_customers)]
+    ];
+    var rowsHtml='';
+    R.forEach(function(r,i){
+      rowsHtml+='<tr class="'+(i%2?'row2':'row1')+'"><td>'+r[0]+'</td><td class="r v">'+r[1]+
+        '</td><td class="r num">'+r[2]+'</td><td class="r">'+r[3]+'</td></tr>';
+    });
+    document.getElementById('an-compare').innerHTML = box('Period comparison',
+      '<th>Metric</th><th class="r">Current</th><th class="r">'+esc(C.label)+'</th><th class="r">Difference</th>',
+      rowsHtml, '', false, ['', '200px', '200px', '140px']);
+  }
+
+  /* ── Column filters popup. One per page, like #flt-pop in the CRM lists:
+     the content is built by the table whose header was clicked. ──
+   */
+  var fpop = document.getElementById('an-flt-pop'), fpOwner = null, fpCol = null, fpHost = null;
+  function closeFp(){
+    fpop.classList.remove('open');
+    document.querySelectorAll('.an-tbl th[data-col].col-open').forEach(function(t){ t.classList.remove('col-open'); });
+    fpOwner = null; fpCol = null; fpHost = null;
+  }
+  document.addEventListener('click', function(e){
+    if(fpop.contains(e.target)) return;
+    if(e.target.closest && e.target.closest('.an-tbl th[data-col]')) return;
+    closeFp();
+  });
+  var TRI = '<svg width="9" height="10" viewBox="0 0 10 11" fill="#374151"><path d="M0 0h10L6.5 5v6h-3V5z"/></svg>';
+
+  // ── Top lists: a "Name / Value / Share" table.
+  //    Collapsed - the first LIMIT rows, "Show all" - the whole list. ──
+  function topTable(host, title, valTitle, data, valFn, opts){
+    /* An empty block is also built as a full table - with a column header, a "No data"
+       row and a filler. Otherwise, next to a filled neighbour it collapsed into a strip
+       and the pair fell apart.
+     */
+    var NODATA = !data.length;
+    /* Tree (categories): the parent already holds the subtree sum, so we compute the share
+       from the sum of ROOTS - otherwise 100% would be reached twice.
+     */
+    var TREE = !!(opts && opts.tree);
+    var total = (TREE ? data.filter(function(r){ return !r.depth; }) : data)
+                  .reduce(function(s,r){ return s + Math.abs(r._v||0); }, 0) || 1;
+    var LIMIT = 10, exp = false;
+    // Filtering and sorting are client-side only: all rows are already here, in data.
+    var F = { q: '', min: null, max: null }, sortF = null, sortD = 'desc';
+    /* Geometry as on the categories page: the vertical runs through the CENTRE of the first letter
+       of the parent name. A 13px letter is ≈ 8px wide, so the centre is text start + 4px;
+       descendant
+       text is indented by the length of the horizontal (14px) plus a gap (6px). Hence the level
+       step
+       of 24px, not 20 as there, because our cells have 16px padding versus 12px there.
+     */
+    /* Branches collapse; initially only roots are open. The block size does NOT depend on this:
+       we take the height reference from the first render, and then, if there are more rows,
+       we enable scrolling at that same height, and if fewer - pad with zebra (see fitHeight).
+     */
+    var collapsed = {}, treeDirty = false;
+    if(TREE) data.forEach(function(r){ collapsed[r.name] = true; });
+    // Nodes that have a deeper row under them in the data are considered parents.
+    function parentNames(){
+      var out = [];
+      data.forEach(function(r, i){
+        var nx = data[i + 1];
+        if(nx && (nx.depth || 0) > (r.depth || 0)) out.push(r.name);
+      });
+      return out;
+    }
+    function allOpen(){
+      return parentNames().every(function(n){ return !collapsed[n]; });
+    }
+    var CHEV18 = '<svg viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" '+
+                 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    var HALF = 4, HLINE = 14, GAP = 6, PAD0 = 16;
+    var STEP = HLINE + GAP + HALF;              // 24px per level
+    function lineX(d){ return PAD0 + HALF + (d - 1) * STEP; }   // vertical of level d
+    function textPad(d){ return d > 0 ? lineX(d) + HLINE + GAP : PAD0; }
+    var CY = 13 + 13 * 1.35 / 2;                // centre of the first text line in the cell
+
+    function mag(r){ return Math.abs(r._v || 0); }
+    function hit(r){
+      var q = F.q.trim().toLowerCase();
+      if(q && String(r.name).toLowerCase().indexOf(q) === -1) return false;
+      if(F.min !== null && mag(r) < F.min) return false;
+      if(F.max !== null && mag(r) > F.max) return false;
+      return true;
+    }
+    /* The tree is filtered and sorted PER LEVEL: a node stays if it matches itself or has a
+       matching
+       descendant, and the order changes within a branch - otherwise a flat sort would mix parents
+       with their own subcategories.
+     */
+    function treeView(){
+      var roots = [], stack = [];
+      data.forEach(function(r){
+        var nd = { r: r, kids: [] }, d = r.depth || 0;
+        if(d === 0 || !stack[d-1]) roots.push(nd); else stack[d-1].kids.push(nd);
+        stack[d] = nd; stack.length = d + 1;
+      });
+      function keep(nd){
+        nd.kids = nd.kids.filter(keep);
+        return hit(nd.r) || nd.kids.length > 0;
+      }
+      var tree = roots.filter(keep);
+      if(sortF){
+        var key = sortF === 'name' ? function(nd){ return String(nd.r.name).toLowerCase(); }
+                                   : function(nd){ return mag(nd.r); };
+        var sign = sortD === 'asc' ? 1 : -1;
+        (function srt(list){
+          list.sort(function(a, b){ var x = key(a), y = key(b); return x === y ? 0 : (x < y ? -1 : 1) * sign; });
+          list.forEach(function(nd){ srt(nd.kids); });
+        })(tree);
+      }
+      /* Along the way we compute everything for the lines: depth, whether the node is first/last
+         among
+         siblings, and whether its ancestors were last (then the vertical is not drawn).
+         A branch under a collapsed node does not make it into the output; during search the tree
+         expands itself, otherwise the match would not be visible.
+       */
+      var out = [], searching = !!F.q.trim();
+      (function walk(list, anc){
+        list.forEach(function(nd, i){
+          var isLast = i === list.length - 1;
+          nd.r._tree = { depth: anc.length, first: i === 0, last: isLast, anc: anc.slice(), kids: nd.kids.length };
+          out.push(nd.r);
+          if(nd.kids.length && (searching || !collapsed[nd.r.name])) walk(nd.kids, anc.concat(isLast));
+        });
+      })(tree, []);
+      return out;
+    }
+    function view(){
+      if(TREE) return treeView();
+      var rows = data.filter(hit);
+      if(sortF){
+        var key = sortF === 'name'
+          ? function(r){ return String(r.name).toLowerCase(); }
+          : mag;
+        var sign = sortD === 'asc' ? 1 : -1;
+        rows = rows.slice().sort(function(a, b){
+          var x = key(a), y = key(b);
+          return x === y ? 0 : (x < y ? -1 : 1) * sign;
+        });
+      }
+      return rows;
+    }
+    function colFiltered(col){
+      if(col === 'name') return !!F.q.trim();
+      if(col === 'val')  return F.min !== null || F.max !== null;
+      return false;
+    }
+    function resetCol(col){
+      if(col === 'name') F.q = '';
+      if(col === 'val'){ F.min = null; F.max = null; }
+      if(sortF === col){ sortF = null; sortD = 'desc'; }
+      paint();
+    }
+
+    /* Tree lines in the name cell - the same geometry as on the categories page: verticals under
+       ancestors (except those that were last themselves), at its own level an elbow for the last
+       descendant or a vertical + horizontal for the rest.
+     */
+    function treeCell(r){
+      var t = r._tree || { depth: 0, first: true, last: true, anc: [], kids: 0 };
+      var lines = '', ownX = lineX(t.depth);
+      for(var lvl = 1; lvl < t.depth; lvl++){
+        if(t.anc[lvl - 1]) continue;                       // ancestor was last - no vertical needed
+        lines += '<i class="an-vline" style="left:'+lineX(lvl)+'px"></i>';
+      }
+      if(t.depth > 0){
+        if(t.last){
+          // The elbow ends in the same place as the horizontal - at the centre of the first line.
+          var top = t.first ? 8 : -1;
+          lines += '<i class="an-elbow" style="left:'+ownX+'px;top:'+top+'px;height:'+(CY - top).toFixed(1)+
+                   'px;width:'+HLINE+'px"></i>';
+        } else {
+          lines += '<i class="an-vline'+(t.first ? ' is-first' : '')+'" style="left:'+ownX+'px"></i>'+
+                   '<i class="an-hline" style="left:'+ownX+'px;width:'+HLINE+'px"></i>';
+        }
+      }
+      // We do not emphasize roots with a font weight - the level reads from the indent anyway.
+      var style = 'padding-left:'+textPad(t.depth)+'px';
+      var cnt = t.kids ? '<span class="an-cnt">('+t.kids+')</span>' : '';
+      var open = !collapsed[r.name];
+      var tg = t.kids ? '<button type="button" class="an-tg'+(open ? ' open' : '')+'" data-k="'+esc(r.name)+
+                        '" title="'+(open ? 'Collapse' : 'Expand')+'">'+CHEV18+'</button>' : '';
+      return '<td class="an-tgc">'+tg+'</td>'+
+             '<td class="name" style="'+style+'" title="'+esc(r.name)+'">'+lines+esc(r.name)+cnt+'</td>';
+    }
+
+    function rowsFor(rows){
+      if(!rows.length) return '<tr class="row1"><td class="an-none" colspan="'+(TREE ? 4 : 3)+'">'+
+        esc(NODATA ? ((opts && opts.emptyText) || 'No data for the period') : 'Nothing found')+'</td></tr>';
+      var html = '';
+      rows.forEach(function(r,i){
+        var share = Math.round(mag(r) / total * 1000) / 10;
+        if(TREE){
+          html += '<tr class="'+(i%2?'row2':'row1')+'">'+treeCell(r)+
+            '<td class="r v">'+valFn(r)+'</td><td class="r pct num">'+share+'%</td></tr>';
+          return;
+        }
+        /* The type label ("Product") is not shown - it adds nothing to the name. */
+        html += '<tr class="'+(i%2?'row2':'row1')+'"><td class="name" title="'+esc(r.name)+'">'+esc(r.name)+'</td>'+
+          '<td class="r v">'+valFn(r)+'</td><td class="r pct num">'+share+'%</td></tr>';
+      });
+      return html;
+    }
+    /* Block height does not depend on the filter: the reference is taken from the unfiltered
+       collapsed view, and the shortfall is padded with zebra (.an-fill).
+     */
+    function fitHeight(shown){
+      var bx = host.querySelector('.an-box'), fill = host.querySelector('.an-fill');
+      if(!bx || !fill) return;
+      fill.style.height = '0px'; fill.innerHTML = '';
+      var tbl = host.querySelector('.an-tbl');
+      if(tbl) tbl.classList.remove('has-fill');
+      var h = bx.getBoundingClientRect().height;
+      // The reference is taken from the 'clean' view; once branches were touched or the height was
+      // set
+      // externally (pair alignment) - we no longer re-measure.
+      var clean = !F.q.trim() && F.min === null && F.max === null && !exp && !treeDirty && !host._locked;
+      if(clean){ host._baseBoxH = h; return; }
+      if(!host._baseBoxH) return;
+      // We enable the last row's border BEFORE measuring: it adds 1px of height itself.
+      if(tbl) tbl.classList.add('has-fill');
+      var gap = Math.max(0, host._baseBoxH - bx.getBoundingClientRect().height);
+      fill.style.height = gap + 'px';
+      if(!gap){ if(tbl) tbl.classList.remove('has-fill'); return; }
+      /* Zebra step = height of the REAL row (44.55, not exactly 44), otherwise the stripes drift
+         out of the table's rhythm. We take the shortest row — the one with a single text line, no
+         wrapped name.
+         The last stripe has no bottom line, its role is played by the block border; a thin tail is
+         merged into the previous stripe so its border doesn't sit flush.
+       */
+      var step = 44;
+      var trs = host.querySelectorAll('.an-tbl tbody tr');
+      if(trs.length){
+        var hs = [].map.call(trs, function(t){ return t.getBoundingClientRect().height; })
+                   .filter(function(x){ return x > 8; });
+        if(hs.length) step = Math.min.apply(null, hs);
+      }
+      var n = Math.ceil(gap / step), odd = shown % 2 === 1, bands = '';
+      if(n > 1 && gap - (n - 1) * step < 12) n -= 1;
+      for(var i = 0; i < n; i++){
+        var bh = (i === n - 1) ? (gap - i * step) : step;
+        var bg = ((i + (odd ? 1 : 0)) % 2) ? '#f9fafb' : '#fff';
+        bands += '<b style="height:'+bh.toFixed(1)+'px;background:'+bg+
+                 (i < n - 1 ? ';border-bottom:1px solid #e5e7eb' : '')+'"></b>';
+      }
+      // We extend the vertical column lines into the filler along the real cell boundaries.
+      var base = fill.getBoundingClientRect().left, seps = '';
+      host.querySelectorAll('.an-tbl thead th').forEach(function(th, i){
+        if(i === 0) return;
+        seps += '<i style="left:' + Math.round(th.getBoundingClientRect().left - base) + 'px"></i>';
+      });
+      fill.innerHTML = bands + seps;
+    }
+    function markHeads(){
+      host.querySelectorAll('.an-tbl thead th[data-col]').forEach(function(th){
+        var col = th.dataset.col, on = colFiltered(col) || sortF === col;
+        th.classList.toggle('col-on', on);
+        var badge = th.querySelector('.th-badge');
+        if(badge) badge.innerHTML = on ? TRI : '';
+      });
+    }
+
+    function paint(){
+      var rows = view();
+      // The tree is shown in full: there is no limit or "Show all" button here —
+      // the height is held by scrolling (see below), not by cropping rows.
+      var scroll = TREE ? false : (exp && rows.length > LIMIT);
+      var list = TREE ? rows : (scroll ? rows : rows.slice(0, LIMIT));
+      var th = function(lbl, col, cls){
+        return '<th'+(cls ? ' class="'+cls+'"' : '')+' data-col="'+col+'">'+esc(lbl)+'<span class="th-badge"></span></th>';
+      };
+      function build(){
+        // The button is needed whenever not all found rows are shown.
+        var foot = (!TREE && (scroll || rows.length > list.length))
+          ? '<button type="button" class="an-more'+(exp ? ' is-open' : '')+'">'+
+            (exp ? 'Collapse' : 'Show all ('+num(rows.length)+')')+CHEV+'</button>'
+          : '';
+        // The chevron in the header expands/collapses ALL branches at once.
+        var allHead = TREE
+          ? '<th class="an-tgc"><button type="button" class="an-tg an-tg-all'+(allOpen() ? ' open' : '')+
+            '" title="'+(allOpen() ? 'Collapse all' : 'Expand all')+'">'+CHEV18+'</button></th>'
+          : '';
+        host.innerHTML = box(title, allHead +
+                             th('Name','name') + th(valTitle,'val','r') + th('Share','pct','r pct'),
+                             rowsFor(list), foot, scroll,
+                             TREE ? ['36px', '', '200px', '120px'] : ['', '200px', '120px']);
+      }
+      build();
+      /* A branch was expanded and there are more rows: instead of cropping, we switch the table to
+         scrolling
+         at the same height as the reference. The block size then doesn't change at all, and all
+         rows can be scrolled to.
+       */
+      if(TREE && host._baseBoxH){
+        host._collapsedBoxH = host._baseBoxH;
+        if(host.querySelector('.an-box').getBoundingClientRect().height > host._baseBoxH + 0.5){
+          scroll = true; build();
+        }
+      }
+      /* The block keeps the same height under any filter: if rows are taller than the reference
+         (long names wrap),
+         the extra ones are hidden under "Show all", and the shortfall below is
+         filled by the zebra (.an-fill in fitHeight).
+       */
+      if(!TREE && !scroll && host._baseBoxH){
+        var guard = 0;
+        while(list.length > 1 && guard++ < 30 &&
+              host.querySelector('.an-box').getBoundingClientRect().height > host._baseBoxH + 0.5){
+          var hadFoot = !!host.querySelector('.an-more');
+          list = list.slice(0, -1);
+          if(!hadFoot && rows.length > list.length) build();          // the button appeared — rebuild
+          else host.querySelector('.an-tbl tbody').innerHTML = rowsFor(list);
+        }
+      }
+      keepHeight(host, scroll);
+      syncHeads(host);
+      markHeads();
+      fitHeight(list.length || 1);
+      host.querySelectorAll('.an-tbl thead th[data-col]').forEach(function(t){
+        t.onclick = function(){ openFilter(t); };
+        // Every paint rebuilds the header — we restore the open-column marker.
+        if(fpHost === host && fpCol === t.dataset.col && fpop.classList.contains('open')){
+          fpOwner = t; t.classList.add('col-open');
+        }
+      });
+      host.querySelectorAll('.an-tg').forEach(function(t){
+        t.onclick = function(e){
+          e.stopPropagation();
+          treeDirty = true;
+          if(t.classList.contains('an-tg-all')){
+            var close = allOpen();                       // everything is open → collapse everything
+            parentNames().forEach(function(n){ collapsed[n] = close; });
+          } else {
+            collapsed[t.dataset.k] = !collapsed[t.dataset.k];
+          }
+          paint();
+        };
+      });
+      var b = host.querySelector('.an-more');
+      if(b) b.onclick = function(){
+        if(!exp){
+          var bxEl = host.querySelector('.an-box');
+          if(bxEl) host._collapsedBoxH = bxEl.getBoundingClientRect().height;
+        }
+        exp = !exp;
+        paint();
+      };
+    }
+
+    function openFilter(th){
+      var col = th.dataset.col;
+      if(fpOwner === th && fpop.classList.contains('open')){ closeFp(); return; }
+      closeFp();
+      fpOwner = th; fpCol = col; fpHost = host;
+      fpop.innerHTML = '';
+      var reset = el('button', null, 'Reset filter'); reset.type = 'button';
+      reset.style.cssText = 'display:block;width:100%;padding:10px;border:none;border-bottom:1px solid #e5e7eb;'+
+        'background:none;color:#dc2626;font-size:13px;font-weight:500;cursor:pointer;text-align:left;';
+      reset.onmouseenter = function(){ this.style.background = '#fef2f2'; };
+      reset.onmouseleave = function(){ this.style.background = 'none'; };
+      reset.onclick = function(){ closeFp(); resetCol(col); };
+      fpop.appendChild(reset);
+      var pairs = col === 'name' ? [['A → Z','asc'], ['Z → A','desc']]
+                                 : [['Largest first','desc'], ['Smallest first','asc']];
+      pairs.forEach(function(p){
+        var btn = el('button', 'fp-sort-row' + (sortF === col && sortD === p[1] ? ' on' : ''));
+        btn.type = 'button';
+        btn.appendChild(el('span', null, esc(p[0])));
+        btn.appendChild(el('span', 'fp-sort-arr', '›'));
+        btn.onclick = function(){
+          sortF = col; sortD = p[1];
+          fpop.querySelectorAll('.fp-sort-row').forEach(function(x){ x.classList.remove('on'); });
+          btn.classList.add('on');
+          paint();
+        };
+        fpop.appendChild(btn);
+      });
+      if(col === 'name'){
+        var body = el('div','fp-pop-body');
+        var inp = document.createElement('input');
+        inp.type = 'text'; inp.className = 'fp-search'; inp.placeholder = 'Search...'; inp.value = F.q;
+        inp.oninput = function(){ F.q = inp.value; paint(); };
+        body.appendChild(inp); fpop.appendChild(body);
+        setTimeout(function(){ inp.focus({ preventScroll: true }); }, 0);
+      } else if(col === 'val'){
+        var body2 = el('div','fp-pop-body');
+        var row = el('div', null); row.style.cssText = 'display:flex;gap:6px;';
+        [['min','From'], ['max','To']].forEach(function(p){
+          var i = document.createElement('input');
+          i.type = 'number'; i.className = 'fp-search'; i.placeholder = p[1];
+          i.value = F[p[0]] === null ? '' : F[p[0]];
+          i.oninput = function(){ var n = parseFloat(i.value); F[p[0]] = isNaN(n) ? null : n; paint(); };
+          row.appendChild(i);
+        });
+        body2.appendChild(row); fpop.appendChild(body2);
+      }
+      fpop.classList.add('open');
+      var r = th.getBoundingClientRect(), pw = 200;
+      fpop.style.width = pw + 'px';
+      fpop.style.left = (window.clFlipLeft ? window.clFlipLeft(r, pw, 8)
+                                           : Math.max(8, Math.min(r.left, window.innerWidth - pw - 8))) + 'px';
+      fpop.style.top = (window.clFlipTop ? window.clFlipTop(r, fpop.offsetHeight, 0) : r.bottom) + 'px';
+      th.classList.add('col-open');
+    }
+
+    // A pair in a row must have equal height — handled by equalizeCols below.
+    host._relock = function(h){
+      host._locked = !!h;
+      host._baseBoxH = h || undefined;
+      paint();
+    };
+    paint();
+  }
+
+  /* Neighboring blocks in the same .an-cols are equalized to the taller one: the shorter one simply
+     gets
+     its height reference raised, and the empty space at the bottom is filled by the zebra
+     (.an-fill).
+   */
+  function equalizeCols(){
+    document.querySelectorAll('.an-cols').forEach(function(row){
+      var hosts = [].slice.call(row.children).filter(function(h){ return h._relock; });
+      if(hosts.length < 2) return;
+      hosts.forEach(function(h){ h._relock(0); });                       // natural height first
+      var max = 0;
+      hosts.forEach(function(h){
+        var bx = h.querySelector('.an-box');
+        if(bx) max = Math.max(max, bx.getBoundingClientRect().height);
+      });
+      if(max) hosts.forEach(function(h){ h._relock(max); });
+    });
+  }
+  var eqRT;
+  window.addEventListener('resize', function(){
+    clearTimeout(eqRT); eqRT = setTimeout(equalizeCols, 160);
+  });
+
+  topTable(document.getElementById('an-top-products'), 'Products by revenue', 'Revenue',
+    D.top_products.map(function(p){return {name:p.name,kind:p.kind,_v:p.revenue,revenue:p.revenue,qty:p.qty};}),
+    function(r){ return uah(r.revenue)+' <span class="an-kind">'+num(r.qty)+' pcs</span>'; });
+  topTable(document.getElementById('an-top-cats'), 'Categories by revenue', 'Revenue',
+    D.top_categories.map(function(p){return {name:p.name,_v:p.revenue,revenue:p.revenue,depth:p.depth};}),
+    function(r){ return uah(r.revenue); }, { tree: true });
+  /* For all time there is nothing to compare against — we say so directly instead of "No data". */
+  var MOVERS_NA = D.movers ? null : 'Nothing to compare against: the period is "all time"';
+  topTable(document.getElementById('an-risers'), 'Risers (vs previous period)', 'Growth',
+    (D.movers?D.movers.risers:[]).map(function(m){return {name:m.name,_v:m.delta,delta:m.delta};}),
+    function(r){ return '<span class="an-up">+'+uah(r.delta)+'</span>'; }, { emptyText: MOVERS_NA });
+  topTable(document.getElementById('an-fallers'), 'Fallers (vs previous period)', 'Decline',
+    (D.movers?D.movers.fallers:[]).map(function(m){return {name:m.name,_v:-m.delta,delta:m.delta};}),
+    function(r){ return '<span class="an-down">'+uah(r.delta)+'</span>'; }, { emptyText: MOVERS_NA });
+  equalizeCols();
+
+  // ── Month-by-month trend ──
+  (function(){
+    var M=D.monthly_trend, host=document.getElementById('an-monthly');
+    var MN=['January','February','March','April','May','June',
+            'July','August','September','October','November','December'];
+    function ml(k){ var p=k.split('-'); return MN[+p[1]-1]+' '+p[0]; }
+    var heads = '<th>Month</th><th class="r">Revenue</th><th class="r">Orders</th>'+
+                '<th class="r">Average order value</th><th class="r">New customers</th><th class="r">Growth</th>';
+    var cols = ['180px', '', '', '', '', ''];
+    // Empty — same as in the top tables: header in place, row centered.
+    if(!M.length){
+      host.innerHTML = box('Monthly trend (12 months)', heads,
+        '<tr class="row1"><td class="an-none" colspan="6">No data for the period</td></tr>', '', false, cols);
+      return;
+    }
+    var rowsHtml='';
+    M.forEach(function(r,i){
+      var prev=i>0?M[i-1].revenue:0, g=prev?Math.round((r.revenue-prev)/prev*1000)/10:null;
+      var gcls=g>0?'an-up':(g<0?'an-down':'an-flat'), gtxt=(g===null)?'—':((g>0?'+':'')+g+'%');
+      rowsHtml+='<tr class="'+(i%2?'row2':'row1')+'"><td>'+ml(r.month)+'</td><td class="r v">'+uah(r.revenue)+
+        '</td><td class="r num">'+num(r.orders)+'</td><td class="r num">'+uah(r.avg_check)+
+        '</td><td class="r num">'+num(r.new_customers)+'</td><td class="r '+gcls+'">'+gtxt+'</td></tr>';
+    });
+    host.innerHTML = box('Monthly trend (12 months)', heads, rowsHtml, '', false, cols);
+  })();
+
+  // ── Customer retention ──
+  (function(){
+    var R=D.retention, host=document.getElementById('an-retention');
+    var nr=R.new_revenue, rr=R.returning_revenue, tot=nr+rr;
+    var d=R.dist, dtot=(d.one+d.two+d.three_plus)||1;
+    function row(i,l,v,share){
+      return '<tr class="'+(i%2?'row2':'row1')+'"><td>'+l+'</td><td class="r v">'+v+
+        '</td><td class="r pct num">'+(share===null?'—':(Math.round(share*1000)/10+'%'))+'</td></tr>';
+    }
+    var rowsHtml =
+      row(0,'Repeat customers', num(R.repeat)+' of '+num(R.total), R.total?R.repeat/R.total:0) +
+      row(1,'Revenue from new', uah(nr), tot?nr/tot:0) +
+      row(2,'Revenue from repeat', uah(rr), tot?rr/tot:0) +
+      row(3,'1 order', num(d.one), d.one/dtot) +
+      row(4,'2 orders', num(d.two), d.two/dtot) +
+      row(5,'3+ orders', num(d.three_plus), d.three_plus/dtot);
+    host.innerHTML =
+      '<div class="an-kpis">'+
+        '<div class="an-kpi"><div class="an-kpi-l">Repeat purchases</div>'+
+        '<div class="an-kpi-v">'+R.repeat_rate.toFixed(1)+'%</div>'+
+        '<div class="an-kpi-d an-flat">'+num(R.repeat)+' of '+num(R.total)+' customers placed ≥2 orders</div></div>'+
+      '</div>'+
+      box('Customer retention', '<th>Metric</th><th class="r">Value</th><th class="r pct">Share</th>',
+          rowsHtml, '', false, ['', '200px', '120px']);
+  })();
+
+  // ── Value of warehouse stock ──
+  (function(){
+    var S=D.stock_value, host=document.getElementById('an-stock');
+    host.innerHTML =
+      '<div class="an-kpis">'+
+        '<div class="an-kpi"><div class="an-kpi-l">Stock value</div><div class="an-kpi-v">'+uah(S.value)+
+        '</div><div class="an-kpi-d an-flat">retail, own products</div></div>'+
+        '<div class="an-kpi"><div class="an-kpi-l">Items in stock</div><div class="an-kpi-v">'+num(S.positions)+
+        '</div><div class="an-kpi-d an-flat">'+num(S.units)+' units</div></div>'+
+      '</div><div id="an-stock-top"></div>';
+    topTable(document.getElementById('an-stock-top'), 'Value of own warehouse stock (now)', 'Value',
+      S.top.map(function(t){return {name:t.name,_v:t.value,value:t.value,stock:t.stock};}),
+      function(r){ return uah(r.value)+' <span class="an-kind">'+num(r.stock)+' pcs</span>'; });
+  })();
+
+  // ── Line (viewBox = real width → no line distortion) ──
+  (function(){
+    var s=D.series, n=s.labels.length, host=document.getElementById('an-line');
+    if(!n){ host.appendChild(el('div','an-empty','No data for the period')); return; }
+    var H=260;
+    function draw(){
+      var W=Math.round(Math.max(360, host.getBoundingClientRect().width||1120));
+      var cmp = D.compare ? D.compare.series.revenue : null;
+      var pL=64,pR=14,pT=20,pB=26,iw=W-pL-pR,ih=H-pT-pB;
+      var maxR=Math.max.apply(null, s.revenue.concat(cmp||[]))||1;
+      function x(i){return pL+(n===1?iw/2:i/(n-1)*iw);} function y(v){return pT+ih-v/maxR*ih;}
+      var ln='',g='';
+      s.revenue.forEach(function(v,i){ ln+=(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)+' '; });
+      var area='M'+x(0).toFixed(1)+' '+y(0).toFixed(1)+' '+ln.replace(/^M/,'L')+'L'+x(n-1).toFixed(1)+' '+y(0).toFixed(1)+' Z';
+      for(var t=0;t<=4;t++){ var gy=pT+ih-(t/4)*ih; g+='<line x1="'+pL+'" y1="'+gy.toFixed(1)+'" x2="'+(W-pR)+'" y2="'+gy.toFixed(1)+'" stroke="#f3f4f6"/>'+
+        '<text x="'+(pL-8)+'" y="'+(gy+3).toFixed(1)+'" font-size="10" fill="#9ca3af" text-anchor="end">'+uah(maxR*t/4)+'</text>'; }
+      var step=Math.max(1,Math.ceil(n/8)),xl='';
+      for(var i=0;i<n;i+=step){ xl+='<text x="'+x(i).toFixed(1)+'" y="'+(H-7)+'" font-size="10" fill="#9ca3af" text-anchor="middle">'+s.labels[i].slice(5)+'</text>'; }
+      var dt=''; s.revenue.forEach(function(v,i){ dt+='<circle cx="'+x(i).toFixed(1)+'" cy="'+y(v).toFixed(1)+'" r="'+(n>40?1.6:2.4)+'" fill="'+LINE+'"><title>'+s.labels[i]+': '+uah(v)+' · '+num(s.orders[i])+' orders</title></circle>'; });
+      var cln='', leg='';
+      if(cmp){
+        cmp.forEach(function(v,i){ cln+=(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)+' '; });
+        leg='<rect x="'+pL+'" y="3" width="12" height="3" rx="1" fill="'+LINE+'"/><text x="'+(pL+17)+'" y="9" font-size="10" fill="#6b7280">Current</text>'+
+            '<rect x="'+(pL+82)+'" y="3" width="12" height="3" rx="1" fill="#9ca3af"/><text x="'+(pL+99)+'" y="9" font-size="10" fill="#6b7280">'+D.compare.label+'</text>';
+      }
+      host.innerHTML='<svg class="an-svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+g+
+        '<path d="'+area+'" fill="rgba(55,65,81,0.06)"/>'+
+        (cmp?'<path d="'+cln+'" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="4 3" stroke-linejoin="round"/>':'')+
+        '<path d="'+ln+'" fill="none" stroke="'+LINE+'" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>'+dt+xl+leg+'</svg>';
+    }
+    draw();
+    var rt; window.addEventListener('resize', function(){ clearTimeout(rt); rt=setTimeout(draw, 120); });
+  })();
+
+  // ── Custom-period calendar (logic as in the order filters) ──
+  var MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var DOWS=['Mo','Tu','We','Th','Fr','Sa','Su'];
+  function pY(s){ if(!s)return null; var p=s.split('-'); return new Date(+p[0],+p[1]-1,+p[2]); }
+  function tY(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  function same(a,b){ return a&&b&&a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate(); }
+  // The calendar opens only via the "Custom range…" row in the period list,
+  // so it hangs off the same "Period" button and highlights exactly that one.
+  var pop=document.getElementById('an-date-pop'), built=false;
+  // We highlight the range ONLY if it was chosen manually (period=custom). For presets — a clean
+  // calendar on the current month (as in the order filters), today is marked in bold.
+  var isCustom='{{ data.period_key }}'==='custom';
+  var selStart=isCustom?pY('{{ data.from }}'):null, selEnd=isCustom?pY('{{ data.to }}'):null, step=1, hov=null;
+  var now=new Date(), cY=(selStart||now).getFullYear(), cM=(selStart||now).getMonth();
+
+  function build(){
+    pop.innerHTML='';
+    // fp-pop-body wrapper (as in the filters) — its flex+gap:10px provides the spacing between the
+    // navigation, the grid and the button. Padding 0 — as in the filter's buildDatePop.
+    var body=el('div','fp-pop-body'); body.style.padding='0'; pop.appendChild(body);
+    var nav=el('div','cal-nav');
+    var prev=el('button','cal-nav-btn','<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,1 1,5 5,9"/></svg>'); prev.type='button';
+    var title=el('span','cal-title');
+    var next=el('button','cal-nav-btn','<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 1,9"/></svg>'); next.type='button';
+    nav.appendChild(prev); nav.appendChild(title); nav.appendChild(next); body.appendChild(nav);
+    var grid=el('div','cal-grid'); body.appendChild(grid);
+    var sep=el('div',null,''); sep.style.cssText='height:1px;background:#e5e7eb;'; body.appendChild(sep);
+    var reset=el('button','cal-reset','Reset'); reset.type='button';
+    reset.onclick=function(){ selStart=null; selEnd=null; step=1; hov=null; full(); };
+    body.appendChild(reset);
+    function eff(){ if(step===2&&hov&&selStart) return hov<selStart?{s:hov,e:selStart}:{s:selStart,e:hov}; return {s:selStart,e:selEnd}; }
+    function cls(){ var r=eff(),today=new Date();
+      grid.querySelectorAll('.cal-day[data-d]').forEach(function(c){ var d=pY(c.dataset.d),iS=same(d,r.s),iE=same(d,r.e),iR=r.s&&r.e&&d>r.s&&d<r.e;
+        c.className='cal-day'; if(iS)c.classList.add('sel-start'); if(iE)c.classList.add('sel-end');
+        if(r.s&&r.e&&!same(r.s,r.e)&&(iS||iE))c.classList.add('has-range'); if(iR)c.classList.add('in-range'); if(same(d,today))c.classList.add('today'); }); }
+    function full(){ title.textContent=MONTHS[cM]+' '+cY; grid.innerHTML='';
+      DOWS.forEach(function(d){ grid.appendChild(el('div','cal-dow',d)); });
+      var fd=(new Date(cY,cM,1).getDay()+6)%7, dim=new Date(cY,cM+1,0).getDate();
+      for(var i=0;i<fd;i++) grid.appendChild(el('div','cal-day empty'));
+      for(var day=1;day<=dim;day++){ var c=el('div','cal-day',String(day)); c.dataset.d=tY(new Date(cY,cM,day));
+        c.onclick=function(){ var date=pY(this.dataset.d);
+          if(step===1){ selStart=date; selEnd=null; step=2; cls(); }
+          else { if(date<selStart){selEnd=selStart;selStart=date;}else{selEnd=date;} location.href='?from='+tY(selStart)+'&to='+tY(selEnd); } };
+        c.onmouseenter=function(){ hov=pY(this.dataset.d); cls(); }; c.onmouseleave=function(){ hov=null; cls(); };
+        grid.appendChild(c); }
+      cls(); }
+    prev.onclick=function(){ cM--; if(cM<0){cM=11;cY--;} full(); };
+    next.onclick=function(){ cM++; if(cM>11){cM=0;cY++;} full(); };
+    full();
+  }
+  function place(){ var r=perBtn.getBoundingClientRect(); pop.style.left=Math.min(r.left,window.innerWidth-238)+'px'; pop.style.top=(r.bottom+4)+'px'; }
+  function openCal(){ if(!built){ build(); built=true; } closePicks(); pop.classList.add('open'); perBtn.classList.add('on'); place(); }
+  function closeCal(){ pop.classList.remove('open'); perBtn.classList.remove('on'); }
+  document.addEventListener('click',function(e){
+    if(pop.classList.contains('open') && !pop.contains(e.target) && !perBtn.contains(e.target)){ closeCal(); } });
+  window.addEventListener('resize',function(){ if(pop.classList.contains('open')) place(); });
+})();
+</script>
+{% endblock %}

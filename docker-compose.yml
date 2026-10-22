@@ -1,0 +1,151 @@
+services:
+  db:
+    image: postgres:18-alpine
+    env_file: .env
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  web:
+    build: ./backend
+    env_file: .env
+    environment:
+# The shell view reads index.html from here to inject the SEO <head>. The volume is filled by
+      # nginx.
+      - FRONTEND_DIST=/app/frontend_dist
+# The Analyst's buttons for server actions only put requests into this folder; they are
+      # executed
+      # by the shop-helper service on the host (ops/shop_helper.py), not by the container.
+      - ANALYST_OPS_DIR=/ops
+# ask — buttons in the Analyst; auto — the Analyst maintains the server itself, no buttons
+      # (see docs/DEPLOY.md).
+      # web must know the mode so as not to show the buttons. Change it: ANALYST_AUTOFIX in the root
+      # .env.
+      - ANALYST_AUTOFIX=${ANALYST_AUTOFIX:-auto}
+# Code error auto-fix: off | propose (prepares and waits for the owner's button) | auto (rolls
+      # out by itself, at night).
+      - ANALYST_CODEFIX=${ANALYST_CODEFIX:-auto}
+# ASGI: each request runs in its own thread, so persistent Postgres connections
+      # (CONN_MAX_AGE=60) stay orphaned until GC:
+      # web held 25-55 of 100 slots even when idle, and a bot spike (≈250 requests/min, 20.10.2026)
+      # exhausted them. Django recommends
+      # disabling persistent connections for ASGI. Web only: scheduler and analyst are long loops
+      # with an explicit close_old_connections().
+      - DB_CONN_MAX_AGE=0
+    volumes:
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+      - frontend_dist:/app/frontend_dist:ro
+# Queue to the helper: ONLY subdirectories are mounted (not the whole ops-queue), so that a
+      # compromised web cannot replace the directory itself
+      # with a symlink, and only requests/ is writable. Responses (results/) are read-only for web.
+      - ./ops-queue/requests:/ops/requests
+      - ./ops-queue/results:/ops/results:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+# The Telegram bot is not deployed yet (the app is not committed to git). When it is ready —
+  # add a bot service: command ["python","manage.py","run_telegram_bot"]
+  # and put 'telegrambot' back into INSTALLED_APPS.
+
+# Scheduler: monobank payment reconciliation, bank statement matching, receipt OCR.
+  # Without it, abandoned monobank invoices would not release stock (stock is held
+  # only after paid), and bank transfers would not be auto-confirmed.
+  scheduler:
+    build: ./backend
+    env_file: .env
+    command: ["python", "manage.py", "run_scheduler"]
+    volumes:
+      - media_volume:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+# The Analyst: daily purchasing advice and constant monitoring of system health → the "Analyst" section
+  # in the CRM inbox. Does not touch store data (orders, stock, prices), writes to its own analyst_*
+  # tables.
+  # A separate service so that its checks don't delay payment reconciliation in the scheduler.
+  # With ANALYST_AUTOFIX=auto the Analyst handles the technical side itself (disk, backup, scheduler
+  # restart):
+  # it puts requests into the /ops queue (hence it is mounted writable), and the helper on the VPS
+  # executes them only from a
+  # whitelist. The backups directory is read-only. To disable the automation: ANALYST_AUTOFIX=ask
+  # (buttons) or off in .env.
+  analyst:
+    build: ./backend
+    env_file: .env
+    environment:
+      - ANALYST_OPS_DIR=/ops
+      - ANALYST_AUTOFIX=${ANALYST_AUTOFIX:-auto}
+      - ANALYST_CODEFIX=${ANALYST_CODEFIX:-auto}
+      - ANALYST_CODEFIX_KEY_FILE=/run/codefix.key
+    command: ["python", "manage.py", "run_analyst"]
+    volumes:
+      - media_volume:/app/media
+      - ./backups:/backups:ro
+# Queue to the helper (see web). analyst additionally puts auto-fix patches there and signs
+      # tasks with a key that web does not have.
+      - ./ops-queue/requests:/ops/requests
+      - ./ops-queue/artifacts:/ops/artifacts
+      - ./ops-queue/results:/ops/results:ro
+      - type: bind
+        source: ${CODEFIX_KEY_FILE:-/opt/shop-autofix/codefix.key}
+        target: /run/codefix.key
+        read_only: true
+        bind:
+          create_host_path: false       # no file - `up` fails instead of creating a directory in place of the key (the key is installed by ops/install.sh)
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+  nginx:
+    build: ./frontend
+    ports:
+      - "80:80"
+      - "443:443"
+# Fresh index.html into the shared volume BEFORE nginx starts. Docker fills a volume
+    # only on first creation — after a deploy (new asset hashes) an explicit cp is needed,
+    # otherwise web would inject SEO into the old index.html with the old hashes.
+    command: >
+      sh -c "cp -f /usr/share/nginx/html/index.html /frontend_dist/index.html &&
+             exec nginx -g 'daemon off;'"
+    volumes:
+      - static_volume:/var/www/static:ro
+      - media_volume:/var/www/media:ro
+      - frontend_dist:/frontend_dist
+# Let's Encrypt certificates from the host (issued by certbot/acme.sh on the server)
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+# Webroot for http-01 certificate renewal without stopping nginx
+      - /var/www/certbot:/var/www/certbot
+    depends_on:
+      - web
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  static_volume:
+  media_volume:
+  frontend_dist:

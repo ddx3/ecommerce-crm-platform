@@ -1,0 +1,456 @@
+{% extends "admin/base_site.html" %}
+{% block title %}Analyst{% endblock %}
+{% block content_title %}<h1>Analyst</h1>{% endblock %}
+{% block extrahead %}{{ block.super }}
+{% include "admin/_ntf_table_css.html" %}
+<style>
+/* Analyst columns (table-layout: fixed - widths come from thead; the text takes the remainder). */
+#tbl-analyst th.col-sec  { width: 200px; }
+#tbl-analyst th.col-date { width: 150px; }
+#tbl-analyst th.col-fix  { width: 230px; }
+#tbl-analyst td.col-fix { padding-top: 6px !important; padding-bottom: 6px !important; }
+#tbl-analyst td.col-sec { color: #6b7280 !important; font-size: 12px !important; }
+#tbl-analyst td.col-fix { white-space: nowrap; }
+
+/* Name and detail - two lines in the standard 57px height, truncated (full text on click). */
+.ar-open { cursor: pointer; }
+.ar-title, .ar-sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ar-title { font-size: 13px; font-weight: 500; color: #111827; line-height: 1.4; }
+.ar-sub   { font-size: 12px; color: #9ca3af; line-height: 1.4; }
+
+.ar-fix { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The confirm button in the window - like #revert-modal-confirm in base_site (dark gray), not a custom color. */
+.cl-top-btn.ar-confirm { background: #374151 !important; border-color: #374151 !important; color: #fff !important; }
+.cl-top-btn.ar-confirm:hover { background: #1f2937 !important; border-color: #1f2937 !important; color: #fff !important; }
+#ar-fix-all { margin-left: 8px; }
+/* Processed row: the fix buttons are hidden (they come back together with the 'new' state). */
+#tbl-analyst tr.ntf-step-1 td.col-fix > * { display: none; }
+/* Fix confirmation window (exact list of changes) - moved into <body>. */
+.ar-modal { position: fixed; inset: 0; z-index: 20000; display: flex; align-items: center; justify-content: center;
+            background: rgba(17, 24, 39, .45); padding: 16px; font-family: var(--font); }
+.ar-modal[hidden] { display: none; }
+.ar-modal-box { background: #fff; border-radius: 8px; width: 640px; max-width: 100%; max-height: 86vh;
+                display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(0,0,0,.25); }
+.ar-modal-h { padding: 16px 20px; font-size: 16px; font-weight: 700; color: #111827; border-bottom: 1px solid #e5e7eb; }
+.ar-modal-b { padding: 14px 20px; overflow-y: auto; font-size: 13px; color: #374151; line-height: 1.5; }
+.ar-modal-b .ar-text { white-space: pre-line; }
+.ar-modal-f { padding: 12px 20px; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid #e5e7eb; flex-wrap: wrap; }
+.ar-plan-t { font-weight: 600; color: #111827; margin: 10px 0 4px; }
+.ar-plan-t:first-child { margin-top: 0; }
+.ar-plan-li { padding: 3px 0 3px 14px; position: relative; }
+.ar-plan-li::before { content: '•'; position: absolute; left: 2px; color: #9ca3af; }
+.ar-plan-note { color: #6b7280; padding: 2px 0; }
+.ar-plan-more { color: #9ca3af; padding: 3px 0 3px 14px; }
+.ar-plan-err { color: #991b1b; padding: 3px 0; }
+.ar-plan-ok { color: #166534; padding: 3px 0; }
+.ar-param { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.ar-param label { flex: 1; }
+.ar-param input { width: 90px; height: 32px; box-sizing: border-box; padding: 0 8px; border: 1px solid #d1d5db; border-radius: 4px; font: inherit; }
+
+/* The "Action" column is needed only while there are buttons (ask mode); without them we don't give it 230px. */
+#tbl-analyst.ar-nofix th.col-fix, #tbl-analyst.ar-nofix td.col-fix { display: none; }
+
+/* Tablet/phone: hide secondary columns, the table stays standard. */
+@media (max-width: 1024px) {
+  #tbl-analyst th.col-sec, #tbl-analyst td.col-sec,
+  #tbl-analyst th.col-date, #tbl-analyst td.col-date { display: none; }
+  #tbl-analyst th.col-fix { width: 190px; }
+  .ntf-bulkbar { padding-left: 64px; }
+}
+@media (max-width: 640px) {
+  /* The actions column goes away: the fix button is available in the window on tapping a row. */
+  #tbl-analyst th.col-fix, #tbl-analyst td.col-fix { display: none; }
+  .ntf-bulkbar { overflow-x: auto; }
+  .ntf-bulkbar .cl-counter { display: none; }
+  .ntf-bulkbar .cl-top-btn { white-space: nowrap; flex: none; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ntf-bulkbar">
+  <a href="#" class="cl-top-btn cl-btn-idle" id="ar-bulk" data-bulk="done">Done</a>
+  <span class="cl-counter" id="ar-counter" style="color:#9ca3af;font-size:12px;">Selected: 0 of {{ rows|length }}</span>
+  {% if demo %}<span class="or-picker-btn is-static" data-tone="warn" style="align-self:center;margin-left:10px;" title="This is an example with made-up data: nothing is saved, the buttons only show how the windows look"><span>Demo · placeholders</span></span>{% endif %}
+  <span style="flex:1 1 0%;"></span>
+  {% if fix_all_count %}
+    <a href="#" class="cl-top-btn" id="ar-fix-all">Fix everything possible ({{ fix_all_count }})</a>
+  {% endif %}
+</div>
+
+<div id="ar-panel">
+<table class="ntf-table{% if not has_fixers %} ar-nofix{% endif %}" id="tbl-analyst">
+  <thead><tr>
+    <th class="col-cb"><input type="checkbox" class="action-select-all" id="ar-select-all"></th>
+    <th class="col-sec">Section</th><th class="col-text">Finding</th>
+    <th class="col-date">Date</th><th class="col-fix">Action</th><th class="col-skip">Type</th>
+  </tr></thead>
+  <tbody>
+    {% for r in rows %}
+    <tr class="ar-row {% if r.is_new %}ntf-step-0{% else %}ntf-step-1{% endif %}" data-id="{{ r.id }}">
+      <td class="col-cb"><input type="checkbox" class="action-select" value="{{ r.id }}"></td>
+      <td class="col-sec">{{ r.section }}</td>
+      <td class="col-text ar-open" title="Show in full">
+        <span class="ar-title">{{ r.title }}</span>
+        <span class="ar-sub">{{ r.body }}</span>
+        <span hidden class="ar-link">{{ r.link }}</span>
+      </td>
+      <td class="col-date">{{ r.first_seen }}</td>
+      <td class="col-fix">{% for f in r.fixers %}<button type="button" class="cl-top-btn ar-fix" data-fix="{{ f.key }}" data-params="{{ f.params_json }}" title="It first shows the exact list of changes — nothing changes until you click Apply">{{ f.label }}</button>{% endfor %}</td>
+      <td class="col-skip"><button type="button" class="ntf-skip-btn" data-act="{% if r.is_new %}done{% else %}reopen{% endif %}" title="{% if r.is_new %}Done{% else %}Return{% endif %}">{% if r.is_new %}<svg viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>{% else %}<span class="ntf-skip-undo">↩</span>{% endif %}</button></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<div class="ntf-pager" id="ntf-pager"></div>
+
+{% if demo %}{{ demo_plans|json_script:"ar-demo-plans" }}{% endif %}
+
+<div class="ar-modal" id="ar-modal" hidden>
+  <div class="ar-modal-box" role="dialog" aria-modal="true" aria-labelledby="ar-modal-title">
+    <div class="ar-modal-h" id="ar-modal-title"></div>
+    <div class="ar-modal-b" id="ar-modal-body"></div>
+    <div class="ar-modal-f" id="ar-modal-foot"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var CSRF = '{{ csrf_token }}';
+  var tbl = document.getElementById('tbl-analyst');
+  var tbody = tbl.tBodies[0];
+  var pgEl = document.getElementById('ntf-pager');
+  var PAGE_MIN = 25, pgSize = 25, pgPage = 1;
+
+  /* ── Helpers ── */
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+  /* Demo page: server responses are mocked, nothing is written to the DB. */
+  var DEMO = {% if demo %}true{% else %}false{% endif %};
+  function demoPost(url, body) {
+    var plans = JSON.parse((document.getElementById('ar-demo-plans') || { textContent: '{}' }).textContent);
+    var ok = function (data) { return { ok: true, status: 200, data: data }; };
+    if (/\/action\/$/.test(url)) return ok({ ok: true });
+    if (/\/fix\/plan\/$/.test(url)) {
+      var plan = plans[body.action];
+      return plan ? ok(plan) : { ok: false, status: 422, data: { error: 'The demo has no sample plan for this action.' } };
+    }
+    if (/\/fix\/plan-all\/$/.test(url)) {
+      var keys = ['host_backup_now', 'host_restart_scheduler'];
+      return ok({ runs: keys.map(function (k) { return plans[k]; }),
+                  skipped: [{ title: 'Disk is 91% full', reason: 'Your decision is needed (rollback images are deleted only by explicit choice) — do it separately with the "Free up space" button.' }] });
+    }
+    if (/\/fix\/apply\/$/.test(url)) {
+      return ok({ results: (body.run_ids || []).map(function (id) {
+        var found = Object.keys(plans).map(function (k) { return plans[k]; }).filter(function (p) { return p.run_id === id; })[0];
+        return { run_id: id, title: found ? found.title : 'Action', ok: true };
+      }) });
+    }
+    return ok({ ok: true });
+  }
+  function post(url, body) {
+    if (DEMO) return new Promise(function (resolve) { setTimeout(function () { resolve(demoPost(url, body || {})); }, 250); });
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify(body || {})
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) { return { ok: r.ok, status: r.status, data: data }; });
+    });
+  }
+  /* Rows that passed the filter (_filters.html puts ntf-filtered-out on the rest): the pager and selection work with them. */
+  function rows() { return Array.prototype.slice.call(tbody.querySelectorAll('tr.ar-row:not(.ntf-filtered-out)')); }
+
+  /* ── Window (confirmation/details) ── */
+  var modal = document.getElementById('ar-modal');
+  document.body.appendChild(modal);   // an ancestor's z-index must not steal the overlay
+  var mTitle = document.getElementById('ar-modal-title');
+  var mBody = document.getElementById('ar-modal-body');
+  var mFoot = document.getElementById('ar-modal-foot');
+  function btn(label, handler, primary) {
+    var b = el('button', 'cl-top-btn' + (primary ? ' ar-confirm' : ''), label);
+    b.type = 'button';
+    b.addEventListener('click', handler);
+    return b;
+  }
+  function close() { modal.hidden = true; }
+  function show(title, nodes, buttons) {
+    mTitle.textContent = title;
+    mBody.textContent = '';
+    nodes.forEach(function (n) { mBody.appendChild(n); });
+    mFoot.textContent = '';
+    buttons.forEach(function (b) { mFoot.appendChild(b); });
+    modal.hidden = false;
+  }
+  function reload() { if (DEMO) { close(); return; } window.location.reload(); }
+  modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) close(); });
+  function lines(list, total) {
+    var nodes = list.map(function (t) { return el('div', 'ar-plan-li', t); });
+    if (total > list.length) nodes.push(el('div', 'ar-plan-more', '…and ' + (total - list.length) + ' more'));
+    return nodes;
+  }
+  function planNodes(plan) {
+    var nodes = [el('div', 'ar-plan-t', plan.title + ' — changes: ' + plan.total)];
+    nodes = nodes.concat(lines(plan.changes, plan.total));
+    (plan.notes || []).forEach(function (n) { nodes.push(el('div', 'ar-plan-note', n)); });
+    return nodes;
+  }
+  function error(title, text) { show(title, [el('div', 'ar-plan-err', text)], [btn('Close', close)]); }
+  function waiting(text) { show('Please wait', [el('div', 'ar-plan-note', text)], []); }
+
+  /* ── Zebra + pagination + filler (like all inbox tables) ── */
+  function padActive() {
+    var fill = tbl.__padFill;
+    if (!fill) {
+      fill = document.createElement('div');
+      fill.className = 'tbl-pad-fill';
+      tbl.parentNode.insertBefore(fill, tbl.nextSibling);
+      tbl.__padFill = fill;
+    }
+    fill.style.height = '0px';
+    var tableBottom = tbl.getBoundingClientRect().bottom;
+    var below = 0;
+    for (var sib = fill.nextElementSibling; sib; sib = sib.nextElementSibling) {
+      if (getComputedStyle(sib).position === 'fixed') continue;
+      below += sib.getBoundingClientRect().height;
+    }
+    var pgVisible = pgEl.classList.contains('show');
+    var pagerH = pgVisible ? pgEl.getBoundingClientRect().height : 0;
+    var fillH = Math.max(0, window.innerHeight - tableBottom - below - pagerH);
+    fill.style.height = fillH + 'px';
+    var overflow = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+    if (overflow > 0) fill.style.height = Math.max(0, fillH - overflow) + 'px';
+    var visible = rows().filter(function (tr) { return tr.style.display !== 'none'; }).length;
+    fill.classList.toggle('parity-odd', (visible % 2) !== 0);
+    if (pgVisible && fillH === 0) tbl.parentNode.style.paddingBottom = pagerH + 'px';
+  }
+  function pgRender() {
+    var all = rows(), total = all.length;
+    var paginate = total > PAGE_MIN;
+    var size = paginate ? (pgSize > 0 ? pgSize : total) : (total || 1);
+    var pages = Math.max(1, Math.ceil(total / size));
+    pgPage = Math.min(Math.max(pgPage, 1), pages);
+    var from = (pgPage - 1) * size, to = from + size;
+    all.forEach(function (tr, i) {
+      var on = i >= from && i < to;
+      tr.style.display = on ? '' : 'none';
+      tr.classList.remove('ntf-zebra-odd', 'ntf-zebra-even');
+      if (on) tr.classList.add((i - from) % 2 === 0 ? 'ntf-zebra-odd' : 'ntf-zebra-even');
+    });
+    if (!paginate) { pgEl.classList.remove('show'); padActive(); return; }
+    pgEl.classList.add('show');
+    var shown = Math.min(size, total - from);
+    var html = '<div class="pager-info">' + (from + 1) + '–' + (from + shown) + ' of ' + total + '</div>';
+    if (pages > 1) {
+      html += '<div class="pager-nav">';
+      html += '<span class="pg-btn pg-arrow' + (pgPage <= 1 ? ' pg-disabled' : '') + '" data-pg="' + (pgPage - 1) + '"><svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,1 1,5 5,9"></polyline></svg></span>';
+      var nums = [];
+      for (var p = 1; p <= pages; p++) {
+        if (p === 1 || p === pages || (p >= pgPage - 1 && p <= pgPage + 1)) nums.push(p);
+        else if (nums[nums.length - 1] !== '…') nums.push('…');
+      }
+      nums.forEach(function (n) {
+        html += n === '…' ? '<span class="pg-dots">…</span>'
+                          : '<span class="pg-btn' + (n === pgPage ? ' pg-active' : '') + '" data-pg="' + n + '">' + n + '</span>';
+      });
+      html += '<span class="pg-btn pg-arrow' + (pgPage >= pages ? ' pg-disabled' : '') + '" data-pg="' + (pgPage + 1) + '"><svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 1,9"></polyline></svg></span>';
+      html += '</div>';
+    } else {
+      html += '<div></div>';
+    }
+    html += '<div class="pager-right"><span>Per page:</span>';
+    [25, 50, 0].forEach(function (s) {
+      html += '<span class="pg-btn' + (s === pgSize ? ' pg-active' : '') + '" data-size="' + s + '">' + (s === 0 ? 'All' : s) + '</span>';
+    });
+    html += '</div>';
+    pgEl.innerHTML = html;
+    var pl = tbl.getBoundingClientRect().left;
+    pgEl.style.left = (window.clX ? window.clX(pl) : pl) + 'px';
+    padActive();
+  }
+  pgEl.addEventListener('click', function (e) {
+    var b = e.target.closest('.pg-btn');
+    if (!b || b.classList.contains('pg-disabled')) return;
+    if (b.dataset.size !== undefined) { pgSize = parseInt(b.dataset.size, 10); pgPage = 1; }
+    else if (b.dataset.pg !== undefined) { pgPage = parseInt(b.dataset.pg, 10); }
+    pgRender(); refreshBar();
+  });
+
+  /* ── Row selection, bulk button and row state change ── */
+  var counter = document.getElementById('ar-counter');
+  var selAll = document.getElementById('ar-select-all');
+  var bulk = document.getElementById('ar-bulk');
+  var SVG_CHECK = '<svg viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var SVG_UNDO = '<span class="ntf-skip-undo">↩</span>';
+  function checkedBoxes() { return tbody.querySelectorAll('.action-select:checked'); }
+  function isNew(tr) { return tr.classList.contains('ntf-step-0'); }
+  function refreshBar() {
+    var checked = Array.prototype.slice.call(checkedBoxes());
+    if (counter) counter.textContent = 'Selected: ' + checked.length + ' of ' + rows().length;
+    // Same as the standard "Mark as read" button: if the selection contains
+    // new rows -> "Done", otherwise -> "Return".
+    var anyNew = checked.some(function (c) { return isNew(c.closest('tr')); });
+    var asDone = anyNew || !checked.length;
+    bulk.textContent = asDone ? 'Done' : 'Return';
+    bulk.dataset.bulk = asDone ? 'done' : 'reopen';
+    bulk.classList.toggle('cl-btn-idle', !checked.length);
+    if (selAll) {
+      var vis = rows().filter(function (tr) { return tr.style.display !== 'none'; })
+                      .map(function (tr) { return tr.querySelector('.action-select'); }).filter(Boolean);
+      var on = vis.filter(function (c) { return c.checked; }).length;
+      selAll.checked = vis.length > 0 && on === vis.length;
+      selAll.indeterminate = on > 0 && on < vis.length;
+    }
+  }
+  if (selAll) selAll.addEventListener('change', function () {
+    rows().forEach(function (tr) {
+      var c = tr.querySelector('.action-select');
+      if (c && tr.style.display !== 'none') c.checked = selAll.checked;
+    });
+    refreshBar();
+  });
+  tbody.addEventListener('change', function (e) { if (e.target.classList.contains('action-select')) refreshBar(); });
+
+  function setState(tr, nowNew) {
+    tr.classList.toggle('ntf-step-0', nowNew);
+    tr.classList.toggle('ntf-step-1', !nowNew);
+    var b = tr.querySelector('.ntf-skip-btn');
+    b.dataset.act = nowNew ? 'done' : 'reopen';
+    b.title = nowNew ? 'Done' : 'Return';
+    b.innerHTML = nowNew ? SVG_CHECK : SVG_UNDO;
+  }
+  /* Same as in the other inbox tables (applyStep): the row state changes immediately, with no
+     dimming or table
+     redraw, and the save runs in the background. Only when the save fails do we revert the row and
+     report it.
+   */
+  function runAction(trs, action) {
+    // "Done" applies only to new rows, "Return" only to processed ones: the
+    // rest are not touched.
+    trs = trs.filter(function (tr) { return action === 'done' ? isNew(tr) : !isNew(tr); });
+    if (!trs.length) return;
+    var toNew = action === 'reopen';
+    trs.forEach(function (tr) { setState(tr, toNew); });
+    refreshBar();
+    document.dispatchEvent(new Event('ar:state-changed'));   // the "New / Processed" filter is recomputed only if it is enabled
+    post('/admin/analyst/action/', { ids: trs.map(function (tr) { return parseInt(tr.dataset.id, 10); }), action: action })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); })
+      .catch(function () {
+        trs.forEach(function (tr) { setState(tr, !toNew); });
+        refreshBar();
+        document.dispatchEvent(new Event('ar:state-changed'));
+        error('Could not save', 'Refresh the page and try again.');
+      });
+  }
+  bulk.addEventListener('click', function (e) {
+    e.preventDefault();
+    if (bulk.classList.contains('cl-btn-idle')) return;
+    runAction(Array.prototype.map.call(checkedBoxes(), function (c) { return c.closest('tr'); }), bulk.dataset.bulk);
+  });
+
+  /* ── Fixes: plan -> "Apply" ── */
+  function confirmApply(plans, skipped, heading) {
+    var nodes = [el('div', 'ar-plan-note', 'Nothing will change until you click "Apply". Actions on store data can be rolled back in the log.')];
+    plans.forEach(function (p) { nodes = nodes.concat(planNodes(p)); });
+    (skipped || []).forEach(function (s) {
+      nodes.push(el('div', 'ar-plan-t', 'Skipped: ' + s.title));
+      nodes.push(el('div', 'ar-plan-note', s.reason));
+    });
+    var apply = btn('Apply', function () {
+      apply.disabled = true; apply.textContent = 'Applying…';
+      post('/admin/analyst/fix/apply/', { run_ids: plans.map(function (p) { return p.run_id; }) }).then(function (r) {
+        var out = [];
+        if (!r.ok) out.push(el('div', 'ar-plan-err', r.data.error || 'Could not apply.'));
+        (r.data.results || []).forEach(function (x) {
+          out.push(el('div', x.ok ? 'ar-plan-ok' : 'ar-plan-err', (x.ok ? 'Done: ' : 'Failed: ') + x.title + (x.error ? ' — ' + x.error : '')));
+        });
+        show('Result', out, [btn('Close', reload, true)]);
+      });
+    }, true);
+    show(heading, nodes, [btn('Cancel', close), apply]);
+  }
+  function requestPlan(findingId, fixKey, params) {
+    waiting('Collecting data… For server actions this can take up to a minute.');
+    post('/admin/analyst/fix/plan/', { finding_id: findingId, action: fixKey, params: params || {} }).then(function (r) {
+      if (!r.ok) return error('Cannot fix', r.data.error || 'Could not build the plan.');
+      confirmApply([r.data], [], 'Confirm the fix');
+    });
+  }
+  function askParams(findingId, fixKey, label, specs) {
+    var inputs = {};
+    var nodes = specs.map(function (s) {
+      var row = el('div', 'ar-param');
+      var inp = el('input'); inp.type = 'number'; inp.min = s.min; inp.max = s.max; inp.value = s.default;
+      inputs[s.name] = inp;
+      row.appendChild(el('label', '', s.label + ' (' + s.min + '–' + s.max + ')')); row.appendChild(inp);
+      return row;
+    });
+    show(label, nodes, [btn('Cancel', close), btn('Next: show changes', function () {
+      var params = {};
+      Object.keys(inputs).forEach(function (k) { params[k] = inputs[k].value; });
+      requestPlan(findingId, fixKey, params);
+    }, true)]);
+  }
+
+  function startFix(fix) {
+    var fid = parseInt(fix.closest('tr').dataset.id, 10);
+    var specs = JSON.parse(fix.dataset.params || '[]');
+    return specs.length ? askParams(fid, fix.dataset.fix, fix.textContent, specs) : requestPlan(fid, fix.dataset.fix, {});
+  }
+
+  /* ── Table clicks ── */
+  tbody.addEventListener('click', function (e) {
+    var fix = e.target.closest('button[data-fix]');
+    if (fix) return startFix(fix);
+    var skip = e.target.closest('.ntf-skip-btn');
+    if (skip) { e.stopPropagation(); return runAction([skip.closest('tr')], skip.dataset.act); }
+
+    /* Click on the finding text - full text (in the row it is truncated to two lines). */
+    var cell = e.target.closest('td.ar-open');
+    if (cell) {
+      var tr = cell.closest('tr');
+      var link = cell.querySelector('.ar-link');
+      var buttons = [btn('Close', close)];
+      if (link && link.textContent.trim()) {
+        buttons.push(btn('Open in CRM', function () { window.location.href = link.textContent.trim(); }));
+      }
+      /* The same fixes as in the "Action" column (on the phone the column is absent). */
+      tr.querySelectorAll('button[data-fix]').forEach(function (f) {
+        buttons.push(btn(f.textContent, function () { close(); startFix(f); }, true));
+      });
+      show(cell.querySelector('.ar-title').textContent,
+           [el('div', 'ar-text', cell.querySelector('.ar-sub').textContent || 'No additional details.')], buttons);
+    }
+  });
+
+
+  var all = document.getElementById('ar-fix-all');
+  if (all) all.addEventListener('click', function (e) {
+    e.preventDefault();
+    waiting('Building a plan for all findings…');
+    post('/admin/analyst/fix/plan-all/', {}).then(function (r) {
+      if (!r.ok) return error('Failed', r.data.error || 'Could not build the plan.');
+      if (!r.data.runs.length) {
+        var why = (r.data.skipped || []).map(function (s) { return el('div', 'ar-plan-note', s.title + ': ' + s.reason); });
+        return show('Nothing to fix automatically', why.length ? why : [el('div', 'ar-plan-note', 'Everything that can be fixed has already been fixed.')], [btn('Close', close, true)]);
+      }
+      confirmApply(r.data.runs, r.data.skipped, 'Fix everything possible');
+    });
+  });
+
+  window.__ar = { pgRender: pgRender, refreshBar: refreshBar };   // for _filters.html
+  document.body.classList.add('ntf-page');
+  refreshBar();
+  requestAnimationFrame(function () { requestAnimationFrame(pgRender); });
+  window.addEventListener('resize', pgRender);
+})();
+</script>
+{% include "admin/analyst/_filters.html" %}
+{% endblock %}

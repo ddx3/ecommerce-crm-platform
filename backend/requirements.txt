@@ -1,0 +1,58 @@
+asgiref==3.11.1
+beautifulsoup4==4.14.3
+bcrypt==5.0.0
+numpy==2.4.3
+cffi==2.0.0
+cryptography==46.0.5
+Django==6.0.2
+django-cleanup==9.0.0
+django-cors-headers==4.9.0
+django-summernote==0.8.20.0
+easy-thumbnails==2.10.1
+djangorestframework==3.16.1
+invoke==2.2.1
+paramiko==4.0.0
+pillow==12.1.1
+# HEIC/HEIF decode plugin for Pillow — without it Image.open() cannot read iPhone photos
+# (the standard camera format). Needed for the HEIC→JPEG conversion in the chat.
+pillow-heif==1.7.0
+psycopg2-binary==2.9.11
+pycparser==3.0
+PyNaCl==1.6.2
+python-dotenv==1.2.2
+sqlparse==0.5.5
+tzdata==2025.3
+python-slugify==8.0.4
+
+openpyxl==3.1.5
+requests==2.32.5
+python-docx==1.2.0
+djangorestframework-simplejwt==5.5.1
+google-genai==1.67.0
+anthropic==0.84.0
+claude-agent-sdk==0.2.87
+mcp==1.27.2   # the SDK pulls mcp with no upper bound: 2.x breaks the in-process tools (create_sdk_mcp_server) — the instruction agent and the TG bot
+youtube-transcript-api==1.2.4
+
+# Real-time chat (WebSockets) + cache/throttle backend
+channels==4.3.2
+channels-redis==4.3.0
+# daphne — local ASGI dev server (runserver). In production HTTP+WS is served by
+# uvicorn with several workers (a single daphne process did not scale and long
+# sync views blocked the whole site). uvicorn[standard] = uvloop+httptools+websockets.
+daphne==4.2.1
+uvicorn[standard]==0.34.0
+redis==7.4.0
+
+# Telegram bot (telegrambot app) — long-polling Claude agent
+aiogram==3.28.2
+
+# Product photo processing: background removal (ML, local) to the storefront standard 1080×1080
+rembg==2.0.65
+onnxruntime==1.26.0
+
+# PDF receipt of an order in the admin: we render the email template through Chromium (Playwright),
+# so that the PDF looks 1:1 like the email. In the Dockerfile — `playwright install --with-deps chromium`
+# + fonts-dejavu-core (Cyrillic). The render runs in a subprocess (orders/chromium_pdf.py).
+playwright==1.60.0
+pymupdf==1.28.2

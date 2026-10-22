@@ -1,0 +1,3434 @@
+{% extends "admin/change_list.html" %}
+{% block pagination %}{% endblock %}
+{% block result_list %}
+{{ block.super }}
+<style>
+#result_list { display: none !important; }
+#toolbar { display: none !important; }
+.results { display: none !important; }
+#or-table.or-loading { opacity: .55; transition: opacity .1s; pointer-events: none; }
+
+/* ── Table ── */
+#or-table { table-layout: auto; width: 100%; border-collapse: collapse !important; border-top: none !important; --hairline-color: transparent; }
+#or-table td, #or-table th { border-top: none !important; }
+#or-table thead th { border-bottom: 1px solid #e5e7eb !important; }
+#or-table thead tr th {
+    background: #f9fafb !important; border-bottom: 1px solid #e5e7eb !important;
+    border-left: 1px solid #e5e7eb !important; padding: 10px 12px !important;
+    font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important;
+    letter-spacing: 0.4px !important; color: #6b7280 !important; white-space: nowrap !important;
+    vertical-align: middle !important; text-align: left !important;
+}
+#or-table thead tr th:first-child { border-left: none !important; }
+#or-table thead tr th.col-cb { padding: 0 0 0 14px !important; width: 44px !important; }
+th[data-col] { cursor: pointer !important; user-select: none !important; position: relative !important; }
+#or-table thead tr th[data-col] { padding-right: 26px !important; }
+/* The Status and Payment columns — exactly the button width + padding (12*2). */
+#or-table th[data-col="status"]  { width: calc(var(--or-status-w, 110px) + 24px); }
+#or-table th[data-col="payment"] { width: calc(var(--or-pay-w, 110px) + 24px); }
+#or-table thead tr th[data-col]:hover, #or-table thead tr th[data-col].col-open { color: #1f2937 !important; }
+#or-table thead tr th[data-col].col-on { background: #d1d5db !important; color: #1f2937 !important; }
+.th-badge { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; pointer-events: none; }
+
+#or-table tbody tr { border-bottom: 1px solid #e5e7eb !important; height: 55px !important; }
+#or-table.tbl-touches-pager tbody tr:last-child { border-bottom: none !important; }
+#or-table tbody tr.row1 { background: #fff !important; }
+#or-table tbody tr.row2 { background: #f9fafb !important; }
+#or-table tbody tr:hover { background: #eef0f3 !important; }
+#or-table tbody tr.or-pinned, #or-table tbody tr.or-pinned:hover { background: #eff6ff !important; }
+#or-table tbody tr.or-pinned-last td { border-bottom: 2px solid #d1d5db !important; }
+/* Highlighting of orders with dropshipping / 50-50 — a colored stripe on the left. */
+#or-table tbody tr.or-hasdrop td.col-cb { box-shadow: inset 3px 0 0 0 #f59e0b !important; }
+#or-table tbody tr.or-hascourse td.col-cb { box-shadow: inset 3px 0 0 0 #2563eb !important; }
+/* If an order has both dropshipping and a course, show both stripes side by side (3px dropshipping + 3px course). */
+#or-table tbody tr.or-hasdrop.or-hascourse td.col-cb { box-shadow: inset 3px 0 0 0 #f59e0b, inset 6px 0 0 0 #2563eb !important; }
+
+#or-table tbody tr.or-empty-row, #or-table tbody tr.or-empty-row:hover { background: #fff !important; cursor: default !important; border-bottom: 1px solid #e5e7eb !important; }
+#or-table tbody tr.or-empty-row td { border-bottom: 1px solid #e5e7eb !important; vertical-align: middle !important; text-align: center !important; padding: 0 !important; color: #9ca3af !important; font-size: 13px !important; }
+table.tbl-touches-pager tbody tr.or-empty-row, table.tbl-touches-pager tbody tr.or-empty-row td { border-bottom: 1px solid #e5e7eb !important; }
+#or-table tbody td {
+    padding: 0 12px !important; font-size: 13px !important; vertical-align: middle !important;
+    border-left: 1px solid #e5e7eb !important; border-bottom: none !important;
+    font-weight: 400 !important; color: #374151 !important; text-align: left !important;
+    overflow: hidden !important; height: 55px !important; box-sizing: border-box !important;
+}
+#or-table tbody td:first-child { border-left: none !important; }
+#or-table td { white-space: nowrap; }
+#or-table .col-num { font-weight: 500; color: #374151; }
+#or-table .col-client { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 140px; max-width: 220px; }
+#or-table .col-comm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 140px; max-width: 240px; font-size: 13px; }
+/* Comment/source — up to 2 lines (on both PC and Mac); longer text is cut with "…",
+   clicking expands the full text.
+ */
+#or-table td.col-comm .or-cell-clamp {
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; white-space: normal; word-break: break-word; line-height: 1.45;
+    padding: 0 4px 1px 4px;   /* safety zone: the left leg of letters like "y" and glyph descenders are not clipped by overflow */
+}
+/* Less padding in the cell (8px) — the span takes the other 4px as a safety zone; the total
+   text indent stays 12px (aligned with the header).
+ */
+#or-table tbody td.col-comm { padding-left: 8px !important; padding-right: 8px !important; }
+/* Delivery — absorbs all the remaining free width (stretches as far as possible):
+   type on 1 line, address on the 2nd line (fully visible on a wide column).
+ */
+#or-table td.col-delivery, #or-table th[data-col="delivery"] { width: auto !important; max-width: none !important; }
+#or-table td.col-delivery { white-space: normal !important; word-break: break-word !important; }
+#or-table td.col-delivery .col-delivery-inner {
+    display: -webkit-box !important; -webkit-line-clamp: 2 !important; -webkit-box-orient: vertical !important;
+    overflow: hidden !important; white-space: normal !important; line-height: 1.45 !important;
+}
+#or-table td.col-delivery .col-delivery-inner > span:first-child { white-space: nowrap !important; }
+/* Widths of the Number / Amount / Client / Date columns — width:1% + nowrap: the column
+   shrinks TIGHT to the longest content on the page (minimum dynamic
+   width). GLOBALLY (also on a wide screen >1440) — otherwise they stretched across everything.
+   The zoom tier (≤1440) has its own copies with the same values.
+ */
+#or-table td.col-num,       #or-table th[data-col="num"]    { width: 1% !important; min-width: 0 !important; white-space: nowrap !important; }
+#or-table thead tr th[data-col="num"] { padding-right: 12px !important; }
+#or-table td.or-order-cell, #or-table th[data-col="price"]  { width: 1% !important; white-space: nowrap !important; }
+#or-table thead tr th[data-col="price"] { padding-right: 11px !important; padding-left: 11px !important; }
+#or-table td.or-order-cell { text-align: left !important; }
+#or-table td.col-client,    #or-table th[data-col="client"] { width: 1% !important; white-space: nowrap !important; }
+#or-table td.col-date,      #or-table th[data-col="date"]   { width: 1% !important; white-space: nowrap !important; }
+/* Client comment / Manager comment / Source — ALL THREE the same width =
+   fit to the longest header (so the headers are on ONE line). JS computes the width
+   (_setCommentColsUniform → --cw-all). Content is cut to 2 lines (click
+   expands). Delivery takes the remaining free width.
+ */
+#or-table td.col-comm { min-width: 0 !important; }
+#or-table th[data-col="comm_client"],  #or-table td.col-comm-client,
+#or-table th[data-col="comm_manager"], #or-table td.col-comm-manager,
+#or-table th[data-col="source"],       #or-table td.col-source { width: var(--cw-all, 168px) !important; max-width: var(--cw-all, 168px) !important; }
+#or-table thead tr th[data-col="comm_client"],
+#or-table thead tr th[data-col="comm_manager"],
+#or-table thead tr th[data-col="source"] { white-space: nowrap !important; padding-right: 16px !important; }
+/* ── LARGE SCREEN (>1440, no zoom): lots of free space. Delivery — FIT TO TEXT
+   (--dw, computed by JS _fitDeliveryCol), and all the remainder goes to comments/source
+   (width:auto, min = header width). On a Mac (≤1440) it stays as it was. ──
+ */
+@media (min-width: 1441px) {
+  #or-table td.col-delivery, #or-table th[data-col="delivery"] { width: var(--dw, 240px) !important; max-width: var(--dw, 240px) !important; }
+  #or-table th[data-col="comm_client"],  #or-table td.col-comm-client,
+  #or-table th[data-col="comm_manager"], #or-table td.col-comm-manager,
+  #or-table th[data-col="source"],       #or-table td.col-source { width: var(--cw-eq, auto) !important; min-width: var(--cw-all, 140px) !important; max-width: none !important; }
+}
+#or-table .col-comm-manager { color: #1d4ed8; cursor: text; }
+.cm-saving { opacity: .55; }
+/* The "Source" column — like the manager comment, but plain dark text (not blue),
+   so the manager doesn't confuse the source with a comment.
+ */
+#or-table .col-source { color: #374151; cursor: text; }
+#or-table .col-cb { width: 44px !important; min-width: 44px !important; max-width: 44px !important; padding: 0 0 0 14px !important; }
+
+/* ── Expanded comment/source: part of the cell slides DOWN over the row
+   below. Same width (left:0/right:0), white background, NO border/shadow/separate
+   window — just a continuation of the cell. Rows don't jump (overlay, doesn't push). ──
+ */
+/* The expanded comment/source slides DOWN from where the collapsed text was
+   (top is set by JS = the row position). The text stays vertically centered and
+   doesn't jump up. Same width, white background, no border/shadow.
+ */
+#or-table td.col-comm-client.cc-open,
+#or-table td.col-comm-manager.is-editing,
+#or-table td.col-source.is-editing { overflow: visible !important; position: relative !important; z-index: 30 !important; }
+/* The client comment (read-only) expands via the same .ce-edit/.ce-abs mechanism
+   as the editors (1 line — in flow, zero shift; multi-line — overlay).
+   Only an arrow cursor, since it can't be edited.
+ */
+#or-table td.col-comm.col-comm-client .or-cell-clamp.ce-edit { cursor: pointer !important; }
+/* contenteditable editor: the same span becomes editable (no swap to a
+   textarea → zero shift). 1 line stays in flow; for multi-line JS makes
+   .ce-abs (absolute over the row below, background = row color).
+ */
+#or-table td.col-comm .or-cell-clamp.ce-edit {
+    display: block !important; -webkit-line-clamp: unset !important;
+    white-space: normal !important; word-break: break-word !important;
+    overflow: visible !important; outline: none !important; cursor: text !important;
+    line-height: 1.45 !important;
+}
+#or-table td.col-comm .or-cell-clamp.ce-edit.ce-abs {
+    position: absolute !important; left: 0 !important; right: 0 !important;
+    padding-left: 12px !important; padding-right: 12px !important; /* = td horizontal padding */
+    /* vertical padding is set by JS — symmetric (top = bottom around the text) */
+    background: var(--ovl-bg, #fff) !important; z-index: 31 !important;
+}
+/* Divider line on the edge toward which the overlay slides (box-shadow — no layout shift):
+   down → line at the bottom, up → line at the top. Color = the table grid color, otherwise it
+   reads as a border of a "window". We do NOT draw the row's top line — the overlay simply
+   doesn't overlap it (JS keeps top >= 0).
+ */
+#or-table td.col-comm .or-cell-clamp.ce-abs.ovl-down { box-shadow: 0 1px 0 0 #e5e7eb !important; }
+#or-table td.col-comm .or-cell-clamp.ce-abs.ovl-up   { box-shadow: 0 -1px 0 0 #e5e7eb !important; }
+/* Overlay background color = row color (zebra + hover), via a CSS variable
+   inherited from <tr> and updated live (including on hover).
+ */
+#or-table tbody tr.row1 { --ovl-bg: #fff; }
+#or-table tbody tr.row2 { --ovl-bg: #f9fafb; }
+#or-table tbody tr:hover { --ovl-bg: #eef0f3; }
+#or-table tbody tr.or-pinned, #or-table tbody tr.or-pinned:hover { --ovl-bg: #eff6ff; }
+
+/* ── Status / Pay inline pickers ── */
+.or-picker-btn {
+    display: inline-flex; align-items: center;
+    height: 26px; padding: 0 10px;
+    border: 1px solid #d1d5db; border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: 12px; font-weight: 500;
+    color: #374151; font-family: inherit; white-space: nowrap;
+    box-sizing: border-box; outline: none;
+}
+.or-picker-btn[data-field="status"]         { width: var(--or-status-w, 110px); }
+.or-picker-btn[data-field="payment_status"] { width: var(--or-pay-w, 110px); }
+.or-picker-btn:hover { border-color: #9ca3af; background: #fff; }
+.or-picker-btn[data-val="new"]        { background-color: #f3f4f6; border-color: #e5e7eb; color: #6b7280; }
+.or-picker-btn[data-val="processing"] { background-color: #fef3c7; border-color: #fde68a; color: #92400e; }
+.or-picker-btn[data-val="shipped"]    { background-color: #dbeafe; border-color: #bfdbfe; color: #1e40af; }
+.or-picker-btn[data-val="delivered"]  { background-color: #dcfce7; border-color: #bbf7d0; color: #166534; }
+.or-picker-btn[data-val="cancelled"]  { background-color: #fee2e2; border-color: #fecaca; color: #991b1b; }
+.or-picker-btn[data-val="pending"]    { background-color: #f3f4f6; border-color: #e5e7eb; color: #6b7280; }
+.or-picker-btn[data-val="paid"]       { background-color: #dcfce7; border-color: #bbf7d0; color: #166534; }
+.or-picker-btn[data-val="new"]:hover,
+.or-picker-btn[data-val="processing"]:hover,
+.or-picker-btn[data-val="shipped"]:hover,
+.or-picker-btn[data-val="delivered"]:hover,
+.or-picker-btn[data-val="cancelled"]:hover,
+.or-picker-btn[data-val="pending"]:hover,
+.or-picker-btn[data-val="paid"]:hover { filter: brightness(0.95); }
+.or-picker-btn svg { flex-shrink: 0; }
+.or-picker-popup {
+    position: fixed; z-index: 99999; background: #fff;
+    border: 1px solid #e5e7eb; border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,.10);
+    padding: 0; overflow: hidden;
+}
+/* Popup of the same width as the button — fit to the longest label. */
+.or-picker-popup.or-picker-popup-status         { width: var(--or-status-w, 110px); min-width: 0; }
+.or-picker-popup.or-picker-popup-payment_status { width: var(--or-pay-w, 110px); min-width: 0; }
+.or-picker-item {
+    padding: 7px 10px; font-size: 12px; color: #374151;
+    cursor: pointer; white-space: nowrap;
+}
+.or-picker-item:hover { background: #f9fafb; }
+.or-picker-item.active { font-weight: 600; color: #111827; }
+
+/* ── Popover ── */
+#or-flt-pop {
+    display: none; position: fixed; z-index: 9999; background: #fff;
+    border: 1px solid #e5e7eb; border-radius: 0 0 6px 6px;
+    box-shadow: 0 6px 16px rgba(0,0,0,.18);
+    overflow: hidden;
+    width: 500px;
+}
+#or-flt-pop.open { display: block; }
+.fp-sort-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px; border-bottom: 1px solid #ececec;
+    background: #fff; color: #374151; font-size: 13px;
+    cursor: pointer; width: 100%; text-align: left;
+    border-left: none; border-right: none; border-top: none;
+}
+.fp-sort-row:last-of-type { border-bottom: 1px solid #e5e7eb; }
+.fp-sort-row:hover { background: #f5f5f5; }
+.fp-sort-row.on { background: #e5e7eb; color: #374151; }
+.fp-sort-arr { color: #d1d5db; font-size: 18px; line-height: 1; flex-shrink: 0; display: inline-flex; align-items: center; }
+.fp-sort-row.on .fp-sort-arr { color: #374151; }
+.fp-pop-body { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+.fp-filter-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #9ca3af; margin-bottom: 6px; }
+.fp-pills { display: flex; gap: 3px; flex-wrap: wrap; }
+.fp-pill { padding: 3px 8px; border: 1px solid #d1d5db; border-radius: 20px; font-size: 11px; color: #6b7280; cursor: pointer; background: #fff; user-select: none; }
+.fp-pill:hover { background: #f9fafb; color: #374151; }
+.fp-pill.on { background: #1f2937; border-color: #1f2937; color: #fff; }
+.fp-search { width: 100%; box-sizing: border-box; height: 28px; padding: 0 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; outline: none; margin-bottom: 0; }
+.fp-search:focus { border-color: #9ca3af; }
+.fp-item { display: flex; align-items: center; gap: 6px; padding: 0; font-size: 13px; line-height: 1; color: #374151; }
+.fp-list .fp-item { border-radius: 0; }
+.fp-item input[type=radio],
+.fp-item input[type=checkbox] {
+    appearance: none; -webkit-appearance: none;
+    width: 14px; height: 14px; flex-shrink: 0;
+    border: 1.5px solid #d1d5db; background: #fff; cursor: pointer; position: relative;
+    margin: 0;
+    transition: background .12s, border-color .12s;
+}
+.fp-item input[type=radio] { border-radius: 50%; }
+.fp-item input[type=checkbox] { border-radius: 3px; }
+.fp-item input[type=radio]:hover,
+.fp-item input[type=checkbox]:hover { border-color: #9ca3af; }
+.fp-item input[type=radio]:checked,
+.fp-item input[type=checkbox]:checked { background: #1f2937; border-color: #1f2937; }
+.fp-item input[type=radio]:checked::after,
+.fp-item input[type=checkbox]:checked::after {
+    content: ''; position: absolute; left: 3px; top: 0px; width: 4px; height: 8px;
+    border: 1.5px solid #fff; border-top: none; border-left: none; transform: rotate(45deg);
+}
+.fp-range { display: flex; align-items: center; gap: 4px; height: 28px; }
+.fp-range input { flex: 1; min-width: 0; width: 0; height: 28px; padding: 0 6px; margin: 0; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; outline: none; box-sizing: border-box; }
+.fp-range input:focus { border-color: #9ca3af; }
+.fp-range-sep { font-size: 0; color: transparent; width: 8px; height: 1px; background: #9ca3af; align-self: center; flex-shrink: 0; margin-top: -1px; }
+.fp-divider { height: 1px; background: #e5e7eb; margin: 0 -10px; }
+.fp-clear { display: block; margin-top: 8px; padding: 0; border: none; background: none; font-size: 11px; color: #9ca3af; cursor: pointer; text-align: left; }
+.fp-clear:hover { color: #dc2626; }
+
+/* ── Calendar ── */
+.cal-nav { display:flex; align-items:center; justify-content:space-between; padding:8px 10px 4px; }
+.cal-nav-btn { background:#f9fafb; border:1px solid #d1d5db; border-radius:4px; width:26px; height:26px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; color:#374151; font-size:16px; line-height:1; padding:0; flex-shrink:0; transition:background .1s,border-color .1s; }
+.cal-nav-btn:hover { background:#e5e7eb; border-color:#9ca3af; color:#111; }
+.cal-nav-btn:active { background:#d1d5db; }
+.cal-title { font-size:12px; font-weight:600; color:#374151; text-align:center; flex:1; }
+.cal-grid { display:grid; grid-template-columns:repeat(7,1fr); padding:0 6px 0; }
+.cal-dow { font-size:10px; color:#9ca3af; text-align:center; padding:2px 0 5px; font-weight:600; }
+.cal-day { font-size:12px; text-align:center; padding:5px 0; cursor:pointer; color:#374151; user-select:none; border-radius:4px; transition:background .1s; }
+.cal-day.empty { cursor:default; pointer-events:none; }
+.cal-day:not(.empty):not(.sel-start):not(.sel-end):hover { background:#d1d5db; }
+.cal-day.today { font-weight:700; color:#111; }
+.cal-day.sel-start, .cal-day.sel-end { background:#1f2937; color:#fff; border-radius:4px; }
+.cal-day.sel-start:hover, .cal-day.sel-end:hover { background:#374151; }
+.cal-day.in-range { background:#e5e7eb; border-radius:0; }
+.cal-day.in-range:hover { background:#d1d5db; }
+.cal-day.sel-start.has-range { border-radius:4px 0 0 4px; }
+.cal-day.sel-end.has-range   { border-radius:0 4px 4px 0; }
+.cal-reset { display:block; text-align:center; padding:0 10px 10px; font-size:11px; color:#9ca3af; cursor:pointer; background:none; border:none; width:100%; }
+.cal-reset:hover { color:#dc2626; }
+
+/* ── Pager ── */
+#or-pager {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; border-top: 1px solid #e5e7eb;
+    position: fixed; bottom: 0; right: 0; background: #fff; z-index: 1000;
+}
+#or-pager .pager-info { font-size: 12px; color: #9ca3af; }
+#or-pager .pager-nav { display: flex; align-items: center; gap: 4px; }
+#or-pager .pg-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; padding: 0; border: 1px solid #d1d5db;
+    border-radius: 4px; background: #fff; color: #374151;
+    font-size: 13px; cursor: pointer; user-select: none; text-decoration: none !important; box-sizing: border-box;
+}
+#or-pager .pg-btn:hover { background: #f3f4f6; border-color: #d1d5db; }
+#or-pager .pg-btn.pg-active { background: #1f2937; color: #fff; border-color: #1f2937; }
+#or-pager .pg-btn.pg-disabled { opacity: 0.35; pointer-events: none; }
+#or-pager .pager-nav .pg-dots { padding: 0 2px; color: #9ca3af; font-size: 12px; line-height: 28px; }
+#or-pager .pager-size { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #9ca3af; }
+#or-pager .pager-size .pg-btn { width: auto; min-width: 36px; padding: 0 8px; }
+#content-main, #content { padding-bottom: 0 !important; }
+
+/* ── Order items popup ── */
+#or-order-pop { display:none; position:fixed; z-index:9999; background:#fff; border:1px solid #e5e7eb; border-radius:0 0 6px 6px; box-shadow:0 6px 16px rgba(0,0,0,.18); padding:0; min-width:300px; max-width:90vw; width:max-content; max-height:70vh; overflow-x:hidden; overflow-y:auto; }
+#or-order-pop.open { display:block; }
+/* Expanded upward (didn't fit below): rounded corners on top, shadow upward. */
+#or-order-pop.flip-up { border-radius:6px 6px 0 0; box-shadow:0 -6px 16px rgba(0,0,0,.18); }
+.or-order-cell.has-items .or-order-cnt { color:#9ca3af; font-size:11px; }
+/* A hint that the cell can be clicked: a solid line under the block on hover.
+   border-bottom (not text-decoration) — the line sits below the glyphs, doesn't collide with
+   parentheses.
+   A transparent border by default reserves the space — the text doesn't jump on hover.
+ */
+.or-order-cell.has-items .or-order-line { display:inline-block; line-height:1.2; cursor:pointer; }
+/* Hover/cursor — only on the amount text itself, not on the whole cell. */
+.or-order-cell.has-items .or-order-line:hover { text-decoration:underline; text-decoration-color:#9ca3af; text-underline-offset:3px; }
+
+/* ── Client cell — clicking the value copies it (no popup and no buttons) ── */
+/* line-height sets an even vertical rhythm and room under the text for a lowered
+   underline (so overflow:hidden on .cl-val doesn't clip it). No extra padding.
+ */
+.cl-row { display:flex; align-items:center; gap:6px; line-height:1.5; }
+.cl-val { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* Value sized to the text width (not the whole cell) — so the hover/copy cursor applies
+   only to the text itself. A long value shrinks with an ellipsis.
+ */
+.cl-val.cl-name { flex:0 1 auto; font-size:13px; color:#374151; }
+.cl-val.cl-sub  { font-size:13px; color:#6b7280; }
+.cl-contacts { gap:10px; }
+.cl-contacts > .cl-val { flex:0 1 auto; }
+/* Click-to-copy of client values — via the global .copy-on-click (base_site). */
+.oop-item { display:flex; align-items:stretch; gap:0; padding:0; font-size:13px; color:#374151; }
+.oop-item:not(:last-child) { border-bottom:1px solid #f3f4f6; }
+.oop-item:hover { background:#eef0f3; cursor:pointer; }
+/* Item content (photo + info) — its own even padding. */
+.oop-item .oop-main { display:flex; align-items:center; gap:8px; flex:1; min-width:0; padding:6px 12px; color:inherit; text-decoration:none !important; }
+/* "Open on site" — a square button zone on the left with a vertical divider.
+   The main click (content) goes to the CRM, this button goes to the site (new tab).
+ */
+/* color !important — otherwise the global a:link (higher specificity) paints the icon dark. */
+.oop-site { display:flex; align-items:center; justify-content:center; flex-shrink:0; width:44px; align-self:stretch; border-right:1px solid #e5e7eb; color:#9ca3af !important; text-decoration:none; transition:color .12s; }
+.oop-site:hover { color:#374151 !important; }
+.oop-site svg { width:17px; height:17px; display:block; }
+/* Name + price on one line (price at the top right); SKU/quantity on the line below. */
+.oop-name-row { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.oop-name-row .oop-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.oop-price { flex-shrink:0; font-size:12px; font-weight:600; line-height:1; color:#374151; font-variant-numeric:tabular-nums; }
+.oop-item.deliv-pkg { padding:6px 12px; }
+.oop-item.deliv-pkg, .oop-item.deliv-pkg:hover { background:transparent; cursor:default; }
+.oop-child:hover { background:#eef0f3 !important; cursor:pointer; }
+.oop-photo-wrap { position:relative; flex-shrink:0; width:32px; height:32px; }
+.oop-child .oop-photo-wrap { width:24px; height:24px; }
+.oop-photo { width:32px; height:32px; object-fit:cover; border-radius:3px; border:1px solid #e5e7eb; flex-shrink:0; background:#f3f4f6; display:block; }
+.oop-child .oop-photo { width:24px; height:24px; }
+.oop-photo-empty { width:32px; height:32px; flex-shrink:0; background:#f3f4f6; border-radius:3px; border:1px solid #e5e7eb; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:#9ca3af; }
+/* align-self:stretch + space-between → name at the top edge of the photo, SKU/qty at the bottom edge. */
+.oop-info { flex:1; min-width:0; display:flex; flex-direction:column; justify-content:space-between; align-self:stretch; gap:0; }
+/* line-height:1 keeps the text at the top edge of the photo; padding-bottom leaves room
+   for descenders (g, y, p) — overflow:hidden clips at the padding-box, so the tails stay visible.
+ */
+.oop-name { display:block; white-space:nowrap; line-height:1; padding-bottom:3px; }
+.oop-meta { display:flex; align-items:baseline; justify-content:space-between; gap:8px; line-height:1; }
+.oop-sku { color:#9ca3af; font-size:11px; white-space:nowrap; font-variant-numeric:tabular-nums; letter-spacing:.2px; }
+.oop-qty { color:#9ca3af; font-size:11px; white-space:nowrap; }
+.oop-child { padding:6px 12px !important; background:#f9fafb; border-left:none !important; }
+.oop-toggle { width:22px; height:22px; padding:0; background:transparent; border:1px solid #d1d5db; border-radius:4px; cursor:pointer; flex-shrink:0; margin-left:6px; align-self:center; display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; }
+.oop-item:hover .oop-toggle { background:#eef0f3; }
+.oop-toggle:hover { background:#e2e5e9 !important; border-color:#9ca3af !important; }
+.oop-toggle:hover .oop-toggle-arrow { border-color:#374151; }
+.oop-toggle-arrow { display:block; width:6px; height:6px; border-right:2px solid #6b7280; border-bottom:2px solid #6b7280; transform:rotate(45deg); margin-top:-2px; }
+.oop-toggle[data-expanded="1"] .oop-toggle-arrow { transform:rotate(-135deg); margin-top:2px; }
+.oop-child .oop-name { font-size:12px; color:#6b7280; }
+.oop-child .oop-qty, .oop-child .oop-sku { font-size:10px; }
+.oop-child .oop-photo, .oop-child .oop-photo-empty { width:24px !important; height:24px !important; min-width:24px; }
+
+/* ── Export modal — shared styles (single source with change_form) ── */
+{% include "admin/_export_modal.css.html" %}
+
+/* ── RESPONSIVE for MacBook 13"/14": the orders table physically does not fit
+   in ~1070–1270px. Secondary columns are hidden by tiers (visible in the order
+   card). Font and row height unchanged. Mobile (≤1024) is left
+   untouched — there it scrolls horizontally with all columns. ──
+ */
+@media (min-width: 1025px) and (max-width: 1440px) {
+  /* ── Column widths for 13" ──────────────────────────────────────
+     Number / Order / Customer — width:1% + nowrap → shrink tight
+       to their widest text on the page (symmetric padding).
+     Status / Payment (sized for the picker in base) / Date — fixed.
+     Delivery — sized for "Nova Poshta" (type on 1 line, address clipped on the 2nd).
+     Comments + Source — NO width: they absorb all the remaining width.
+   */
+
+  /* Number: width:1% + nowrap → the column shrinks tight to the widest number
+     on the page (narrow without OLD; wider with OLD). The "#" header is short, so
+     the data dictates the width.
+   */
+  #or-table td.col-num,       #or-table th[data-col="num"]    { width: 1% !important; min-width: 0 !important; white-space: nowrap !important; }
+  #or-table thead tr th[data-col="num"] { padding-right: 12px !important; }  /* "#" is short — smaller reserve for the badge */
+  #or-table td.or-order-cell, #or-table th[data-col="price"]  { width: 1% !important; white-space: nowrap !important; }
+  /* The "Order" header stretched the column with extra right padding (26px for the
+     sort badge) — trimmed so the column sits tight to its content.
+   */
+  #or-table thead tr th[data-col="price"] { padding-right: 11px !important; padding-left: 11px !important; }
+  #or-table td.or-order-cell { text-align: left !important; }
+  #or-table td.col-client,    #or-table th[data-col="client"] { width: 1% !important; }
+  #or-table td.col-date,      #or-table th[data-col="date"]   { white-space: nowrap !important; width: 124px !important; max-width: 124px !important; }
+
+  /* Delivery — absorbs the free remainder (as on desktop); type on 1 line, address on the 2nd. */
+  #or-table td.col-delivery { white-space: normal !important; word-break: break-word !important; }
+  #or-table td.col-delivery .col-delivery-inner {
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    white-space: normal !important;
+    line-height: 1.45 !important;
+  }
+  #or-table td.col-delivery .col-delivery-inner > span:first-child { white-space: nowrap !important; }
+
+  /* Comments + Source — absorb free space (no explicit width).
+     The base min-width:140 prevents shrinking to the remainder — removed.
+   */
+  #or-table td.col-comm { min-width: 0 !important; }
+  #or-table td.col-comm .or-cell-clamp {
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    line-height: 1.45 !important;
+  }
+  #or-table thead tr th[data-col="comm_client"],
+  #or-table thead tr th[data-col="comm_manager"],
+  #or-table thead tr th[data-col="source"] { overflow: hidden !important; text-overflow: ellipsis !important; }
+}
+</style>
+
+<div id="or-export-modal" class="em-modal">
+  <div id="or-export-box" class="em-box">
+    <div class="em-head">
+      <h3>Export orders</h3>
+      <button type="button" class="em-close" id="or-export-close">✕</button>
+    </div>
+    <div class="em-fname">
+      <label>File name</label>
+      <input type="text" id="or-export-fname" />
+      <span>.docx</span>
+    </div>
+    <div class="em-opt">
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#374151;cursor:pointer;">
+        <input type="checkbox" id="or-export-include-packing" checked>
+        Add the "Packing" page
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#374151;cursor:pointer;">
+        <input type="checkbox" id="or-export-include-instructions" checked>
+        A separate file with bundle instructions (PDF)
+      </label>
+
+    </div>
+    <div id="or-export-body" class="em-body"></div>
+    <div class="em-foot">
+      <button type="button" class="em-btn" id="or-export-cancel">Cancel</button>
+      <button type="button" class="em-btn primary" id="or-export-confirm">Download</button>
+    </div>
+  </div>
+</div>
+
+<div id="or-flt-pop"></div>
+<div id="or-order-pop"></div>
+<table id="or-table"></table>
+<div id="or-pager"></div>
+
+<script>
+(function(){
+/* allData — the CURRENT page only (filtering/sorting/pagination happen on the server).
+   srvMeta — page metadata (total/num_pages/page/page_size).
+   selectedData — cache of full objects of the selected orders (may come from different
+   pages) — for rendering pinned rows and for export.
+ */
+var allData = {{ orders_json|safe }};
+var srvMeta = {{ orders_meta_json|safe }};
+var selectedData = {};
+
+var F = {numMode:'exact', numExact:'', numFrom:'', numTo:'', clientQ:'', statuses:[], payment:'all', delivery:'all', dateMin:null, dateMax:null, priceMin:null, priceMax:null, commClient:'all', commManager:'all', commSource:'all', selectedItems:[], itemsMode:'and', drops:[], imported:'all'};
+
+/* Full list of products (the entire orders catalog) — used ONLY when
+   searching. Without a search the popup shows only products from the current page's rows.
+ */
+var allOrderItems = ({{ items_facet_json|safe }}).slice().sort(function(a,b){ return a.name.localeCompare(b.name,'uk'); });
+
+/* Find an order object among the current page or among the selected ones. */
+function findOrder(id){
+    id = parseInt(id,10);
+    for(var i=0;i<allData.length;i++){ if(allData[i].id===id) return allData[i]; }
+    return selectedData[id] || null;
+}
+
+function calcFilteredQty(){
+    var qty = {};
+    currentFiltered.forEach(function(o){
+        (o.items||[]).forEach(function(it){
+            var k = (it.name||'').toLowerCase();
+            if(k) qty[k] = (qty[k]||0) + (it.qty||1);
+            if(it.is_bundle && it.bundle_items){
+                it.bundle_items.forEach(function(bi){
+                    var bk = (bi.name||'').toLowerCase();
+                    if(bk) qty[bk] = (qty[bk]||0) + (bi.qty||1);
+                });
+            }
+        });
+    });
+    return qty;
+}
+var sortField = null, sortDir = 'asc';
+var currentPage = srvMeta.page || 1, pageSize = srvMeta.page_size || 25, currentFiltered = [];
+var srvTotal = srvMeta.total || 0, srvPages = srvMeta.num_pages || 1;
+var selectedIds = new Set();
+var currentPageData = [];
+var _fetchSeq = 0, _fetchTimer = null;
+
+/* ── Persisting table state (filters / sorting / page / size) ──
+   Stored in localStorage so that when returning to the list (via menu, back,
+   "Exit" from the card) the last view is restored. Row selection is not stored here.
+ */
+var STATE_KEY = 'order_list_state_v1';
+function _saveState(){
+    try {
+        localStorage.setItem(STATE_KEY, JSON.stringify({
+            F: F, sortField: sortField, sortDir: sortDir,
+            currentPage: currentPage, pageSize: pageSize,
+        }));
+    } catch(e) {}
+}
+function _loadState(){
+    try {
+        var raw = localStorage.getItem(STATE_KEY);
+        if(!raw) return false;
+        var s = JSON.parse(raw);
+        if(s.F) Object.assign(F, s.F);
+        if(typeof s.sortField   !== 'undefined') sortField   = s.sortField;
+        if(typeof s.sortDir     !== 'undefined') sortDir     = s.sortDir;
+        if(typeof s.currentPage !== 'undefined') currentPage = s.currentPage;
+        if(typeof s.pageSize    !== 'undefined') pageSize    = s.pageSize;
+        return true;
+    } catch(e) { return false; }
+}
+
+/* Collects GET params from the current filter/sort/page state. */
+function buildQuery(){
+    var p = new URLSearchParams();
+    p.set('_json','1');
+    p.set('page', currentPage);
+    p.set('page_size', pageSize);
+    if(F.numMode==='exact' && F.numExact!==''){ p.set('numMode','exact'); p.set('numExact',F.numExact); }
+    else if(F.numMode==='range' && (F.numFrom!==''||F.numTo!=='')){ p.set('numMode','range'); if(F.numFrom!=='')p.set('numFrom',F.numFrom); if(F.numTo!=='')p.set('numTo',F.numTo); }
+    if(F.clientQ) p.set('q', F.clientQ);
+    if(F.statuses.length) p.set('statuses', F.statuses.join(','));
+    if(F.payment!=='all') p.set('payment', F.payment);
+    if(F.delivery!=='all') p.set('delivery', F.delivery);
+    if(F.imported && F.imported!=='all') p.set('imported', F.imported);
+    if(F.dateMin) p.set('dateMin', F.dateMin);
+    if(F.dateMax) p.set('dateMax', F.dateMax);
+    if(F.priceMin!==null) p.set('priceMin', F.priceMin);
+    if(F.priceMax!==null) p.set('priceMax', F.priceMax);
+    if(F.commClient!=='all') p.set('commClient', F.commClient);
+    if(F.commManager!=='all') p.set('commManager', F.commManager);
+    if(F.commSource!=='all') p.set('commSource', F.commSource);
+    if(F.drops.length) p.set('drops', F.drops.join(','));
+    if(F.selectedItems.length){ p.set('items', F.selectedItems.join('||')); p.set('itemsMode', F.itemsMode); }
+    if(sortField){ p.set('sort', sortField); p.set('dir', sortDir); }
+    return p.toString();
+}
+
+/* Fetches the current page from the server and redraws the table. */
+function fetchOrders(){
+    /* Cancel any scheduled debounced fetch (updateTable) so that after
+       a direct call (pagination/status change) the deferred request doesn't "override"
+       the page back to 1 a second later.
+     */
+    if(_fetchTimer){ clearTimeout(_fetchTimer); _fetchTimer = null; }
+    _saveState();
+    var seq = ++_fetchSeq;
+    if(orTable) orTable.classList.add('or-loading');
+    fetch(window.location.pathname + '?' + buildQuery(), {credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}})
+        .then(function(r){ return r.json(); })
+        .then(function(resp){
+            if(seq !== _fetchSeq) return;  /* stale response — ignore */
+            allData = resp.orders || [];
+            srvTotal = resp.total || 0;
+            srvPages = resp.num_pages || 1;
+            currentPage = resp.page || 1;
+            if(orTable) orTable.classList.remove('or-loading');
+            renderRows(allData);
+        })
+        .catch(function(){ if(orTable) orTable.classList.remove('or-loading'); });
+}
+
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function getCsrf(){ var m=document.cookie.match(/csrftoken=([^;]+)/); return m?m[1]:''; }
+function toCmpDate(str){ var m=str&&str.match(/^(\d{2})\.(\d{2})\.(\d{4})/); return m?m[3]+'-'+m[2]+'-'+m[1]:null; }
+
+function applyFilters(data){
+    return data.filter(function(o){
+        if(F.numMode==='exact' && F.numExact!==''){
+            if(String(o.order_number||'')!==String(F.numExact)) return false;
+        } else if(F.numMode==='range'){
+            var n=parseInt(o.order_number)||0;
+            if(F.numFrom!=='' && n<parseInt(F.numFrom)) return false;
+            if(F.numTo!==''   && n>parseInt(F.numTo))   return false;
+        }
+        if(F.clientQ){
+            var q=F.clientQ.toLowerCase();
+            if((o.customer_name+' '+(o.customer_phone||'')+' '+(o.customer_email||'')).toLowerCase().indexOf(q)===-1) return false;
+        }
+        if(F.statuses.length && F.statuses.indexOf(o.status)===-1) return false;
+        if(F.payment!=='all' && o.payment_status!==F.payment) return false;
+        if(F.delivery!=='all' && o.delivery_type!==F.delivery) return false;
+        if(F.imported==='new' && o.is_imported) return false;
+        if(F.imported==='old' && !o.is_imported) return false;
+        if(F.dateMin||F.dateMax){ var d=toCmpDate(o.created_at); if(F.dateMin&&(!d||d<F.dateMin)) return false; if(F.dateMax&&(!d||d>F.dateMax)) return false; }
+        if(F.priceMin!==null && parseFloat(o.total_price||0)<F.priceMin) return false;
+        if(F.priceMax!==null && parseFloat(o.total_price||0)>F.priceMax) return false;
+        if(F.drops.length && F.drops.indexOf(o.drop_status||'none')===-1) return false;
+        if(F.commClient==='has'  && !o.comment) return false;
+        if(F.commClient==='none' &&  o.comment) return false;
+        if(F.commManager==='has'  && !o.manager_comment) return false;
+        if(F.commManager==='none' &&  o.manager_comment) return false;
+        if(F.commSource==='has'  && !o.source) return false;
+        if(F.commSource==='none' &&  o.source) return false;
+        if(F.selectedItems.length){
+            var matchItem = function(name){
+                var nl = name.toLowerCase();
+                return (o.items||[]).some(function(it){
+                    if((it.name||'').toLowerCase()===nl) return true;
+                    if(it.is_bundle && it.bundle_items){
+                        return it.bundle_items.some(function(bi){ return (bi.name||'').toLowerCase()===nl; });
+                    }
+                    return false;
+                });
+            };
+            var ok = F.itemsMode==='and'
+                ? F.selectedItems.every(matchItem)
+                : F.selectedItems.some(matchItem);
+            if(!ok) return false;
+        }
+        return true;
+    });
+}
+
+function applySort(data){
+    if(!sortField) return data;
+    return data.slice().sort(function(a,b){
+        var va,vb;
+        if(sortField==='order_number'){ va=String(a.order_number||''); vb=String(b.order_number||''); }
+        else if(sortField==='customer_name'){ va=(a.customer_name||'').toLowerCase(); vb=(b.customer_name||'').toLowerCase(); }
+        else if(sortField==='created_at'){ va=a.created_at||''; vb=b.created_at||''; }
+        else if(sortField==='total_price'){ va=parseFloat(a.total_price)||0; vb=parseFloat(b.total_price)||0; }
+        else if(sortField==='status'){ va=a.status||''; vb=b.status||''; }
+        else if(sortField==='payment_status'){ va=a.payment_status||''; vb=b.payment_status||''; }
+        else if(sortField==='delivery_type'){ va=a.delivery_type||''; vb=b.delivery_type||''; }
+        else return 0;
+        return va<vb?(sortDir==='asc'?-1:1):va>vb?(sortDir==='asc'?1:-1):0;
+    });
+}
+
+function isColFiltered(col){
+    if(col==='num')      return (F.numMode==='exact' && F.numExact!=='') || (F.numMode==='range' && (F.numFrom!==''||F.numTo!=='')) || (F.imported && F.imported!=='all');
+    if(col==='client')   return !!F.clientQ;
+    if(col==='status')   return F.statuses.length>0;
+    if(col==='payment')  return F.payment!=='all';
+    if(col==='delivery') return F.delivery!=='all';
+    if(col==='date')     return !!(F.dateMin||F.dateMax);
+    if(col==='price')    return F.priceMin!==null||F.priceMax!==null||F.selectedItems.length>0||F.drops.length>0;
+    if(col==='comm_client')  return F.commClient!=='all';
+    if(col==='comm_manager') return F.commManager!=='all';
+    if(col==='source')       return F.commSource!=='all';
+    return false;
+}
+
+function resetCol(col){
+    if(col==='num')      { F.numExact=''; F.numFrom=''; F.numTo=''; F.imported='all'; }
+    if(col==='client')   F.clientQ='';
+    if(col==='status')   F.statuses=[];
+    if(col==='payment')  F.payment='all';
+    if(col==='delivery') F.delivery='all';
+    if(col==='date')     { F.dateMin=null; F.dateMax=null; }
+    if(col==='price')    { F.priceMin=null; F.priceMax=null; F.selectedItems=[]; F.itemsMode='and'; F.drops=[]; }
+    if(col==='comm_client')  F.commClient='all';
+    if(col==='comm_manager') F.commManager='all';
+    if(col==='source')       F.commSource='all';
+    if(sortField===col){ sortField=null; sortDir='asc'; }
+    updateTable();
+}
+
+/* ── Popover ── */
+var pop = document.getElementById('or-flt-pop');
+var popOwner = null;
+
+/* The width of price-popup is computed dynamically for the longest product name in the CURRENT
+   list (driven by buildPricePop/renderSug → applyFit), so it is absent from popWidths.
+ */
+function _measureMaxNameWidth(names){
+    var probe = document.createElement('span');
+    var bf = getComputedStyle(document.body);
+    probe.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;white-space:nowrap;font-size:12px;font-family:'+bf.fontFamily+';';
+    document.body.appendChild(probe);
+    var maxW = 0;
+    for(var i=0;i<names.length;i++){ probe.textContent = names[i] || ''; if(probe.offsetWidth>maxW) maxW = probe.offsetWidth; }
+    document.body.removeChild(probe);
+    return maxW;
+}
+/* maxNameW + img(40) + gap(10) + row-padding(20) + scrollbar(14) + safety(8) = +92.
+   Lower bound 380 — so the controls (price/mode/packaging) don't get cramped.
+ */
+function _priceePopWidth(names){
+    var maxW = names.length ? _measureMaxNameWidth(names) : 0;
+    return Math.max(380, Math.min(maxW + 92, window.innerWidth - 32));
+}
+var popWidths = {date: 230};
+
+function openPop(th, buildFn){
+    if(popOwner===th && pop.classList.contains('open')){ closePop(); return; }
+    if(popOwner) popOwner.classList.remove('col-open');
+    popOwner = th;
+    pop.innerHTML = '';
+    buildFn();
+    var resetBar = document.createElement('button'); resetBar.type = 'button';
+    resetBar.textContent = 'Reset filter';
+    resetBar.style.cssText = 'display:block;width:100%;padding:10px;border:none;border-bottom:1px solid #e5e7eb;background:none;color:#dc2626;font-size:13px;font-weight:500;cursor:pointer;text-align:left;';
+    resetBar.addEventListener('click', function(){ resetCol(th.dataset.col); closePop(); });
+    resetBar.addEventListener('mouseenter', function(){ this.style.background='#fef2f2'; });
+    resetBar.addEventListener('mouseleave', function(){ this.style.background='none'; });
+    pop.insertBefore(resetBar, pop.firstChild);
+    pop.classList.add('open');
+    var r = th.getBoundingClientRect();
+    var z = (window.clZoom ? window.clZoom() : 1);
+    var pw = popWidths[th.dataset.col];
+    if(typeof pw === 'function') pw = pw();
+    /* price: the width has already been set by buildPricePop/renderSug (applyFit) to fit product
+       names —
+       don't override it. The remaining columns — from their own map or default 200.
+     */
+    if(th.dataset.col !== 'price') pop.style.width = (pw || 200) + 'px';
+    var pwV = pop.offsetWidth * z;   // actual popup width
+    var left = r.left;
+    if(left + pwV > window.innerWidth - 8) left = window.innerWidth - pwV - 8;
+    pop.style.left = (Math.max(8, left) / z) + 'px';
+    pop.style.top = (window.clFlipTop ? window.clFlipTop(r, pop.offsetHeight, 0) : (r.bottom)) + 'px';
+    th.classList.add('col-open');
+}
+
+function closePop(){
+    pop.classList.remove('open');
+    if(popOwner){ popOwner.classList.remove('col-open'); popOwner = null; }
+}
+
+document.addEventListener('click', function(e){
+    if(e.button!==0) return;
+    if(!pop.contains(e.target) && !e.target.closest('th[data-col]')) closePop();
+});
+
+function popHasFocus(){ return !!pop.querySelector('input:focus,textarea:focus'); }
+/* pop.addEventListener('mouseleave', ...) -- disabled: keep popup open on mouseleave */
+pop.addEventListener('wheel', function(e){
+    var scrollable = e.target.closest('.fp-list,.cal-grid');
+    if(scrollable && scrollable.scrollHeight > scrollable.clientHeight){
+        var atTop = scrollable.scrollTop===0 && e.deltaY<0;
+        var atBot = scrollable.scrollTop+scrollable.clientHeight>=scrollable.scrollHeight && e.deltaY>0;
+        if(!atTop && !atBot) return;
+    }
+    e.preventDefault();
+}, {passive:false});
+
+/* helpers */
+function popBody(){
+    var d = document.createElement('div'); d.className = 'fp-pop-body';
+    pop.appendChild(d); return d;
+}
+function addSortRows(field, la, ld){
+    [[la,'asc'],[ld,'desc']].forEach(function(p){
+        var btn = document.createElement('button'); btn.type = 'button';
+        btn.className = 'fp-sort-row' + (sortField===field && sortDir===p[1] ? ' on' : '');
+        var sp = document.createElement('span'); sp.textContent = p[0];
+        var arr = document.createElement('span'); arr.className = 'fp-sort-arr'; arr.textContent = '›';
+        btn.appendChild(sp); btn.appendChild(arr);
+        btn.addEventListener('click', function(){
+            sortField = field; sortDir = p[1];
+            pop.querySelectorAll('.fp-sort-row').forEach(function(b){ b.classList.remove('on'); });
+            btn.classList.add('on');
+            updateTable();
+        });
+        pop.appendChild(btn);
+    });
+}
+function radioList(cont, opts, getVal, setVal){
+    var grp = 'fp-rg-' + Date.now();
+    opts.forEach(function(o){
+        var row = document.createElement('div'); row.className = 'fp-item';
+        var lbl = document.createElement('label'); lbl.style.cssText = 'display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+        var rb = document.createElement('input'); rb.type = 'radio'; rb.name = grp; rb.value = o[0]; rb.checked = getVal()===o[0];
+        rb.addEventListener('change', function(){ if(rb.checked){ setVal(o[0]); updateTable(); } });
+        lbl.appendChild(rb); lbl.appendChild(document.createTextNode(o[1]));
+        row.appendChild(lbl); cont.appendChild(row);
+    });
+}
+function flabel(cont, text){ var d = document.createElement('div'); d.className = 'fp-filter-label'; d.textContent = text; cont.appendChild(d); }
+
+/* ── Build functions ── */
+function buildNumPop(){
+    addSortRows('order_number', 'Ascending', 'Descending');
+    var b = popBody();
+
+    /* Mode toggle */
+    var grp = 'num-mode-'+Date.now();
+    [['exact','Exact number'],['range','Range']].forEach(function(m){
+        var row = document.createElement('div'); row.className = 'fp-item';
+        var lbl = document.createElement('label'); lbl.style.cssText = 'display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+        var rb = document.createElement('input'); rb.type = 'radio'; rb.name = grp; rb.value = m[0]; rb.checked = F.numMode===m[0];
+        rb.addEventListener('change', function(){
+            if(rb.checked){
+                F.numMode=m[0]; F.numExact=''; F.numFrom=''; F.numTo='';
+                updateTable();
+                var th=popOwner; popOwner=null; openPop(th, buildNumPop);
+            }
+        });
+        lbl.appendChild(rb); lbl.appendChild(document.createTextNode(m[1]));
+        row.appendChild(lbl); b.appendChild(row);
+    });
+
+    var div = document.createElement('div'); div.className = 'fp-divider'; b.appendChild(div);
+
+    if(F.numMode==='exact'){
+        var inp = document.createElement('input'); inp.type = 'number'; inp.className = 'fp-search';
+        inp.placeholder = 'Number...'; inp.value = F.numExact;
+        inp.addEventListener('input', function(){ F.numExact = inp.value.trim(); updateTable(); });
+        b.appendChild(inp);
+        setTimeout(function(){ inp.focus(); }, 40);
+    } else {
+        var wrap = document.createElement('div'); wrap.className = 'fp-range';
+        var i1 = document.createElement('input'); i1.type = 'number'; i1.placeholder = 'from'; i1.value = F.numFrom; i1.style.cssText='flex:1;min-width:0;width:0;';
+        var sep = document.createElement('span'); sep.className = 'fp-range-sep'; sep.textContent = '—';
+        var i2 = document.createElement('input'); i2.type = 'number'; i2.placeholder = 'to'; i2.value = F.numTo; i2.style.cssText='flex:1;min-width:0;width:0;';
+        i1.addEventListener('input', function(){ F.numFrom = i1.value; updateTable(); });
+        i2.addEventListener('input', function(){ F.numTo = i2.value; updateTable(); });
+        wrap.appendChild(i1); wrap.appendChild(sep); wrap.appendChild(i2);
+        b.appendChild(wrap);
+        setTimeout(function(){ i1.focus(); }, 40);
+    }
+
+    /* Order type: all / new only (placed on the site) / old only (OLD import) */
+    var div2 = document.createElement('div'); div2.className = 'fp-divider'; b.appendChild(div2);
+    var capt = document.createElement('div'); capt.className = 'fp-filter-label'; capt.textContent = 'Order type'; b.appendChild(capt);
+    var igrp = 'imp-'+Date.now();
+    [['all','All'],['new','New only (site)'],['old','Old only (OLD)']].forEach(function(m){
+        var row = document.createElement('div'); row.className = 'fp-item';
+        var lbl = document.createElement('label'); lbl.style.cssText = 'display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+        var rb = document.createElement('input'); rb.type = 'radio'; rb.name = igrp; rb.value = m[0]; rb.checked = (F.imported||'all')===m[0];
+        rb.addEventListener('change', function(){ if(rb.checked){ F.imported = m[0]; updateTable(); } });
+        lbl.appendChild(rb); lbl.appendChild(document.createTextNode(m[1]));
+        row.appendChild(lbl); b.appendChild(row);
+    });
+}
+
+function buildClientPop(){
+    addSortRows('customer_name', 'A ⟶ Z', 'Z ⟶ A');
+    var b = popBody();
+    var inp = document.createElement('input'); inp.type = 'text'; inp.className = 'fp-search';
+    inp.placeholder = 'Name, phone, email...'; inp.value = F.clientQ;
+    inp.addEventListener('input', function(){ F.clientQ = inp.value; updateTable(); });
+    b.appendChild(inp);
+    setTimeout(function(){ inp.focus(); }, 40);
+}
+
+function buildStatusPop(){
+    var b = popBody();
+    var opts = [['new','New'],['processing','Processing'],['shipped','Shipped'],['delivered','Delivered'],['cancelled','Cancelled']];
+    opts.forEach(function(o){
+        var row = document.createElement('div'); row.className = 'fp-item';
+        var lbl = document.createElement('label'); lbl.style.cssText = 'display:inline-flex;align-items:center;gap:6px;cursor:pointer;width:100%;';
+        var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = F.statuses.indexOf(o[0])!==-1;
+        cb.addEventListener('change', function(){
+            if(cb.checked){ if(F.statuses.indexOf(o[0])===-1) F.statuses.push(o[0]); }
+            else { F.statuses = F.statuses.filter(function(s){ return s!==o[0]; }); }
+            updateTable();
+        });
+        lbl.appendChild(cb); lbl.appendChild(document.createTextNode(o[1]));
+        row.appendChild(lbl);
+        b.appendChild(row);
+    });
+}
+
+function buildPaymentPop(){
+    var b = popBody();
+    radioList(b,
+        [['all','All'],['pending','Not paid'],['paid','Paid']],
+        function(){ return F.payment; }, function(v){ F.payment = v; }
+    );
+}
+
+function buildDeliveryPop(){
+    var b = popBody();
+    /* "Ukr Poshta" stays ONLY as a filter for old orders — new ones
+       are placed with Nova Poshta or pickup.
+     */
+    radioList(b,
+        [['all','All'],['nova_poshta','Nova Poshta'],['pickup','Pickup'],['ukr_poshta','Ukrposhta (old)']],
+        function(){ return F.delivery; }, function(v){ F.delivery = v; }
+    );
+}
+
+function buildPricePop(){
+    addSortRows('total_price', 'Smaller ⟶ larger', 'Larger ⟶ smaller');
+    var b = popBody();
+
+    /* ── Price range ── */
+    var wrap = document.createElement('div'); wrap.className = 'fp-range';
+    var i1 = document.createElement('input'); i1.type = 'number'; i1.placeholder = 'from'; i1.value = F.priceMin !== null ? F.priceMin : '';
+    var psep = document.createElement('span'); psep.className = 'fp-range-sep'; psep.textContent = '—';
+    var i2 = document.createElement('input'); i2.type = 'number'; i2.placeholder = 'to'; i2.value = F.priceMax !== null ? F.priceMax : '';
+    i1.addEventListener('input', function(){ F.priceMin = i1.value !== '' ? parseFloat(i1.value) : null; updateTable(); });
+    i2.addEventListener('input', function(){ F.priceMax = i2.value !== '' ? parseFloat(i2.value) : null; updateTable(); });
+    wrap.appendChild(i1); wrap.appendChild(psep); wrap.appendChild(i2);
+    b.appendChild(wrap);
+
+    var dropDiv = document.createElement('div'); dropDiv.className='fp-divider'; b.appendChild(dropDiv);
+
+    /* ── Dropshipping (multi-select) ── */
+    [['drop','Dropship'],['mixed','Mixed'],['none','No dropship']].forEach(function(o){
+        var row = document.createElement('div'); row.className = 'fp-item';
+        var lbl = document.createElement('label'); lbl.style.cssText = 'display:inline-flex;align-items:center;gap:6px;cursor:pointer;width:100%;';
+        var cb = document.createElement('input'); cb.type='checkbox'; cb.checked = F.drops.indexOf(o[0])!==-1;
+        cb.addEventListener('change', function(){
+            if(cb.checked){ if(F.drops.indexOf(o[0])===-1) F.drops.push(o[0]); }
+            else { F.drops = F.drops.filter(function(s){ return s!==o[0]; }); }
+            updateTable();
+        });
+        lbl.appendChild(cb); lbl.appendChild(document.createTextNode(o[1]));
+        row.appendChild(lbl); b.appendChild(row);
+    });
+
+    var div = document.createElement('div'); div.className='fp-divider'; b.appendChild(div);
+
+    /* ── Item search ── */
+    var modeRow = document.createElement('div');
+    modeRow.style.cssText = 'display:flex;gap:4px;';
+    ['and','or'].forEach(function(m){
+        var btn = document.createElement('button'); btn.type='button';
+        btn.textContent = m==='and' ? 'All products' : 'At least one';
+        btn.dataset.mode = m;
+        btn.style.cssText = 'flex:1;padding:4px 0;font-size:11px;font-weight:500;border-radius:4px;cursor:pointer;border:1px solid #d1d5db;transition:none;';
+        function applyMode(){
+            ['and','or'].forEach(function(x){
+                var b2 = modeRow.querySelector('[data-mode="'+x+'"]');
+                if(x===F.itemsMode){ b2.style.background='#1f2937'; b2.style.color='#fff'; b2.style.borderColor='#1f2937'; }
+                else { b2.style.background='#fff'; b2.style.color='#6b7280'; b2.style.borderColor='#d1d5db'; }
+            });
+        }
+        btn.addEventListener('click', function(){
+            F.itemsMode = m; applyMode(); updateTable(); renderSug(inp.value);
+        });
+        modeRow.appendChild(btn);
+        setTimeout(applyMode, 0);
+    });
+    b.appendChild(modeRow);
+
+    var chipsEl = document.createElement('div');
+    chipsEl.style.cssText = 'display:flex;flex-direction:column;gap:3px;';
+    b.appendChild(chipsEl);
+
+    var divTop = document.createElement('div'); divTop.style.cssText = 'height:1px;background:#e5e7eb;margin:0 -10px;';
+    b.appendChild(divTop);
+
+    var inp = document.createElement('input'); inp.type = 'text'; inp.className = 'fp-search';
+    inp.placeholder = 'Product name...';
+    b.appendChild(inp);
+
+    /* Packaging type switcher: all / own / factory. A divider line on top
+       spanning the full width (.fp-list pattern: border-top + negative horizontal margins).
+     */
+    var pkFilter = 'all';
+    var pkBar = document.createElement('div'); pkBar.style.cssText = 'display:flex;gap:4px;margin:0 -10px;padding:10px 10px 0;border-top:1px solid #e5e7eb;';
+    [['all','All'],['own','Own'],['factory','Factory']].forEach(function(o){
+        var btn = document.createElement('button'); btn.type='button'; btn.textContent = o[1];
+        btn._paint = function(){
+            var on = pkFilter===o[0];
+            btn.style.cssText = 'flex:1;padding:4px 8px;font-size:11px;border-radius:4px;cursor:pointer;'+
+                'border:1px solid '+(on?'#1f2937':'#e5e7eb')+';background:'+(on?'#1f2937':'#fff')+';color:'+(on?'#fff':'#6b7280')+';transition:all .12s;';
+        };
+        btn._paint();
+        btn.addEventListener('click', function(){ pkFilter=o[0]; pkBar.querySelectorAll('button').forEach(function(bb){bb._paint();}); renderSug(inp.value); });
+        pkBar.appendChild(btn);
+    });
+    b.appendChild(pkBar);
+
+    var sugWrap = document.createElement('div'); sugWrap.style.cssText = 'margin:0 -10px -10px;border-bottom-left-radius:6px;border-bottom-right-radius:6px;overflow:hidden;';
+    var sug = document.createElement('div'); sug.className = 'fp-list'; sug.style.cssText = 'max-height:360px;overflow-y:auto;padding:0;margin:0;gap:0;';
+    sugWrap.appendChild(sug);
+    b.appendChild(sugWrap);
+
+    function palBg(letter){
+        var p=['#e0e7ff:#6366f1','#fce7f3:#db2777','#dcfce7:#16a34a','#fef9c3:#ca8a04','#ffedd5:#ea580c','#f3e8ff:#9333ea'];
+        var c=p[letter.charCodeAt(0)%p.length].split(':'); return c;
+    }
+    function escRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
+    function hlText(text,q){
+        if(!q) return esc(text);
+        return esc(text).replace(new RegExp('('+escRe(esc(q))+')','gi'),'<mark style="background:none;color:#1f2937;font-weight:600">$1</mark>');
+    }
+
+    function renderChips(){
+        chipsEl.innerHTML='';
+        chipsEl.style.display = F.selectedItems.length ? 'flex' : 'none';
+        F.selectedItems.forEach(function(name){
+            var item = allOrderItems.find(function(i){ return i.name===name; }) || {name:name, photo:null};
+            var chip = document.createElement('span');
+            chip.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 6px 4px 4px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;font-size:11px;color:#2563eb;width:100%;box-sizing:border-box;min-width:0;';
+            var letter = (item.name||'?')[0].toUpperCase();
+            if(item.photo){
+                var img = document.createElement('img'); img.src = item.photo;
+                img.style.cssText = 'width:16px;height:16px;border-radius:50%;object-fit:cover;flex-shrink:0;';
+                chip.appendChild(img);
+            } else {
+                var av = document.createElement('span');
+                av.style.cssText = 'width:16px;height:16px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;background:#bfdbfe;color:#1d4ed8;';
+                av.textContent = letter; chip.appendChild(av);
+            }
+            var nm = document.createElement('span');
+            nm.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+            nm.textContent = item.name; chip.appendChild(nm);
+            var x = document.createElement('button'); x.type='button';
+            x.style.cssText = 'border:none;background:none;cursor:pointer;color:#93c5fd;font-size:16px;line-height:1;padding:0;flex-shrink:0;margin-left:auto;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;';
+            x.textContent = '×';
+            x.addEventListener('mouseenter', function(){ x.style.color='#1d4ed8'; });
+            x.addEventListener('mouseleave', function(){ x.style.color='#93c5fd'; });
+            x.addEventListener('mousedown', function(e){
+                if (e.button !== 0) return;
+                e.preventDefault();
+                F.selectedItems = F.selectedItems.filter(function(n){ return n!==name; });
+                updateTable(); renderChips(); renderSug(inp.value);
+            });
+            chip.appendChild(x); chipsEl.appendChild(chip);
+        });
+    }
+
+    function applyFit(matches){
+        /* Width fits EXACTLY the longest name in the current list — dynamic on every
+           search (both narrows and widens).
+         */
+        var names = matches.map(function(m){ return (m.is_own ? 'own ' : '') + (m.name || ''); });
+        var need = _priceePopWidth(names);
+        pop.style.width = need + 'px';
+        if(popOwner){
+            var z = (window.clZoom ? window.clZoom() : 1);
+            var r = popOwner.getBoundingClientRect();
+            var wV = need * z, left = r.left;
+            if(left + wV > window.innerWidth - 8) left = window.innerWidth - wV - 8;
+            pop.style.left = (Math.max(8, left) / z) + 'px';
+        }
+    }
+    function renderSug(q){
+        sug.innerHTML='';
+        var filteredQty = calcFilteredQty();
+        var lq = q.toLowerCase().trim();
+        // Without a search — only products from the current page's rows; with a search — across the
+        // whole
+        // orders catalog (allOrderItems).
+        var matches = lq
+            ? allOrderItems.filter(function(i){ return i.name.toLowerCase().indexOf(lq)!==-1; })
+            : allOrderItems.filter(function(i){ return (filteredQty[(i.name||'').toLowerCase()]||0) > 0; });
+        if(pkFilter!=='all'){
+            matches = matches.filter(function(i){ return pkFilter==='own' ? !!i.is_own : !i.is_own; });
+        }
+        matches.sort(function(a,b){
+            var qa = filteredQty[(a.name||'').toLowerCase()]||0;
+            var qb = filteredQty[(b.name||'').toLowerCase()]||0;
+            if((qa>0) !== (qb>0)) return qa>0 ? -1 : 1;
+            return a.name.localeCompare(b.name,'uk');
+        });
+        applyFit(matches);   // popup width for the longest name in the current list (grow-only)
+        if(!matches.length){
+            var em = document.createElement('div'); em.style.cssText='padding:10px 14px;font-size:13px;color:#9ca3af;';
+            em.textContent = lq ? 'Nothing found' : 'Start typing a name to search across all products';
+            sug.appendChild(em); return;
+        }
+        matches.forEach(function(i){
+            var already = F.selectedItems.indexOf(i.name)!==-1;
+            var row = document.createElement('div'); row.className='fp-item';
+            row.style.cssText = 'display:flex;align-items:stretch;gap:10px;padding:8px 10px;cursor:pointer;opacity:'+(already?'0.4':'1')+';border-radius:0;';
+            var letter = (i.name||'?')[0].toUpperCase();
+            var colors = palBg(letter);
+            if(i.photo){
+                var img = document.createElement('img');
+                img.src=i.photo; img.style.cssText='width:40px;height:40px;object-fit:cover;border-radius:3px;border:1px solid #e5e7eb;flex-shrink:0;';
+                row.appendChild(img);
+            } else {
+                var av = document.createElement('div');
+                av.style.cssText='width:40px;height:40px;border-radius:3px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;background:'+colors[0]+';color:'+colors[1]+';';
+                av.textContent=letter; row.appendChild(av);
+            }
+            var txt = document.createElement('div');
+            txt.style.cssText='min-width:0;flex:1;display:flex;flex-direction:column;justify-content:space-between;gap:4px;min-height:40px;';
+            var nm = document.createElement('div');
+            nm.style.cssText='font-size:12px;line-height:1.35;padding-bottom:2px;color:#1f2937;display:flex;align-items:baseline;';
+            var ownBadge = i.is_own?'<span style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;font-weight:600;margin-right:6px;flex-shrink:0;">own</span>':'';
+            nm.innerHTML = ownBadge+'<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+hlText(i.name, lq)+'</span>';
+            var bot = document.createElement('div');
+            bot.style.cssText='display:flex;align-items:flex-end;justify-content:space-between;gap:6px;';
+            var sk = document.createElement('div');
+            sk.style.cssText='font-size:11px;color:#9ca3af;';
+            sk.textContent = i.sku || '';
+            if(i.sku) bot.appendChild(sk); else bot.appendChild(document.createElement('span'));
+            var iq = filteredQty[(i.name||'').toLowerCase()]||0;
+            var qEl = document.createElement('div');
+            qEl.style.cssText='font-size:11px;color:#9ca3af;flex-shrink:0;';
+            qEl.textContent = iq || '';
+            bot.appendChild(qEl);
+            txt.appendChild(nm); txt.appendChild(bot);
+            row.appendChild(txt);
+            row.addEventListener('mousedown', function(e){
+                if (e.button !== 0) return;
+                e.preventDefault();
+                if(already){
+                    F.selectedItems = F.selectedItems.filter(function(n){ return n!==i.name; });
+                } else {
+                    F.selectedItems.push(i.name);
+                    inp.value='';
+                }
+                updateTable(); renderChips(); renderSug(inp.value);
+            });
+            row.addEventListener('mouseenter', function(){ row.style.background='#f3f4f6'; });
+            row.addEventListener('mouseleave', function(){ row.style.background=''; });
+            sug.appendChild(row);
+        });
+    }
+
+    inp.addEventListener('input', function(){ renderSug(inp.value); });
+    renderChips(); renderSug('');
+
+    setTimeout(function(){ inp.focus(); }, 40);
+}
+
+var CAL_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+var CAL_DOWS = ['Mo','Tu','We','Th','Fr','Sa','Su'];
+function calParseYMD(s){ if(!s) return null; var p=s.split('-'); return new Date(+p[0],+p[1]-1,+p[2]); }
+function calToYMD(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function calSameDay(a,b){ return a&&b&&a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate(); }
+
+function buildDatePop(){
+    addSortRows('created_at', 'Older ⟶ newer', 'Newer ⟶ older');
+    var selStart = calParseYMD(F.dateMin), selEnd = calParseYMD(F.dateMax);
+    var pickStep = (selStart && !selEnd) ? 2 : 1;
+    var hovDate = null;
+    var now = new Date();
+    var calYear = (selStart||now).getFullYear(), calMonth = (selStart||now).getMonth();
+
+    var b = popBody(); b.style.padding = '0';
+    var nav = document.createElement('div'); nav.className = 'cal-nav';
+    var prevBtn = document.createElement('button'); prevBtn.type='button'; prevBtn.className='cal-nav-btn'; prevBtn.innerHTML='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,1 1,5 5,9"/></svg>';
+    var title = document.createElement('span'); title.className='cal-title';
+    var nextBtn = document.createElement('button'); nextBtn.type='button'; nextBtn.className='cal-nav-btn'; nextBtn.innerHTML='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 1,9"/></svg>';
+    nav.appendChild(prevBtn); nav.appendChild(title); nav.appendChild(nextBtn);
+    b.appendChild(nav);
+    var grid = document.createElement('div'); grid.className='cal-grid'; b.appendChild(grid);
+    var calSep = document.createElement('div'); calSep.style.cssText='height:1px;background:#e5e7eb;margin:0;'; b.appendChild(calSep);
+    var resetBtn = document.createElement('button'); resetBtn.type='button'; resetBtn.className='cal-reset'; resetBtn.textContent='Reset';
+    resetBtn.addEventListener('click', function(){ selStart=null; selEnd=null; pickStep=1; F.dateMin=null; F.dateMax=null; updateTable(); renderFull(); });
+    b.appendChild(resetBtn);
+
+    function effRange(){
+        if(pickStep===2 && hovDate && selStart)
+            return hovDate<selStart ? {s:hovDate,e:selStart} : {s:selStart,e:hovDate};
+        return {s:selStart, e:selEnd};
+    }
+    function applyClasses(){
+        var r=effRange(), today=new Date();
+        grid.querySelectorAll('.cal-day[data-d]').forEach(function(cell){
+            var d=calParseYMD(cell.dataset.d);
+            var isS=calSameDay(d,r.s), isE=calSameDay(d,r.e);
+            var inR=r.s&&r.e&&d>r.s&&d<r.e;
+            cell.className='cal-day';
+            if(isS) cell.classList.add('sel-start');
+            if(isE) cell.classList.add('sel-end');
+            if(r.s&&r.e&&!calSameDay(r.s,r.e)&&(isS||isE)) cell.classList.add('has-range');
+            if(inR) cell.classList.add('in-range');
+            if(calSameDay(d,today)) cell.classList.add('today');
+        });
+    }
+    function renderFull(){
+        title.textContent = CAL_MONTHS[calMonth]+' '+calYear;
+        grid.innerHTML = '';
+        CAL_DOWS.forEach(function(d){ var c=document.createElement('div'); c.className='cal-dow'; c.textContent=d; grid.appendChild(c); });
+        var firstDay = (new Date(calYear,calMonth,1).getDay()+6)%7;
+        var daysInMonth = new Date(calYear,calMonth+1,0).getDate();
+        for(var i=0;i<firstDay;i++){ var e=document.createElement('div'); e.className='cal-day empty'; grid.appendChild(e); }
+        for(var day=1;day<=daysInMonth;day++){
+            var cell=document.createElement('div');
+            cell.className='cal-day'; cell.dataset.d=calToYMD(new Date(calYear,calMonth,day)); cell.textContent=day;
+            cell.addEventListener('click',function(){
+                var date=calParseYMD(this.dataset.d);
+                if(pickStep===1){ selStart=date; selEnd=null; pickStep=2; }
+                else {
+                    if(date<selStart){selEnd=selStart;selStart=date;}else{selEnd=date;}
+                    pickStep=1; F.dateMin=calToYMD(selStart); F.dateMax=calToYMD(selEnd); updateTable();
+                }
+                applyClasses();
+            });
+            cell.addEventListener('mouseenter',function(){ hovDate=calParseYMD(this.dataset.d); applyClasses(); });
+            cell.addEventListener('mouseleave',function(){ hovDate=null; applyClasses(); });
+            grid.appendChild(cell);
+        }
+        applyClasses();
+    }
+    prevBtn.addEventListener('click',function(){ calMonth--; if(calMonth<0){calMonth=11;calYear--;} renderFull(); });
+    nextBtn.addEventListener('click',function(){ calMonth++; if(calMonth>11){calMonth=0;calYear++;} renderFull(); });
+    renderFull();
+}
+
+function buildCommClientPop(){
+    var b = popBody();
+    radioList(b, [['has','Has comment'],['none','None']],
+        function(){ return F.commClient; }, function(v){ F.commClient=v; });
+}
+function buildCommManagerPop(){
+    var b = popBody();
+    radioList(b, [['has','Has comment'],['none','None']],
+        function(){ return F.commManager; }, function(v){ F.commManager=v; });
+}
+function buildCommSourcePop(){
+    var b = popBody();
+    radioList(b, [['has','Has source'],['none','None']],
+        function(){ return F.commSource; }, function(v){ F.commSource=v; });
+}
+
+var colBuilders = {
+    num: buildNumPop, client: buildClientPop, status: buildStatusPop,
+    payment: buildPaymentPop, delivery: buildDeliveryPop, date: buildDatePop,
+    price: buildPricePop, comm_client: buildCommClientPop, comm_manager: buildCommManagerPop,
+    source: buildCommSourcePop
+};
+
+/* ── Thead (built once) ── */
+var orTable = document.getElementById('or-table');
+var thead = document.createElement('thead');
+function sc(lbl, col){ return '<th data-col="'+col+'">'+lbl+'<span class="th-badge"></span></th>'; }
+thead.innerHTML = '<tr>'+
+    '<th class="col-cb"><input type="checkbox" id="or-cb-all"></th>'+
+    sc('#','num')+sc('Status','status')+sc('Payment','payment')+
+    sc('Date','date')+sc('Total','price')+sc('Customer','client')+
+    sc('Delivery','delivery')+
+    sc('Customer comment','comm_client')+sc('Manager comment','comm_manager')+
+    sc('Source','source')+
+    '</tr>';
+orTable.appendChild(thead);
+
+/* thead.addEventListener('mouseleave', ...) -- disabled: keep popup open on mouseleave */
+thead.addEventListener('click', function(e){
+    var th = e.target.closest('th[data-col]'); if(!th) return;
+    e.stopPropagation();
+    var fn = colBuilders[th.dataset.col]; if(fn) openPop(th, fn);
+});
+document.getElementById('or-cb-all').addEventListener('change', function(){
+    var checked = this.checked;
+    /* Toggle only the rows of the CURRENT PAGE. */
+    (currentPageData||[]).forEach(function(o){
+        if(checked){ selectedIds.add(o.id); selectedData[o.id]=o; }
+        else { selectedIds.delete(o.id); delete selectedData[o.id]; }
+    });
+    renderRows(currentFiltered);
+    updateActionBar();
+});
+
+var ALL_COLS = ['num','client','status','payment','delivery','date','price','comm_client','comm_manager','source'];
+function hasAnyActiveFilter(){
+    if(sortField) return true;
+    return ALL_COLS.some(isColFiltered);
+}
+function resetAllFilters(){
+    F.numMode='exact'; F.numExact=''; F.numFrom=''; F.numTo='';
+    F.clientQ=''; F.statuses=[]; F.payment='all'; F.delivery='all';
+    F.dateMin=null; F.dateMax=null;
+    F.priceMin=null; F.priceMax=null;
+    F.selectedItems=[]; F.itemsMode='and'; F.drops=[];
+    F.commClient='all'; F.commManager='all'; F.commSource='all'; F.imported='all';
+    sortField=null; sortDir='asc';
+    try { localStorage.removeItem(STATE_KEY); } catch(e) {}
+    closePop();
+    updateTable();
+}
+function _renderResetBtn(){
+    var bar = document.querySelector('.submit-row.cl-bar'); if(!bar) return;
+    var btn = bar.querySelector('#ds-reset-filters');
+    var active = hasAnyActiveFilter();
+    if(active && !btn){
+        btn = document.createElement('button');
+        btn.type='button'; btn.id='ds-reset-filters';
+        btn.className='cl-top-btn'; btn.textContent='Reset filters';
+        btn.addEventListener('click', resetAllFilters);
+        var del = bar.querySelector('.cl-top-btn-danger');
+        if(del) bar.insertBefore(btn, del); else bar.appendChild(btn);
+    } else if(!active && btn){
+        btn.remove();
+    }
+}
+
+/* Updates the column badges (filter/sort) — purely visual. */
+function _syncColBadges(){
+    orTable.querySelectorAll('th[data-col]').forEach(function(th){
+        var col = th.dataset.col;
+        var filt = isColFiltered(col), sorted = (sortField === col);
+        th.classList.toggle('col-on', sorted || filt);
+        var badge = th.querySelector('.th-badge');
+        if(badge) badge.innerHTML = (filt || sorted) ? '<svg width="9" height="10" viewBox="0 0 10 11" fill="#374151"><path d="M0 0h10L6.5 5v6h-3V5z"/></svg>' : '';
+    });
+    _renderResetBtn();
+}
+
+/* Filter/sort change → always from page 1, data is fetched from the server.
+   Debounce — so typing in search fields doesn't send a request on every letter.
+ */
+function updateTable(){
+    currentPage = 1;
+    _syncColBadges();
+    if(_fetchTimer) clearTimeout(_fetchTimer);
+    _fetchTimer = setTimeout(fetchOrders, 180);
+}
+
+var STATUS_OPTS = [['new','New'],['processing','Processing'],['shipped','Shipping'],['delivered','Delivered'],['cancelled','Cancelled']];
+var PAY_OPTS    = [['pending','Not paid'],['paid','Paid']];
+
+/* Programmatically measure the longest label in each set — so buttons and columns
+   fit the text exactly without extra space.
+ */
+(function _setPickerWidths(){
+  var probe = document.createElement('span');
+  var bf = getComputedStyle(document.body);
+  probe.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;white-space:nowrap;font:500 12px '+bf.fontFamily+';';
+  document.body.appendChild(probe);
+  function _maxW(opts){
+    var m = 0;
+    opts.forEach(function(o){ probe.textContent = o[1]; if(probe.offsetWidth > m) m = probe.offsetWidth; });
+    return Math.ceil(m) + 22;  /* padding 10*2 + border 1*2 */
+  }
+  document.documentElement.style.setProperty('--or-status-w', _maxW(STATUS_OPTS) + 'px');
+  document.documentElement.style.setProperty('--or-pay-w',    _maxW(PAY_OPTS)    + 'px');
+  document.body.removeChild(probe);
+})();
+var arrowSvg = '<svg width="9" height="5" viewBox="0 0 9 5" fill="none"><path d="M1 1l3.5 3L8 1" stroke="#9ca3af" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+var _orPickerPopup = null;
+var _orPickerBtn   = null;
+
+function closeOrPicker(){
+    if(_orPickerPopup){ _orPickerPopup.remove(); _orPickerPopup=null; }
+    if(_orPickerBtn){ _orPickerBtn.classList.remove('open'); _orPickerBtn=null; }
+}
+document.addEventListener('click', function(e){
+    if(_orPickerPopup && !_orPickerPopup.contains(e.target) && e.target!==_orPickerBtn) closeOrPicker();
+});
+
+function makeOrPicker(opts, currentVal, orderId, field){
+    var label = (opts.find(function(o){ return o[0]===currentVal; }) || opts[0])[1];
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'or-picker-btn';
+    btn.dataset.id    = orderId;
+    btn.dataset.field = field;
+    btn.dataset.val   = currentVal;
+    btn.innerHTML = '<span>' + esc(label) + '</span>';
+    btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        if(_orPickerBtn===btn){ closeOrPicker(); return; }
+        closeOrPicker();
+        _orPickerBtn = btn;
+        btn.classList.add('open');
+        var popup = document.createElement('div');
+        popup.className = 'or-picker-popup or-picker-popup-' + field;
+        _orPickerPopup = popup;
+        opts.forEach(function(op){
+            var item = document.createElement('div');
+            item.className = 'or-picker-item' + (op[0]===btn.dataset.val ? ' active' : '');
+            item.textContent = op[1];
+            item.addEventListener('mousedown', function(ev){
+                if(ev.button!==0) return;
+                ev.preventDefault();
+                var id    = parseInt(btn.dataset.id);
+                var fld   = btn.dataset.field;
+                var oldVal = btn.dataset.val;
+                btn.dataset.val = op[0];
+                btn.querySelector('span').textContent = op[1];
+                closeOrPicker();
+                var item2 = findOrder(id);
+                if(item2) item2[fld] = op[0];
+                /* Roll back the button + in-memory value to the old state. */
+                function revert(msg){
+                    btn.dataset.val = oldVal;
+                    btn.querySelector('span').textContent = (opts.find(function(o){ return o[0]===oldVal; })||opts[0])[1];
+                    if(item2) item2[fld] = oldVal;
+                    if(msg) alert(msg);
+                }
+                fetch('/admin/orders/update-field/', {
+                    method:'POST', credentials:'same-origin',
+                    headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+                    body:JSON.stringify({id:id,field:fld,value:op[0]})
+                }).then(function(r){
+                    if(r.ok){
+                        /* If a filter or sorting by this field is active — re-fetch the
+                           page from the server so the row immediately disappears/moves to fit the
+                           filter.
+                         */
+                        var affects = (fld==='status' && (F.statuses.length>0 || sortField==='status'))
+                                   || (fld==='payment_status' && (F.payment!=='all' || sortField==='payment_status'));
+                        if(affects) fetchOrders();
+                        return;
+                    }
+                    /* The server rejected it (e.g. an invalid status transition) — roll back. */
+                    return r.json().then(function(d){ revert(d && d.error ? d.error : 'Could not save'); },
+                                         function(){ revert('Could not save'); });
+                }).catch(function(){ revert(); });
+            });
+            popup.appendChild(item);
+        });
+        popup.addEventListener('mouseleave', function(e){
+            var to = e.relatedTarget;
+            if(to === btn || (btn && btn.contains(to))) return;
+            closeOrPicker();
+        });
+        var r = btn.getBoundingClientRect();
+        var z = (window.clZoom ? window.clZoom() : 1);
+        popup.style.left = (r.left / z) + 'px';
+        document.body.appendChild(popup);
+        popup.style.top  = (window.clFlipTop ? window.clFlipTop(r, popup.offsetHeight, 4) : (r.bottom + 4)) + 'px';
+        var pwV = popup.offsetWidth * z;  // visual popup width
+        if(r.left + pwV > window.innerWidth - 8) popup.style.left = ((window.innerWidth - pwV - 8) / z) + 'px';
+    });
+    return btn;
+}
+
+/* Page-scoped counter: X = checked row checkboxes on the current page,
+   Y = number of row checkboxes rendered on the current page. */
+function _orSyncCounter(){
+    var rowCbs = orTable.querySelectorAll('tbody:not(#or-sel-hidden) tr:not(.or-pinned) .or-row-cb');
+    var checked = 0;
+    rowCbs.forEach(function(cb){ if(cb.checked) checked++; });
+    window._orSelected = checked;
+    window._orTotal = rowCbs.length;
+    if(window._updateCounter) window._updateCounter();
+}
+
+function updateActionBar(){
+    _orSyncCounter();
+    /* "Clear selection" — removes the selection from OTHER pages (outside the current one), as on products. */
+    (function(){
+        var counter = document.querySelector('.cl-counter');
+        if(!counter) return;
+        var clearBtn = document.getElementById('cl-clear-sel');
+        if(!clearBtn){
+            clearBtn = document.createElement('a');
+            clearBtn.href='#'; clearBtn.id='cl-clear-sel'; clearBtn.className='cl-top-btn';
+            clearBtn.textContent='Clear selection';
+            clearBtn.style.marginLeft='10px';
+            clearBtn.style.setProperty('display','none','important');
+            clearBtn.addEventListener('click', function(e){
+                e.preventDefault();
+                var ids = new Set((currentPageData||[]).map(function(o){ return o.id; }));
+                Array.from(selectedIds).forEach(function(id){ if(!ids.has(id)){ selectedIds.delete(id); delete selectedData[id]; } });
+                renderRows(currentFiltered); updateActionBar();
+            });
+            counter.insertAdjacentElement('afterend', clearBtn);
+        }
+        var ids = new Set((currentPageData||[]).map(function(o){ return o.id; }));
+        var off = 0; selectedIds.forEach(function(id){ if(!ids.has(id)) off++; });
+        if(off>0) clearBtn.style.removeProperty('display'); else clearBtn.style.setProperty('display','none','important');
+    })();
+    var btn = document.getElementById('or-gen-top-btn');
+    if(!btn) return;
+    if(selectedIds.size === 0){
+        btn.disabled = true; btn.style.opacity = '0.45'; btn.style.cursor = 'default';
+    } else {
+        btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer';
+    }
+    btn.textContent = 'Export';
+}
+
+function updateSelAll(){
+    var cbAll = document.getElementById('or-cb-all');
+    if(!cbAll) return;
+    var pageIds = currentPageData.map(function(o){ return o.id; });
+    var allChecked = pageIds.length > 0 && pageIds.every(function(id){ return selectedIds.has(id); });
+    var someChecked = pageIds.some(function(id){ return selectedIds.has(id); });
+    cbAll.checked = allChecked;
+    cbAll.indeterminate = false;
+}
+
+var oPop = document.getElementById('or-order-pop');
+var oPopOwner = null;
+function closeOrderPop(){
+    oPop.classList.remove('open');
+    oPopOwner = null;
+}
+/* Positions the popup under the cell; if it doesn't fit below — expands upward
+   (popup bottom at the top of the row, rounding/shadow — class .flip-up). The popup must
+   already be .open (to measure its size).
+ */
+function positionDropPop(pop, rect){
+    /* rect — visual px (getBoundingClientRect). With body{zoom}, fixed top/left
+       are interpreted in zoom-px, so we divide by zoom. offsetH/W are CSS px,
+       their visual size = ×zoom.
+     */
+    var z = (window.clZoom ? window.clZoom() : 1);
+    var ph = pop.offsetHeight * z, pw = pop.offsetWidth * z;  // visual
+    if(rect.bottom + ph <= window.innerHeight - 8){
+        pop.classList.remove('flip-up');
+        pop.style.top = (rect.bottom / z) + 'px';
+    } else {
+        pop.classList.add('flip-up');
+        pop.style.top = (Math.max(8, rect.top - ph) / z) + 'px';
+    }
+    var left = rect.left;
+    if(left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+    pop.style.left = (Math.max(8, left) / z) + 'px';
+}
+/* Layout of the expanded comment (the same span with class .ce-edit) — shared
+   by the editors (manager/source) and the read-only customer one:
+   • 1 line → stays in flow (zero shift, just editing/expanding);
+   • multi-line → .ce-abs (absolute), first line at the top of the cell and text going down;
+     if there's no room below — flip upward (block bottom = cell bottom).
+ */
+function layoutCommentOverlay(td, span){
+    if(!span) return;
+    var z = (window.clZoom ? window.clZoom() : 1);
+    /* Reset to the collapsed state BEFORE measuring the cell: otherwise ce-edit (in flow,
+       adds openCommentCE to reposition) has already stretched the cell and cr.bottom is wrong
+       (it broke the upward flip — it was computed from the stretched cell).
+     */
+    span.classList.remove('ce-abs','ce-edit','ovl-up','ovl-down'); span.style.top = ''; span.style.paddingTop = ''; span.style.paddingBottom = '';
+    var cr = td.getBoundingClientRect();                     // cell in the COLLAPSED state
+    /* Position of the 1st line in the COLLAPSED view — so the expanded one doesn't jump up
+       and the first line stays exactly in place (the text then grows downward).
+     */
+    var rng = document.createRange(); rng.selectNodeContents(span);
+    var collapsedTop = rng.getBoundingClientRect().top;
+    span.classList.add('ce-edit');                          // expand to measure the height (in flow)
+    var lh = parseFloat(getComputedStyle(span).lineHeight) || 18;
+    var fullH = span.getBoundingClientRect().height;         // stable text height (in-flow, before absolute)
+    if(fullH <= lh * z * 2.5) return;                        // ≤2 lines → in flow (fully visible)
+    /* Symmetric vertical padding: above the 1st line = below the last.
+       padV = top padding of the collapsed state (centering in the cell). The overlay starts
+       at the top of the cell, the text at collapsedTop → first line exactly in place.
+       The overlay height is computed analytically (fullH + paddings): measuring AFTER ce-abs is
+       unstable
+       due to reflow of the absolute width.
+     */
+    var padV = collapsedTop - cr.top; if(padV < 0) padV = 0;
+    var oh = fullH + 2 * padV;                               // visual overlay height
+    span.classList.add('ce-abs');
+    span.style.paddingTop = (padV / z) + 'px';
+    span.style.paddingBottom = (padV / z) + 'px';
+    /* The lower bound of the available area = top of the fixed pager (#or-pager), not the
+       bottom of the window: otherwise the overlay "fits" within the window but is hidden BEHIND the
+       pager.
+     */
+    var bottomLimit = window.innerHeight;
+    var pager = document.getElementById('or-pager');
+    if(pager && getComputedStyle(pager).position === 'fixed'){ var pr = pager.getBoundingClientRect(); if(pr.height > 0) bottomLimit = Math.min(bottomLimit, pr.top); }
+    var topV, up = false;
+    if(cr.top + oh <= bottomLimit - 8) topV = cr.top;                  // downward: overlay top = cell top
+    else { topV = Math.max(8, cr.bottom - oh); up = true; }            // no room below → upward (bottom = cell bottom)
+    span.classList.toggle('ovl-up', up);                    // divider line at the edge of the expansion
+    span.classList.toggle('ovl-down', !up);
+    /* Overlay offset = off. A negative off (downward) is forbidden for the block ITSELF: its
+       background would creep
+       onto the row's top line and the line would disappear. So the block stays at top:0 and the
+       needed
+       negative goes into padding-top — the text lands exactly where it was before, the line stays
+       intact.
+       For the upward flip a negative is fine (the block deliberately extends above the cell).
+     */
+    var padTop = padV / z;
+    function applyTop(off){
+        if(!up && off < 0){
+            var pt = padTop + off;
+            span.style.top = '0px';
+            span.style.paddingTop = (pt > 0 ? pt : 0) + 'px';
+        } else {
+            span.style.top = off + 'px';
+            span.style.paddingTop = padTop + 'px';
+        }
+    }
+    applyTop((topV - cr.top) / z);
+    if(!up){
+        /* Correct the sub-pixel jump: put the 1st line EXACTLY at collapsedTop
+           (measure the actual position after rendering and compensate for the error).
+         */
+        var aRng = document.createRange(); aRng.selectNodeContents(span);
+        var err = aRng.getBoundingClientRect().top - collapsedTop;
+        if(Math.abs(err) > 0.1) applyTop((topV - cr.top - err) / z);
+    }
+}
+/* Only one expanded comment/source window at a time. Closes all of them:
+   the read-only customer overlay + active inline editors (blur → save).
+ */
+function closeAllCommentOverlays(){
+    document.querySelectorAll('#or-table td.cc-open').forEach(function(c){
+        c.classList.remove('cc-open'); c.classList.remove('ov-up');
+        var s = c.querySelector('.or-cell-clamp'); if(s){ s.classList.remove('ce-edit','ce-abs','ovl-up','ovl-down'); s.style.top = ''; s.style.paddingTop = ''; s.style.paddingBottom = ''; }
+    });
+    document.querySelectorAll('#or-table .or-cell-clamp.ce-edit').forEach(function(s){ s.blur(); s.dispatchEvent(new FocusEvent('blur')); });
+}
+/* Customer value — clicking the text copies it (the single .copy-on-click mechanism from
+   base_site).
+   cls: cl-name | cl-sub; grow=true — stretches and truncates (for email).
+ */
+function makeClVal(val, cls, grow){
+    var v = document.createElement('span');
+    v.className = 'cl-val copy-on-click ' + cls + (grow ? ' cl-item-grow' : '');
+    v.dataset.copy = val; v.textContent = val; v.title = 'Copy: ' + val;
+    return v;
+}
+
+/* Width of the Delivery column to fit the text (address on 2 lines): on a wide screen (>1440)
+   delivery does NOT stretch to the whole remainder — it stays fit to the text, and the free space
+   goes to comments/source (via --dw + the desktop media query).
+ */
+function _fitDeliveryCol(){
+    /* Delivery width = fits the longest LINE (type/address) IN FULL — a «minimal
+       maximum». Measured on the actually rendered text (more reliable than the data).
+     */
+    var probe = document.createElement('span');
+    var bf = getComputedStyle(document.body);
+    probe.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;white-space:nowrap;font-family:'+bf.fontFamily+';';
+    document.body.appendChild(probe);
+    var maxW = 0;
+    orTable.querySelectorAll('tbody td.col-delivery .col-delivery-inner').forEach(function(inner){
+        var spans = inner.querySelectorAll('span');
+        spans.forEach(function(sp, i){
+            probe.style.fontSize = (i === 0 ? '12px' : '11px');   // type 12px, address 11px
+            probe.textContent = sp.textContent || '';
+            if(probe.offsetWidth > maxW) maxW = probe.offsetWidth;
+        });
+    });
+    var w = Math.max(150, Math.min(maxW + 26, 640));
+    orTable.style.setProperty('--dw', w + 'px');
+    document.body.removeChild(probe);
+}
+/* Make all three comments/source columns the same width = fit the longest
+   header (so the headers stay on one line).
+ */
+function _setCommentColsUniform(){
+    var probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;white-space:nowrap;';
+    document.body.appendChild(probe);
+    var maxW = 0;
+    ['comm_client','comm_manager','source'].forEach(function(col){
+        var th = orTable.querySelector('thead th[data-col="'+col+'"]');
+        if(!th) return;
+        var thcs = getComputedStyle(th);
+        probe.style.font = thcs.font;
+        probe.style.letterSpacing = thcs.letterSpacing;
+        probe.style.textTransform = thcs.textTransform;
+        var hw = 0;
+        th.childNodes.forEach(function(n){ if(n.nodeType===3 && n.textContent.trim()){ probe.textContent = n.textContent; hw = probe.offsetWidth; } });
+        var w = hw + parseFloat(thcs.paddingLeft) + parseFloat(thcs.paddingRight) + 2;
+        if(w > maxW) maxW = w;
+    });
+    if(maxW) orTable.style.setProperty('--cw-all', Math.ceil(maxW) + 'px');
+    document.body.removeChild(probe);
+}
+/* On a wide screen (>1440) split the free remainder EQUALLY among the 3 columns of
+   comments/source (so they are the same size). On a Mac — nothing (there is no remainder,
+   the base equal width fitting the header applies).
+ */
+function _fillCommentsDesktop(){
+    if(window.innerWidth <= 1440){ orTable.style.removeProperty('--cw-eq'); return; }
+    var tableW = orTable.clientWidth, nonComm = 0;
+    orTable.querySelectorAll('thead th').forEach(function(th){
+        var c = th.dataset.col;
+        if(c==='comm_client' || c==='comm_manager' || c==='source') return;
+        nonComm += th.getBoundingClientRect().width;
+    });
+    var headerMax = parseFloat(getComputedStyle(orTable).getPropertyValue('--cw-all')) || 140;
+    var per = Math.max(headerMax, Math.floor((tableW - nonComm) / 3) - 1);
+    orTable.style.setProperty('--cw-eq', per + 'px');
+}
+function renderRows(data){
+    /* data is already the current page (the server filtered/sorted/sliced it).
+       total/pages are taken from srvTotal/srvPages.
+     */
+    currentFiltered = data;
+    var total = srvTotal;
+    var pages = srvPages;
+    var page = data;
+    currentPageData = page;
+
+    var oldTbody = orTable.querySelector('tbody'); if(oldTbody) oldTbody.remove();
+    var tbody = document.createElement('tbody');
+    var deliveryLabels = {'nova_poshta':'Nova Poshta','pickup':'Pickup','ukr_poshta':'Ukrposhta'};
+
+    /* pinned: selected orders from other pages, rendered on top (from cache). */
+    var visibleIds = {};
+    page.forEach(function(o){ visibleIds[String(o.id)] = 1; });
+    var pinned = [];
+    selectedIds.forEach(function(id){
+        if(visibleIds[String(id)]) return;
+        var od = selectedData[id];
+        if(od) pinned.push(od);
+    });
+    pinned.forEach(function(o, i){
+        var tr = buildRow(o, i, true);
+        if(i===pinned.length-1) tr.classList.add('or-pinned-last');
+        tbody.appendChild(tr);
+    });
+    page.forEach(function(o, i){
+        tbody.appendChild(buildRow(o, i, false));
+    });
+
+    if (page.length === 0) {
+        var emptyTr = document.createElement('tr');
+        emptyTr.className = 'or-empty-row';
+        var emptyTd = document.createElement('td');
+        emptyTd.colSpan = 11;
+        emptyTd.style.cssText = 'height:56px;box-sizing:border-box;';
+        emptyTd.textContent = 'No results';
+        emptyTr.appendChild(emptyTd);
+        tbody.appendChild(emptyTr);
+    }
+
+    orTable.appendChild(tbody);
+    _setCommentColsUniform();   // equal width of the 3 columns fitting the longest header (1 line)
+    _fitDeliveryCol();   // delivery width fitting the longest text (for the desktop layout)
+    _fillCommentsDesktop();     // on desktop split the remainder equally among the 3 columns
+    _syncHiddenSel();
+    updateSelAll();
+    renderPager(total, pages);
+    _orSyncCounter();
+
+    /* ── Inline editor: manager comment ─────────────────────────────
+       Click on the cell → textarea. Enter (without Shift) or blur → save
+       via the existing update-field endpoint (manager_comment is in the allowlist).
+       Esc — cancel.
+     */
+    function renderManagerCommentCell(td, text){
+        td.classList.remove('is-editing');
+        if(text){
+            td.innerHTML = '<span class="or-cell-clamp"></span>'; td.firstChild.textContent = text;
+            td.style.color = '';
+            td.title = 'Click to edit';
+        } else {
+            td.innerHTML = '<span class="or-cell-clamp">—</span>';
+            td.style.color = '#9ca3af';
+            td.title = 'Click to add a comment';
+        }
+    }
+    /* Universal contenteditable editor: edit the text IN PLACE (the same
+       span) → zero shift. 1 line — in flow; multi-line — absolute on top
+       (downward from the cell, or upward if there's no room below).
+     */
+    function openCommentCE(td, o, field, renderFn){
+        closeAllCommentOverlays();
+        var orderId = parseInt(td.dataset.orderId, 10);
+        var current = (o[field] || '').trim();
+        var span = td.querySelector('.or-cell-clamp');
+        if(!span){ td.innerHTML = '<span class="or-cell-clamp"></span>'; span = td.firstChild; }
+        if((span.textContent || '') === '—') span.textContent = '';
+        td.classList.add('is-editing');
+        td.style.color = '';
+        span.classList.add('ce-edit');
+        span.contentEditable = 'true';
+        function reposition(){ layoutCommentOverlay(td, span); }
+        reposition();                         /* position first (flip), then focus/cursor */
+        span.focus({preventScroll:true});     /* preventScroll + position already absolute → the cursor doesn't drag the page */
+        try { var rg = document.createRange(); rg.selectNodeContents(span); rg.collapse(false); var sl = getSelection(); sl.removeAllRanges(); sl.addRange(rg); } catch(_){}
+        span.addEventListener('input', reposition);
+        var done = false;
+        function finish(text){ span.contentEditable = 'false'; span.classList.remove('ce-edit', 'ce-abs'); span.style.top = ''; renderFn(td, text); }
+        function save(){
+            if(done) return; done = true;
+            var next = (span.textContent || '').trim();
+            if(next === current){ finish(current); return; }
+            td.classList.add('cm-saving');
+            fetch('/admin/orders/update-field/', {
+                method:'POST', credentials:'same-origin',
+                headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+                body:JSON.stringify({id: orderId, field: field, value: next})
+            }).then(function(r){
+                td.classList.remove('cm-saving');
+                if(!r.ok){ finish(current); return; }
+                o[field] = next; finish(next);
+            }).catch(function(){ td.classList.remove('cm-saving'); finish(current); });
+        }
+        function cancel(){ if(done) return; done = true; finish(current); }
+        span.addEventListener('blur', save);
+        span.addEventListener('keydown', function(e){
+            if(e.key === 'Escape'){ e.preventDefault(); cancel(); }
+            else if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); span.blur(); }
+        });
+        span.addEventListener('paste', function(e){ e.preventDefault(); var t = (e.clipboardData || window.clipboardData).getData('text'); document.execCommand('insertText', false, t); });
+        span.addEventListener('click', function(e){ e.stopPropagation(); });
+        span.addEventListener('mousedown', function(e){ e.stopPropagation(); });
+    }
+    function openManagerCommentEditor(td, o){ openCommentCE(td, o, 'manager_comment', renderManagerCommentCell); }
+
+    /* ── Inline editor: order source ─────────────────────────────
+       Mirror of the manager comment, saves via field:'source'.
+     */
+    function renderSourceCell(td, text){
+        td.classList.remove('is-editing');
+        if(text){
+            td.innerHTML = '<span class="or-cell-clamp"></span>'; td.firstChild.textContent = text;
+            td.style.color = '';
+            td.title = 'Click to edit';
+        } else {
+            td.innerHTML = '<span class="or-cell-clamp">—</span>';
+            td.style.color = '#9ca3af';
+            td.title = 'Click to add a source';
+        }
+    }
+    function openSourceEditor(td, o){ openCommentCE(td, o, 'source', renderSourceCell); }
+
+    function buildRow(o, i, pinned){
+        var tr = document.createElement('tr');
+        tr.className = ((i%2===0) ? 'row1' : 'row2') + (pinned ? ' or-pinned' : '')
+            + ((o.drop_status === 'drop' || o.drop_status === 'mixed') ? ' or-hasdrop' : '')
+            + ((o.course_status === 'course' || o.course_status === 'mixed') ? ' or-hascourse' : '');
+        tr.style.cursor = 'pointer';
+        var href = '/admin/orders/order/'+o.id+'/change/';
+
+        var cbTd = document.createElement('td'); cbTd.className = 'col-cb';
+        cbTd.innerHTML = '<input type="checkbox" class="action-select or-row-cb" name="_selected_action" value="'+o.id+'" data-id="'+o.id+'"'+(selectedIds.has(o.id)?' checked':'')+' onclick="event.stopPropagation()">';
+
+        var numTd = document.createElement('td'); numTd.className = 'col-num';
+        numTd.innerHTML = '<span style="display:flex;align-items:center;min-width:0;">'
+            + (o.is_imported ? '<span title="Old order (imported from the old site)" style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;font-weight:600;margin-right:6px;flex-shrink:0;">OLD</span>' : '')
+            + '<span class="col-num-val copy-on-click" data-copy="' + esc(String(o.order_number)) + '" title="Copy number">' + esc(String(o.order_number)) + '</span>'
+            + '</span>';
+
+        var stTd = document.createElement('td'); stTd.appendChild(makeOrPicker(STATUS_OPTS, o.status, o.id, 'status'));
+        var payTd = document.createElement('td'); payTd.appendChild(makeOrPicker(PAY_OPTS, o.payment_status, o.id, 'payment_status'));
+        var dateTd = document.createElement('td'); dateTd.className = 'col-date'; dateTd.textContent = o.created_at;
+
+        var itemCount = (o.items||[]).length;
+        var itemsJson = JSON.stringify(o.items||[]);
+        var priceTd = document.createElement('td');
+        priceTd.className = 'or-order-cell' + (itemCount ? ' has-items' : '');
+        priceTd.style.textAlign = 'right';
+        /* cursor only on .or-order-line (the amount text), not on the whole cell */
+        priceTd.dataset.items = itemsJson;
+        if(o.total_price) {
+            priceTd.innerHTML = '<span class="or-order-line"><span class="or-order-total" style="font-weight:500">'+esc(o.total_price)+'</span>'
+                +(itemCount?' <span class="or-order-cnt">('+itemCount+')</span>':'')+'</span>';
+        } else { priceTd.innerHTML = '&mdash;'; }
+
+        var clientTd = document.createElement('td'); clientTd.className = 'col-client';
+        // Clicking the value copies it. Line 1 — name; line 2 — phone + email together
+        // (email stretches and truncates, the full one is in the tooltip). At most two lines.
+        if(o.customer_name){
+            var r1 = document.createElement('div'); r1.className = 'cl-row';
+            // In the list we show only last name + first name (first 2 words), without the
+            // patronymic.
+            // The full name stays in the tooltip and for copying.
+            var nmShort = o.customer_name.split(/\s+/).slice(0,2).join(' ');
+            var nmEl = makeClVal(nmShort, 'cl-name');
+            nmEl.title = o.customer_name; nmEl.dataset.copy = o.customer_name;
+            r1.appendChild(nmEl);
+            clientTd.appendChild(r1);
+        }
+        if(o.customer_phone){
+            var r2 = document.createElement('div'); r2.className = 'cl-row cl-contacts';
+            r2.appendChild(makeClVal(o.customer_phone, 'cl-sub'));
+            clientTd.appendChild(r2);
+        }
+        /* Pickup may have no customer data — the cell is not left empty. */
+        if(!clientTd.firstChild) clientTd.textContent = '—';
+
+        var delivTd = document.createElement('td'); delivTd.className = 'col-delivery';
+        if(o.delivery_summary && o.delivery_summary.length) {
+            // New orders: summary by parcels — "Nova Poshta (1-3)" / "Ukrposhta
+            // (1) · Nova Poshta (2,3)".
+            delivTd.innerHTML = '<span style="font-size:13px">' + o.delivery_summary.map(esc).join('<br>') + '</span>';
+        } else if(o.delivery_type) {
+            var dl = {'nova_poshta':'Nova Poshta','pickup':'Pickup','ukr_poshta':'Ukrposhta'};
+            if(o.drop_delivery_address){
+                // Two parcels — the cell shows only the TYPES (no addresses). Addresses are in the
+                // popup on click.
+                // If both Nova Poshta parcels go to the SAME branch — just write "Nova
+                // Poshta".
+                var sameWh = (o.delivery_type==='nova_poshta' && o.delivery_address === o.drop_delivery_address);
+                var label = sameWh
+                    ? 'Nova Poshta'
+                    : (o.delivery_type==='nova_poshta'
+                        ? 'Nova Poshta (1) + Nova Poshta (2)'
+                        : (dl[o.delivery_type]||o.delivery_type) + ' + Nova Poshta');
+                delivTd.innerHTML = '<span style="font-size:13px">'+esc(label)+'</span>';
+                delivTd.style.cursor = 'pointer';
+                delivTd.addEventListener('click', function(e){
+                    if(e.button!==0) return; e.stopPropagation();
+                    if(oPopOwner===delivTd && oPop.classList.contains('open')){ closeOrderPop(); return; }
+                    closeOrderPop();
+                    function pkg(title, addr){
+                        return '<div class="oop-item deliv-pkg"><div class="oop-info">'
+                            +'<span class="oop-name">'+esc(title)+'</span>'
+                            +'<div class="oop-meta"><span class="oop-sku" style="font-size:11px;">'+esc(addr||'—')+'</span></div></div></div>';
+                    }
+                    oPop.innerHTML = pkg('Own products — '+(dl[o.delivery_type]||o.delivery_type), o.delivery_address)
+                                   + pkg('Made to order — Nova Poshta', o.drop_delivery_address);
+                    oPopOwner = delivTd;
+                    oPop.classList.add('open');
+                    positionDropPop(oPop, delivTd.getBoundingClientRect());
+                });
+                delivTd.addEventListener('mouseleave', function(e){
+                    if(oPopOwner!==delivTd) return;
+                    if(oPop.contains(e.relatedTarget)) return;
+                    closeOrderPop();
+                });
+            } else {
+                delivTd.innerHTML = '<span style="font-size:13px">'+esc(deliveryLabels[o.delivery_type]||o.delivery_type)+'</span>'
+                    +(o.delivery_address?'<br><span style="font-size:11px;color:#6b7280">'+esc(o.delivery_address)+'</span>':'');
+            }
+        } else {
+            delivTd.innerHTML = '<span style="color:#9ca3af">—</span>';
+        }
+        /* Address wrapper — so that on a narrow screen (laptop tier) it is clamped to 2-3 lines
+           via line-clamp and rows keep an even height. The click listener is on the td itself.
+         */
+        delivTd.innerHTML = '<span class="col-delivery-inner">' + delivTd.innerHTML + '</span>';
+
+        var commClientTd = document.createElement('td'); commClientTd.className = 'col-comm col-comm-client';
+        if(o.comment){ commClientTd.innerHTML='<span class="or-cell-clamp"></span>'; commClientTd.firstChild.textContent=o.comment; } else { commClientTd.innerHTML='<span class="or-cell-clamp">—</span>'; commClientTd.style.color='#9ca3af'; }
+
+        var commManagerTd = document.createElement('td'); commManagerTd.className = 'col-comm col-comm-manager';
+        commManagerTd.dataset.orderId = String(o.id);
+        renderManagerCommentCell(commManagerTd, o.manager_comment || '');
+
+        var sourceTd = document.createElement('td'); sourceTd.className = 'col-comm col-source';
+        sourceTd.dataset.orderId = String(o.id);
+        renderSourceCell(sourceTd, o.source || '');
+
+        [cbTd,numTd,stTd,payTd,dateTd,priceTd,clientTd,delivTd,commClientTd,commManagerTd,sourceTd].forEach(function(td){ tr.appendChild(td); });
+
+        /* Click on the manager comment cell — inline editor. */
+        commManagerTd.addEventListener('click', function(e){
+            if(commManagerTd.classList.contains('is-editing')) return;
+            e.stopPropagation();
+            openManagerCommentEditor(commManagerTd, o);
+        });
+
+        /* Click on the customer comment cell (read-only) — expand the full text
+           with the same mechanism as the editors: 1 line stays in place.
+         */
+        commClientTd.addEventListener('click', function(e){
+            if(!o.comment) return;
+            e.stopPropagation();
+            var open = commClientTd.classList.contains('cc-open');
+            var span = commClientTd.querySelector('.or-cell-clamp');
+            closeAllCommentOverlays();
+            if(!open){ commClientTd.classList.add('cc-open'); if(span) span.classList.add('ce-edit'); layoutCommentOverlay(commClientTd, span); }
+        });
+        if(!window.__ccCloseBound){ window.__ccCloseBound = true;
+            document.addEventListener('click', function(){ closeAllCommentOverlays(); });
+            document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeAllCommentOverlays(); });
+        }
+
+        /* Click on the source cell — inline editor. */
+        sourceTd.addEventListener('click', function(e){
+            if(sourceTd.classList.contains('is-editing')) return;
+            e.stopPropagation();
+            openSourceEditor(sourceTd, o);
+        });
+
+        /* Row click → navigate */
+        tr.addEventListener('click', function(e){
+            if(e.button!==0) return;
+            if(e.target.type==='checkbox'||e.target.tagName==='A'||e.target.tagName==='INPUT'||e.target.tagName==='BUTTON'||e.target.tagName==='TEXTAREA'||e.target.closest('select')||e.target.closest('.col-comm-manager')||e.target.closest('.col-source')) return;
+            window.location.href = href;
+        });
+
+        /* Checkbox */
+        cbTd.querySelector('.or-row-cb').addEventListener('change', function(){
+            var id = parseInt(this.dataset.id);
+            if(this.checked){ selectedIds.add(id); selectedData[id]=o; }
+            else { selectedIds.delete(id); delete selectedData[id]; }
+            renderRows(currentFiltered);
+            updateActionBar();
+        });
+
+
+        /* Items popup — opens on click on the "Order" cell (like a filter dropdown) */
+        priceTd.addEventListener('click', function(e){
+            if(e.button!==0) return;
+            // Click on the amount text (.or-order-line) → products popup; on the empty part of the
+            // cell we don't swallow it, so the row navigation to the order page works.
+            if(!e.target.closest('.or-order-line')) return;
+            e.stopPropagation();  // don't navigate the row and don't let the global handler close it right away
+            var items = JSON.parse(priceTd.dataset.items || '[]');
+            if(!items.length) return;
+            // toggle: a repeated click on the same cell — close
+            if(oPopOwner===priceTd && oPop.classList.contains('open')){ closeOrderPop(); return; }
+            closeOrderPop();  // remove the highlight from the previous cell
+            oPop.innerHTML = items.map(function(it){
+                var letter = (it.name||'?')[0].toUpperCase();
+                var photo = it.photo
+                    ? '<div class="oop-photo-wrap"><img class="oop-photo" src="'+esc(it.photo)+'" alt=""></div>'
+                    : '<div class="oop-photo-empty">'+letter+'</div>';
+                var url = it.is_bundle
+                    ? (it.bundle_id ? '/admin/catalog/bundle/'+it.bundle_id+'/change/' : '')
+                    : (it.variant_id ? '/admin/catalog/productvariant/'+it.variant_id+'/change/' : '');
+                var hasChildren = it.is_bundle && it.bundle_items && it.bundle_items.length;
+                var toggleBtn = hasChildren
+                    ? '<button type="button" class="oop-toggle" data-expanded="0" onclick="event.stopPropagation();event.preventDefault();(function(b){var exp=b.getAttribute(\'data-expanded\')===\'1\';var g=b.closest(\'.oop-item\').nextElementSibling;while(g&&g.classList.contains(\'oop-child\')){g.style.display=exp?\'none\':\'\';g=g.nextElementSibling;}b.setAttribute(\'data-expanded\',exp?\'0\':\'1\');})(this)"><span class="oop-toggle-arrow"></span></button>'
+                    : '';
+                var priceHtml = it.price ? '<span class="oop-price">'+esc(it.price)+' UAH</span>' : '';
+                var inner = photo
+                    +'<div class="oop-info">'
+                    +'<div class="oop-name-row"><span class="oop-name" title="'+esc(it.name)+'">'+esc(it.name)+'</span>'+priceHtml+'</div>'
+                    +'<div class="oop-meta"><span class="oop-sku">'+esc(it.sku||'')+'</span><span class="oop-qty">'+esc(String(it.qty))+' pcs</span></div></div>'
+                    +toggleBtn;
+                var siteLink = it.site_url
+                    ? '<a class="oop-site" href="'+esc(it.site_url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open on site"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>'
+                    : '';
+                var mainOpen = url
+                    ? '<a class="oop-main" href="'+url+'" onclick="event.stopPropagation()">'
+                    : '<span class="oop-main">';
+                var mainClose = url ? '</a>' : '</span>';
+                var main = '<div class="oop-item">'+siteLink+mainOpen+inner+mainClose+'</div>';
+                if(hasChildren){
+                    var children = it.bundle_items.map(function(bi){
+                        var bl = (bi.name||'?')[0].toUpperCase();
+                        var bp = bi.photo
+                            ? '<div class="oop-photo-wrap"><img class="oop-photo" src="'+esc(bi.photo)+'" alt=""></div>'
+                            : '<div class="oop-photo-empty" style="width:24px;height:24px;font-size:10px;">'+bl+'</div>';
+                        return '<div class="oop-item oop-child" style="display:none">'+bp
+                            +'<div class="oop-info"><span class="oop-name" title="'+esc(bi.name)+'">'+esc(bi.name)+'</span>'
+                            +'<div class="oop-meta"><span class="oop-sku">'+esc(bi.sku||'')+'</span><span class="oop-qty">'+esc(String(bi.qty))+' pcs</span></div></div></div>';
+                    }).join('');
+                    return main + children;
+                }
+                return main;
+            }).join('');
+            oPopOwner = priceTd;
+            oPop.classList.add('open');
+            positionDropPop(oPop, priceTd.getBoundingClientRect());
+        });
+        /* Close when the mouse leaves the cell NOT into the products window itself */
+        priceTd.addEventListener('mouseleave', function(e){
+            if(oPopOwner!==priceTd) return;
+            if(oPop.contains(e.relatedTarget)) return;
+            closeOrderPop();
+        });
+
+        return tr;
+    }
+}
+
+(function(){
+    // Close the products popup on a click outside it (the cell itself is handled by its own
+    // toggle).
+    document.addEventListener('click', function(e){
+        if(e.button!==0) return;
+        if(oPop.contains(e.target) || e.target.closest('.or-order-cell')) return;
+        if(oPopOwner && oPopOwner.contains && oPopOwner.contains(e.target)) return;  // owner cell (e.g. delivery)
+        closeOrderPop();
+    });
+    // Close when the mouse leaves the window NOT back into the owner cell.
+    oPop.addEventListener('mouseleave', function(e){
+        var rt = e.relatedTarget;
+        if(rt && rt.closest && rt.closest('.or-order-cell')===oPopOwner) return;
+        if(rt && oPopOwner && oPopOwner.contains && oPopOwner.contains(rt)) return;  // owner = delivery cell
+        closeOrderPop();
+    });
+})();
+
+/* Off-page persistence: keep hidden checked _selected_action inputs inside the
+   table for selected ids not currently rendered, so the shared delete code in
+   base_site.html (input[name=_selected_action]:checked) acts on the full
+   cross-page selection. */
+function _syncHiddenSel(){
+    var holder = orTable.querySelector('#or-sel-hidden');
+    if(holder) holder.remove();
+    holder = document.createElement('tbody');
+    holder.id = 'or-sel-hidden';
+    holder.style.display = 'none';
+    var visible = {};
+    orTable.querySelectorAll('tbody:not(#or-sel-hidden) .or-row-cb').forEach(function(cb){ visible[cb.value]=1; });
+    selectedIds.forEach(function(id){
+        if(visible[String(id)]) return;
+        var inp = document.createElement('input');
+        inp.type='checkbox'; inp.className='action-select or-row-cb'; inp.name='_selected_action';
+        inp.value=id; inp.checked=true;
+        holder.appendChild(inp);
+    });
+    orTable.appendChild(holder);
+}
+
+window._orSetPage = function(p){ currentPage=p; fetchOrders(); };
+window._orPageSize = function(s){ pageSize=s; currentPage=1; fetchOrders(); };
+
+function renderPager(total, pages){
+    var pager = document.getElementById('or-pager');
+    var tblEl = orTable;
+    /* Paginator — only when there are more than 25 rows. */
+    if(total<=25){ pager.style.display='none'; positionPager(); return; }
+    pager.style.display='';
+    var start=(currentPage-1)*pageSize+1, end=Math.min(currentPage*pageSize,total);
+    var info = total===0 ? '0' : '<b>'+start+'–'+end+'</b> of '+total;
+
+    function pgBtn(label,p,active,disabled){
+        if(disabled) return '<button type="button" class="pg-btn pg-disabled" disabled>'+label+'</button>';
+        if(active)   return '<button type="button" class="pg-btn pg-active">'+label+'</button>';
+        return '<button type="button" class="pg-btn" onclick="_orSetPage('+p+')">'+label+'</button>';
+    }
+    var prevSvg='<svg width="7" height="11" viewBox="0 0 7 11" fill="none"><path d="M6 1L1 5.5L6 10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    var nextSvg='<svg width="7" height="11" viewBox="0 0 7 11" fill="none"><path d="M1 1L6 5.5L1 10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+    var nav='';
+    if(pages>1){
+        nav+=pgBtn(prevSvg,currentPage-1,false,currentPage<=1);
+        var pNums=[];
+        if(pages<=7){ for(var i=1;i<=pages;i++) pNums.push(i); }
+        else{
+            pNums.push(1);
+            if(currentPage>3) pNums.push('...');
+            for(var i=Math.max(2,currentPage-1);i<=Math.min(pages-1,currentPage+1);i++) pNums.push(i);
+            if(currentPage<pages-2) pNums.push('...');
+            pNums.push(pages);
+        }
+        pNums.forEach(function(p){
+            if(p==='...') nav+='<span class="pg-dots">\u2026</span>';
+            else nav+=pgBtn(p,p,p===currentPage,false);
+        });
+        nav+=pgBtn(nextSvg,currentPage+1,false,currentPage>=pages);
+    }
+    var sizeHtml='<div class="pager-size"><span>Per page:</span>'+
+        [25,50].map(function(s){
+            return s===pageSize
+                ? '<button type="button" class="pg-btn pg-active">'+s+'</button>'
+                : '<button type="button" class="pg-btn" onclick="_orPageSize('+s+')">'+s+'</button>';
+        }).join('')+'</div>';
+    pager.innerHTML='<span class="pager-info">'+info+'</span>'+
+        (nav?'<div class="pager-nav">'+nav+'</div>':'<div></div>')+sizeHtml;
+
+    function positionPager(){
+        var content=document.querySelector('#content-main')||document.body;
+        /* /clZoom: with body{zoom}, fixed-left is interpreted in zoom-px, while rect is visual. */
+        pager.style.left=(content.getBoundingClientRect().left/(window.clZoom?window.clZoom():1))+'px';
+        if(tblEl){ tblEl.style.marginBottom='0'; var __lr=tblEl.querySelector("tbody tr:last-child"); if(__lr){var __rb=__lr.getBoundingClientRect().bottom, __pt=pager.getBoundingClientRect().top; tblEl.classList.toggle("tbl-touches-pager", getComputedStyle(pager).display !== 'none' && __rb >= __pt - 1);} if(window.padChangelistTable) window.padChangelistTable(tblEl); if(tblEl.__padFill) tblEl.__padFill.style.marginBottom=pager.offsetHeight+'px'; }
+    }
+    positionPager();
+    window.addEventListener('resize', positionPager);
+    if(window.ResizeObserver) new ResizeObserver(positionPager).observe(document.querySelector('#content-main')||document.body);
+    var nav2=document.getElementById('nav-sidebar');
+    if(nav2) nav2.addEventListener('transitionend', positionPager);
+}
+
+/* ── Export modal ── */
+/* pendingEdits: item_id -> {variant_id, variant_name, price, quantity} (changed fields only) */
+var pendingEdits = {};
+
+function defaultFilename(){
+    var now=new Date();
+    return 'orders '+String(now.getDate()).padStart(2,'0')+'.'+String(now.getMonth()+1).padStart(2,'0')+'.'+now.getFullYear();
+}
+function fmtPriceUah(v){
+    var n = Math.round(parseFloat(v||0));
+    return (isFinite(n)?n:0).toLocaleString('uk-UA') + ' ₴';
+}
+function effItem(it){
+    /* Returns the product with the edit applied (for recalculation and UI) */
+    var ed = pendingEdits[it.item_id] || {};
+    var compsEdited = ed.components && Object.keys(ed.components).some(function(k){
+        if(k==='new') return Array.isArray(ed.components.new) && ed.components.new.length>0;
+        var c = ed.components[k];
+        return c && (c.delete || c.variant_id || c.quantity!=null);
+    });
+    return {
+        item_id: it.item_id,
+        name: ed.variant_name || it.name,
+        /* The photo is also "effective": after replacing a product/bundle we show the new one's
+           photo,
+           otherwise the pin would keep the old image.
+         */
+        photo:(ed.photo!=null)    ? ed.photo    : it.photo,
+        qty:  (ed.quantity!=null) ? ed.quantity : it.qty,
+        price:(ed.price!=null)    ? ed.price    : it.price,
+        is_drop: it.is_drop,
+        is_course: it.is_course,
+        is_bundle: it.is_bundle,
+        bundle_items: it.bundle_items,
+        edited: !!(ed.variant_id || ed.quantity!=null || ed.bundle_id || compsEdited),
+    };
+}
+function effComp(it, comp){
+    /* Returns the effective (with edits applied) data of a bundle component. */
+    var ed = (pendingEdits[it.item_id] && pendingEdits[it.item_id].components) || {};
+    var ce = comp.comp_id ? ed[comp.comp_id] : null;
+    var per = comp.qty_per_set || 0;
+    var name = comp.name, variantId = comp.variant_id, qtyPer = per, photo = comp.photo || '';
+    if(ce){
+        if(ce.variant_name) name = ce.variant_name;
+        if(ce.variant_id)   variantId = ce.variant_id;
+        if(ce.quantity!=null) qtyPer = ce.quantity;
+        if(ce.photo!=null)  photo = ce.photo;   // photo of the replacement component
+    }
+    return {
+        comp_id: comp.comp_id || null,
+        name: name,
+        photo: photo,
+        variant_id: variantId,
+        qty_per_set: qtyPer,
+        deleted: !!(ce && ce.delete),
+        edited: !!(ce && (ce.variant_id || ce.quantity!=null)),
+    };
+}
+function recalcOrderSummary(orderEl, order){
+    var items = order.items || [];
+    var qty = 0, qtyAll = 0, includedSum = 0, excludedSum = 0;
+    var includedCount = 0;
+    items.forEach(function(it){
+        var eit = effItem(it);
+        var cb = orderEl.querySelector('.em-item-cb[data-item-id="'+it.item_id+'"]');
+        var on = cb ? cb.checked : true;
+        var line = orderEl.querySelector('.em-item[data-item-id="'+it.item_id+'"]');
+        if(line) line.classList.toggle('excluded', !on);
+        var lineSum = (parseFloat(eit.price||0)||0) * (parseInt(eit.qty||0)||0);
+        if(on){
+            var itQty = parseInt(eit.qty||0)||0;
+            qty += itQty;
+            includedSum += lineSum;
+            includedCount++;
+            /* qtyAll — physical quantity of units: for a bundle we break it down into components,
+               a regular product takes its own qty.
+             */
+            if(it.is_bundle && it.bundle_items && it.bundle_items.length){
+                it.bundle_items.forEach(function(bi){
+                    var ec = effComp(it, bi);
+                    if(!ec.deleted){
+                        qtyAll += (parseInt(ec.qty_per_set||0)||0) * itQty;
+                    }
+                });
+            } else {
+                qtyAll += itQty;
+            }
+        }
+        else  { excludedSum += lineSum; }
+    });
+    /* If nothing was edited — recalculate as before via order.total_price - excluded.
+       If edited — total = sum of the included items.
+     */
+    var anyEdit = items.some(function(it){ return !!pendingEdits[it.item_id]; });
+    var total = anyEdit ? includedSum : Math.max(0, parseFloat(order.total_price||0) - excludedSum);
+    var sumEl = orderEl.querySelector('.em-order-summary');
+    if(sumEl){
+        var qtyEl = sumEl.querySelector('.em-sum-qty');
+        if(qtyEl){
+            qtyEl.textContent = (qtyAll !== qty) ? (qty + ' (' + qtyAll + ')') : String(qty);
+        }
+        sumEl.querySelector('.em-sum-price').textContent = fmtPriceUah(total);
+    }
+    /* If ALL items are excluded — strike through the whole order so the user sees:
+       this order will not make it into the docx.
+     */
+    orderEl.classList.toggle('all-excluded', items.length > 0 && includedCount === 0);
+}
+/* Loads the composition of the new Bundle and recreates the component rows. */
+function reloadBundleComponents(orderEl, order, it, bundleId){
+    fetch('/admin/orders/bundle/'+bundleId+'/items/', {credentials:'same-origin'})
+        .then(function(r){ return r.json(); })
+        .then(function(data){
+            var newItems = (data.items||[]).map(function(ci){
+                /* Unique synthetic comp_id for the new template —
+                   so that querySelector in rerenderComponentLine finds separate rows.
+                 */
+                return {
+                    comp_id: 'new-'+bundleId+'-'+(ci.variant_id||'x')+'-'+Math.random().toString(36).slice(2,6),
+                    name: ci.name,
+                    qty_per_set: ci.qty_per_set,
+                    variant_id: ci.variant_id,
+                    sku: ci.sku,
+                    photo: ci.photo || '',
+                };
+            });
+            it.bundle_items = newItems;
+            it.is_bundle = true;
+            /* When the template changes, the component edits of the previous state are invalid */
+            if(pendingEdits[it.item_id]) delete pendingEdits[it.item_id].components;
+            /* Find/create em-item-children. If the item was a product — the children container doesn't exist. */
+            var line = orderEl.querySelector('.em-item[data-item-id="'+it.item_id+'"]');
+            if(!line) return;
+            var kidsBlock = line.nextElementSibling;
+            if(!kidsBlock || !kidsBlock.classList || !kidsBlock.classList.contains('em-item-children')){
+                kidsBlock = document.createElement('div');
+                kidsBlock.className = 'em-item-children';
+                kidsBlock.dataset.parentItem = String(it.item_id);
+                line.parentNode.insertBefore(kidsBlock, line.nextSibling);
+            }
+            kidsBlock.innerHTML = '';
+            kidsBlock.style.display = '';
+            newItems.forEach(function(bi){
+                var child = document.createElement('div');
+                child.className = 'em-item-child';
+                child.dataset.compKey = String(bi.comp_key || bi.comp_id);
+                kidsBlock.appendChild(child);
+            });
+            /* Re-render the bundle row (so the chevron appears) + components */
+            rerenderItemLine(orderEl, order, it);
+            newItems.forEach(function(bi){ rerenderComponentLine(orderEl, order, it, bi); });
+        })
+        .catch(function(){});
+}
+
+/* Hover-preview photo positioning (for products and bundle components).
+   Constrained to the bounds of the #or-export-box modal, the popup sits below/above the pin icon,
+   aligned to the left edge of the thumbnail.
+ */
+function attachPhotoPreviewHandler(wrap){
+    if (!wrap) return;
+    var preview = wrap.querySelector('.app-photo-preview');
+    if (!preview) return;
+    wrap.addEventListener('mouseenter', function(){
+        var wr = wrap.getBoundingClientRect();
+        var modal = document.getElementById('or-export-box');
+        var bnd = modal ? modal.getBoundingClientRect()
+                        : { left:0, top:0, right:window.innerWidth, bottom:window.innerHeight };
+        var GAP = 6, MARGIN = 8;
+        preview.style.visibility = 'hidden';
+        preview.style.display = 'block';
+        preview.style.left = '0px';
+        preview.style.top = '0px';
+        var pw = preview.offsetWidth, ph = preview.offsetHeight;
+        preview.style.display = '';
+        preview.style.visibility = '';
+        var top = wr.bottom + GAP;
+        if (top + ph > bnd.bottom - MARGIN) top = wr.top - ph - GAP;
+        if (top < bnd.top + MARGIN) top = bnd.top + MARGIN;
+        var POPUP_INNER_OFFSET = 0;
+        var left = wr.left - POPUP_INNER_OFFSET;
+        if (left + pw > bnd.right - MARGIN) left = bnd.right - pw - MARGIN;
+        if (left < bnd.left + MARGIN) left = bnd.left + MARGIN;
+        preview.style.left = left + 'px';
+        preview.style.top  = top + 'px';
+    });
+}
+
+function rerenderItemLine(orderEl, order, it, forcedChecked){
+    var line = orderEl.querySelector('.em-item[data-item-id="'+it.item_id+'"]');
+    if(!line) return;
+    var eit = effItem(it);
+    var idx = parseInt(line.dataset.idx||'0',10);
+    /* Text color: red — dropshipping, blue — edited. If the item is edited,
+       the drop indicator is removed (the new product may not be a drop item).
+     */
+    var showDrop = it.is_drop && !eit.edited;
+    var showCourse = it.is_course && !eit.edited;
+    var pe = pendingEdits[it.item_id] || {};
+    var nameEdited = !!(pe.variant_id || pe.bundle_id);
+    var qtyEdited  = pe.quantity != null;
+    line.classList.toggle('edited', !!eit.edited);
+    line.classList.toggle('name-edited', nameEdited);
+    line.classList.toggle('qty-edited', qtyEdited);
+    line.classList.toggle('is-drop', !!showDrop);
+    line.classList.toggle('is-course', !!showCourse);
+    /* Bundle→product conversion: there are no components anymore. */
+    var becameVariant = !!(pe.variant_id);
+    /* keep is-bundle only if the item is still a bundle */
+    var stillBundle = (it.is_bundle && !becameVariant);
+    var hasKids = !!(stillBundle && it.bundle_items && it.bundle_items.length);
+    line.classList.toggle('is-bundle', stillBundle);
+    var kidsBlock = line.nextElementSibling;
+    if(kidsBlock && kidsBlock.classList && kidsBlock.classList.contains('em-item-children')){
+        if(becameVariant){
+            kidsBlock.style.display = 'none';
+            kidsBlock.classList.remove('open');
+        } else {
+            kidsBlock.style.display = '';
+        }
+    }
+    if(becameVariant) line.classList.remove('bundle-open');
+    var cbChecked = line.querySelector('.em-item-cb');
+    var stillChecked;
+    if(typeof forcedChecked === 'boolean'){ stillChecked = forcedChecked; }
+    else if(cbChecked){ stillChecked = cbChecked.checked; }
+    else { stillChecked = !(it.is_drop || it.is_course); }
+    /* If the item was replaced (another variant/bundle) — it is always active.
+       Without this, a drop variant stays excluded even after the replacement.
+     */
+    if(nameEdited) stillChecked = true;
+    /* The pencil is on both bundles and regular products (for a bundle only qty is editable) */
+    var editBtn = '<button type="button" class="em-item-edit-btn" title="Edit item">'
+        +'<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M9.5 2L12 4.5L4.5 12L1.5 12.5L2 9.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>'
+        +'</button>';
+    var chevronBtn = hasKids
+        ? '<button type="button" class="em-item-chevron" title="Expand composition">'
+          +'<svg width="12" height="12" viewBox="0 0 10 10" fill="none"><path d="M3 1.5L7 5L3 8.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+          +'</button>'
+        : '';
+    /* Pin with photo — AFTER the number and BEFORE the name. Works for regular products
+       and for bundles (bundle photo). Hover — preview, click — toggle selection.
+       We use <button type="button"> because a span inside <label> natively
+       flashes the row checkbox.
+     */
+    var pinPhoto = eit.photo;   // after replacing the product — the new one's photo
+    var photoPin = pinPhoto
+        ? '<button type="button" class="em-photo-wrap'+(pe.attach_photo?' is-selected':'')+'" title="Click — choose a photo for the docx">'
+          +'<img class="em-item-photo-pin" src="'+esc(pinPhoto)+'" alt="">'
+          +'<span class="em-photo-check"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 7.5L5.5 10.5L11.5 3.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>'
+          +'<div class="app-photo-preview"><img src="'+esc(pinPhoto)+'"></div>'
+          +'</button>'
+        : '';
+    line.innerHTML =
+        '<input type="checkbox" class="em-item-cb" data-item-id="'+it.item_id+'"'+(stillChecked?' checked':'')+'>'
+        +'<span class="em-item-num">'+idx+'.</span>'
+        +photoPin
+        +'<span class="em-item-text">'+esc(eit.name)+' — <span class="em-qty-num">'+esc(String(eit.qty))+'</span> pcs</span>'
+        +chevronBtn
+        +editBtn;
+    var photoWrapEl = line.querySelector('.em-photo-wrap');
+    attachPhotoPreviewHandler(photoWrapEl);
+    if (photoWrapEl) {
+        /* `.em-item` is a <label> with for pointing at the row checkbox, so a click on any
+           element inside flashes the checkbox before our click handler fires.
+           We suppress PD/SP already on mousedown so the label doesn't catch the click.
+         */
+        ['mousedown','mouseup','click'].forEach(function(ev){
+            photoWrapEl.addEventListener(ev, function(e){
+                e.preventDefault(); e.stopPropagation();
+            });
+        });
+        photoWrapEl.addEventListener('click', function(e){
+            if (!pendingEdits[it.item_id]) pendingEdits[it.item_id] = {};
+            pendingEdits[it.item_id].attach_photo = !pendingEdits[it.item_id].attach_photo;
+            if (!pendingEdits[it.item_id].attach_photo) {
+                delete pendingEdits[it.item_id].attach_photo;
+                if (!Object.keys(pendingEdits[it.item_id]).length) delete pendingEdits[it.item_id];
+            }
+            photoWrapEl.classList.toggle('is-selected',
+                !!(pendingEdits[it.item_id] && pendingEdits[it.item_id].attach_photo));
+        });
+    }
+    /* Explicitly sync the checked property with our desired state — so we don't depend
+       on how the browser interprets the attribute after an innerHTML replace.
+     */
+    var freshCb = line.querySelector('.em-item-cb');
+    if(freshCb) freshCb.checked = !!stillChecked;
+    /* Sync excluded strictly with the checked state */
+    line.classList.toggle('excluded', !stillChecked);
+    /* rebinding handlers */
+    freshCb.addEventListener('change', function(){ recalcOrderSummary(orderEl, order); });
+    var btnEl = line.querySelector('.em-item-edit-btn');
+    if(btnEl){
+        btnEl.addEventListener('click', function(e){
+            e.preventDefault(); e.stopPropagation();
+            openItemEditor(orderEl, order, it);
+        });
+    }
+    var chevEl = line.querySelector('.em-item-chevron');
+    if(chevEl){
+        chevEl.addEventListener('click', function(e){
+            e.preventDefault(); e.stopPropagation();
+            var kids = line.nextElementSibling;
+            if(kids && kids.classList.contains('em-item-children')){
+                var open = kids.classList.toggle('open');
+                line.classList.toggle('bundle-open', open);
+            }
+        });
+    }
+}
+
+/* Render a child bundle component with a pencil button */
+function rerenderComponentLine(orderEl, order, it, comp){
+    var childEl = orderEl.querySelector('.em-item-child[data-comp-key="'+(comp.comp_key||comp.comp_id||'?')+'"]');
+    if(!childEl) return;
+    var ec = effComp(it, comp);
+    var pe = (pendingEdits[it.item_id] && pendingEdits[it.item_id].components && pendingEdits[it.item_id].components[comp.comp_id]) || {};
+    var nameEdited = !!pe.variant_id;
+    var qtyEdited  = pe.quantity != null;
+    childEl.classList.toggle('edited', !!ec.edited);
+    childEl.classList.toggle('name-edited', nameEdited);
+    childEl.classList.toggle('qty-edited', qtyEdited);
+    childEl.classList.toggle('deleted', !!ec.deleted);
+    var qtyTotal = (ec.qty_per_set || 0) * (it.qty || 0);
+    var btn = comp.comp_id
+        ? '<button type="button" class="em-item-edit-btn" title="Edit component">'
+          +'<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M9.5 2L12 4.5L4.5 12L1.5 12.5L2 9.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>'
+          +'</button>'
+        : '';
+    /* The checkbox controls removal of the component: unchecked = exclude from export.
+       It sits in the same column as the product checkbox (next to the left edge).
+     */
+    var cbHtml = comp.comp_id
+        ? '<input type="checkbox" class="em-comp-cb" data-comp-key="'+esc(String(comp.comp_id))+'"'+(ec.deleted?'':' checked')+'>'
+        : '<span style="width:13px;flex-shrink:0;"></span>';  // placeholder so the text indent doesn't shift
+    /* Pin with the component photo — ALWAYS (if present). A click toggles "attach to docx". */
+    var compPinPhoto = ec.photo;   // after replacing the component — the new one's photo
+    var compPhotoPin = compPinPhoto
+        ? '<button type="button" class="em-photo-wrap'+(pe.attach_photo?' is-selected':'')+'" title="Click — choose a photo for the docx">'
+          +'<img class="em-item-photo-pin" src="'+esc(compPinPhoto)+'" alt="">'
+          +'<span class="em-photo-check"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 7.5L5.5 10.5L11.5 3.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>'
+          +'<div class="app-photo-preview"><img src="'+esc(compPinPhoto)+'"></div>'
+          +'</button>'
+        : '';
+    childEl.innerHTML = cbHtml
+        + '<span class="em-comp-indent"></span>'
+        + compPhotoPin
+        + '<span class="em-item-text">'+esc(ec.name)+' — <span class="em-qty-num">'+esc(String(qtyTotal))+'</span> pcs</span>'
+        + btn;
+    var compPhotoWrap = childEl.querySelector('.em-photo-wrap');
+    attachPhotoPreviewHandler(compPhotoWrap);
+    if (compPhotoWrap && comp.comp_id) {
+        compPhotoWrap.addEventListener('click', function(e){
+            e.preventDefault(); e.stopPropagation();
+            if (!pendingEdits[it.item_id]) pendingEdits[it.item_id] = {};
+            if (!pendingEdits[it.item_id].components) pendingEdits[it.item_id].components = {};
+            var comps = pendingEdits[it.item_id].components;
+            var c = comps[comp.comp_id] || {};
+            c.attach_photo = !c.attach_photo;
+            if (!c.attach_photo) {
+                delete c.attach_photo;
+                if (!Object.keys(c).length) delete comps[comp.comp_id];
+                if (!Object.keys(comps).length) {
+                    delete pendingEdits[it.item_id].components;
+                    if (!Object.keys(pendingEdits[it.item_id]).length) delete pendingEdits[it.item_id];
+                }
+            } else {
+                comps[comp.comp_id] = c;
+            }
+            compPhotoWrap.classList.toggle('is-selected', !!c.attach_photo);
+        });
+    }
+    var btnEl = childEl.querySelector('.em-item-edit-btn');
+    if(btnEl){
+        btnEl.addEventListener('click', function(e){
+            e.preventDefault(); e.stopPropagation();
+            openComponentEditor(orderEl, order, it, comp);
+        });
+    }
+    var cbEl = childEl.querySelector('.em-comp-cb');
+    if(cbEl){
+        cbEl.addEventListener('click', function(e){ e.stopPropagation(); });
+        cbEl.addEventListener('change', function(){
+            if(!comp.comp_id) return;
+            if(!pendingEdits[it.item_id]) pendingEdits[it.item_id] = {};
+            if(!pendingEdits[it.item_id].components) pendingEdits[it.item_id].components = {};
+            var comps = pendingEdits[it.item_id].components;
+            var c = comps[comp.comp_id] || {};
+            if(cbEl.checked){
+                delete c.delete;
+                if(!Object.keys(c).length) delete comps[comp.comp_id];
+                if(!Object.keys(comps).length){
+                    delete pendingEdits[it.item_id].components;
+                    if(!Object.keys(pendingEdits[it.item_id]).length) delete pendingEdits[it.item_id];
+                }
+            } else {
+                c.delete = true;
+                comps[comp.comp_id] = c;
+            }
+            childEl.classList.toggle('deleted', !cbEl.checked);
+            recalcOrderSummary(orderEl, order);
+        });
+    }
+}
+function closeAllOpenEditors(){
+    document.querySelectorAll('#or-export-body .editing .ee-btn.cancel').forEach(function(btn){
+        btn.click();
+    });
+}
+function openItemEditor(orderEl, order, it){
+    var line = orderEl.querySelector('.em-item[data-item-id="'+it.item_id+'"]');
+    if(!line || line.classList.contains('editing')) return;
+    closeAllOpenEditors();
+    var eit = effItem(it);
+    /* Remember the checkbox BEFORE innerHTML is destroyed */
+    var savedChecked = (function(){
+        var cb = line.querySelector('.em-item-cb');
+        return cb ? cb.checked : !(it.is_drop || it.is_course);
+    })();
+    line.classList.add('editing');
+    line.innerHTML = '';
+    var ed = document.createElement('div'); ed.className = 'em-item-editor';
+    var revertBtn = eit.edited ? (
+        '<button type="button" class="ee-btn revert" title="Revert to original">'
+        +'<svg width="14" height="14" viewBox="0 0 14 14" fill="none">'
+        +'<path d="M2 6h7a3 3 0 0 1 0 6H6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>'
+        +'<path d="M4 4 2 6l2 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
+        +'</svg></button>'
+    ) : '';
+    var bundleMode = !!it.is_bundle;
+    var placeholder = bundleMode ? 'Search bundle...' : 'Search product...';
+    var searchInput = '<input type="text" class="ee-vinput" placeholder="'+placeholder+'" value="'+esc(eit.name)+'">';
+    ed.innerHTML =
+        searchInput
+        +'<span class="ee-mul"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>'
+        +'<input type="number" class="ee-qty" min="1" value="'+esc(String(eit.qty))+'">'
+        +'<button type="button" class="ee-btn ok" title="Save">'
+        +'<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 7l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>'
+        +'<button type="button" class="ee-btn cancel" title="Cancel">'
+        +'<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>'
+        +revertBtn
+        +'<div class="ee-sug"></div>';
+    line.appendChild(ed);
+    var vinp = ed.querySelector('.ee-vinput');
+    var qinp = ed.querySelector('.ee-qty');
+    var sug  = ed.querySelector('.ee-sug');
+    var okBtn = ed.querySelector('.ee-btn.ok');
+    var cancelBtn = ed.querySelector('.ee-btn.cancel');
+    var revertBtnEl = ed.querySelector('.ee-btn.revert');
+    /* editor state */
+    var pickedVariantId = (pendingEdits[it.item_id] && pendingEdits[it.item_id].variant_id) || null;
+    var pickedBundleId = (pendingEdits[it.item_id] && pendingEdits[it.item_id].bundle_id) || null;
+    var pickedVariantName = null;
+    var pickedVariantPrice = null;
+    var pickedVariantPhoto = null;   // photo of the chosen product/packaging → into pendingEdits
+    var searchTimer = null;
+    var forceCheckedOnCommit = false;
+    var prevChecked = savedChecked;
+    function positionSug(){
+        var r = vinp.getBoundingClientRect();
+        sug.style.left = r.left + 'px';
+        sug.style.top  = (r.bottom + 2) + 'px';
+        sug.style.width = r.width + 'px';
+    }
+    function renderSug(items, query){
+        sug.innerHTML = '';
+        var inner = document.createElement('div'); inner.className = 'ee-sug-scroll';
+        sug.appendChild(inner);
+        /* Don't let the wheel event "leak" to the parent container/page.
+           If the content fits — suppress it fully; if there is scroll — suppress only at the edges.
+         */
+        inner.addEventListener('wheel', function(e){
+            var h = inner.scrollHeight - inner.clientHeight;
+            if(h <= 0){ e.preventDefault(); return; }
+            var top = inner.scrollTop;
+            if((e.deltaY < 0 && top <= 0) || (e.deltaY > 0 && top >= h - 0.5)){
+                e.preventDefault();
+            }
+        }, {passive:false});
+        if(!items.length){
+            var r = document.createElement('div'); r.className = 'ee-sug-row empty';
+            r.textContent = (query && query.length>=2) ? 'Nothing found' : 'Enter at least 2 characters';
+            inner.appendChild(r); positionSug(); sug.classList.add('open'); return;
+        }
+        items.forEach(function(v){
+            var r = document.createElement('div'); r.className = 'ee-sug-row';
+            var photo = v.photo
+                ? '<img class="ee-sug-photo" src="'+esc(v.photo)+'" alt="">'
+                : '<div class="ee-sug-photo"></div>';
+            var st = parseInt(v.stock,10)||0;
+            var stockHtml = st > 0
+                ? '<span class="ee-sug-stock" style="color:#16a34a">'+st+' pcs</span>'
+                : '<span class="ee-sug-stock" style="color:#dc2626">None</span>';
+            r.innerHTML = photo
+                +'<div class="ee-sug-info">'
+                +'<span class="ee-sug-name">'+esc(v.name)+'</span>'
+                +'<span class="ee-sug-meta">'
+                +  '<span class="ee-sug-sku">'+esc(v.sku||'—')+'</span>'
+                +  stockHtml
+                +'</span>'
+                +'</div>';
+            r.addEventListener('click', function(e){
+                /* Without this the click would bubble up to <label class="em-item">
+                   and toggle the checkbox inside — the item would become excluded.
+                 */
+                e.preventDefault(); e.stopPropagation();
+                if(v.__kind === 'bundle'){
+                    pickedBundleId = v.__bundle.id;
+                    pickedVariantId = null;
+                    pickedVariantName = v.name;
+                    pickedVariantPrice = parseFloat(v.price)||0;
+                } else {
+                    pickedVariantId = v.id;
+                    pickedBundleId = null;
+                    pickedVariantName = v.name;
+                    /* with discount (variant/brand) — like the storefront price */
+                    pickedVariantPrice = parseFloat(v.final_price || v.price)||0;
+                }
+                pickedVariantPhoto = v.photo || '';
+                vinp.value = v.name;
+                sug.classList.remove('open');
+                forceCheckedOnCommit = true;
+                /* If a bundle is selected — load its composition for the preview */
+                var bundleIdToLoad = (v.__kind === 'bundle') ? v.__bundle.id : null;
+                commit();
+                /* Guarantee that excluded is cleared and the checkmark is set — in case
+                   something went wrong in the rerender.
+                 */
+                var cb = line.querySelector('.em-item-cb');
+                if(cb){ cb.checked = true; }
+                line.classList.remove('excluded');
+                recalcOrderSummary(orderEl, order);
+                if(bundleIdToLoad){
+                    reloadBundleComponents(orderEl, order, it, bundleIdToLoad);
+                }
+            });
+            inner.appendChild(r);
+        });
+        positionSug();
+        sug.classList.add('open');
+    }
+    /* On scrolling the modal body, close the dropdown — otherwise it "hangs" in the air */
+    var bodyEl = document.getElementById('or-export-body');
+    function _closeSugOnScroll(){ if(sug) sug.classList.remove('open'); }
+    if(bodyEl) bodyEl.addEventListener('scroll', _closeSugOnScroll, {passive:true});
+    window.addEventListener('resize', _closeSugOnScroll);
+    function doSearch(){
+        var q = vinp.value.trim();
+        if(q === eit.name){ sug.classList.remove('open'); return; }
+        if(q.length < 2){ renderSug([], q); return; }
+        /* Universal search: products + bundles in parallel */
+        var qs = encodeURIComponent(q);
+        Promise.all([
+            fetch('/admin/orders/invoice/search-variants/?q='+qs, {credentials:'same-origin'}).then(function(r){return r.json();}).catch(function(){return {results:[]};}),
+            fetch('/admin/orders/search-bundles/?q='+qs, {credentials:'same-origin'}).then(function(r){return r.json();}).catch(function(){return {results:[]};}),
+        ]).then(function(both){
+            var rows = [];
+            (both[0].results||[]).forEach(function(v){
+                rows.push({
+                    __kind: 'variant',
+                    id: v.id, name: v.name,
+                    sku: v.sku || '—',
+                    stock: v.stock, price: v.price, final_price: v.final_price, photo: v.photo,
+                });
+            });
+            (both[1].results||[]).forEach(function(b){
+                if(b.is_active === false) return;
+                rows.push({
+                    __kind: 'bundle',
+                    __bundle: {id: b.id, name: b.name, photo: b.photo},
+                    id: 'b-'+b.id,
+                    name: b.name,
+                    sku: b.sku || '—',
+                    stock: b.stock, price: b.price,
+                    photo: b.photo,
+                });
+            });
+            renderSug(rows, q);
+        });
+    }
+    vinp.addEventListener('input', function(){
+        pickedVariantId = null;
+        pickedBundleId = null;
+        pickedVariantName = null;
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(doSearch, 200);
+    });
+    vinp.addEventListener('focus', function(){ if(vinp.value.trim().length>=2) doSearch(); });
+    document.addEventListener('click', function _outside(e){
+        if(!ed.contains(e.target)){ sug.classList.remove('open'); }
+    });
+    function commit(){
+        var newQty = parseInt(qinp.value, 10);
+        if(!(newQty > 0)) newQty = eit.qty;
+        var rec = pendingEdits[it.item_id] ? Object.assign({}, pendingEdits[it.item_id]) : {};
+        var changed = false;
+        /* Universal replacement: can change the item type too (product↔bundle) */
+        if(pickedVariantId){
+            var sameVariant = !it.is_bundle && pickedVariantId === it.variant_id;
+            if(!sameVariant){
+                rec.variant_id = pickedVariantId;
+                rec.bundle_id = null;
+                rec.variant_name = pickedVariantName || vinp.value;
+                if(pickedVariantPrice!=null) rec.price = pickedVariantPrice;
+                if(pickedVariantPhoto!=null) rec.photo = pickedVariantPhoto;
+                delete rec.components;
+                changed = true;
+            }
+        } else if(pickedBundleId){
+            var sameBundle = it.is_bundle && pickedBundleId === it.bundle_id;
+            if(!sameBundle){
+                rec.bundle_id = pickedBundleId;
+                rec.variant_id = null;
+                rec.variant_name = pickedVariantName || vinp.value;
+                if(pickedVariantPrice!=null) rec.price = pickedVariantPrice;
+                if(pickedVariantPhoto!=null) rec.photo = pickedVariantPhoto;
+                delete rec.components;
+                changed = true;
+            }
+        }
+        if(newQty !== it.qty){
+            rec.quantity = newQty;
+            changed = true;
+        }
+        var hadPending = !!pendingEdits[it.item_id];
+        if(!changed && !hadPending){
+            // nothing changed and nothing pending — just close
+        } else if(changed){
+            pendingEdits[it.item_id] = rec;
+        }
+        line.classList.remove('editing');
+        /* If the variant/bundle was replaced — the item must not stay excluded */
+        var variantOrTypeChanged = !!(rec.variant_id || rec.bundle_id);
+        if(variantOrTypeChanged) forceCheckedOnCommit = true;
+        var forced = forceCheckedOnCommit ? true : prevChecked;
+        rerenderItemLine(orderEl, order, it, forced);
+        if(forceCheckedOnCommit){
+            var cb = line.querySelector('.em-item-cb');
+            if(cb) cb.checked = true;
+            line.classList.remove('excluded');
+        }
+        recalcOrderSummary(orderEl, order);
+    }
+    function cancel(){
+        line.classList.remove('editing');
+        rerenderItemLine(orderEl, order, it, prevChecked);
+        recalcOrderSummary(orderEl, order);
+    }
+    function revert(){
+        delete pendingEdits[it.item_id];
+        line.classList.remove('editing');
+        rerenderItemLine(orderEl, order, it, prevChecked);
+        recalcOrderSummary(orderEl, order);
+    }
+    okBtn.addEventListener('click', commit);
+    cancelBtn.addEventListener('click', cancel);
+    if(revertBtnEl) revertBtnEl.addEventListener('click', revert);
+    qinp.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); commit(); } if(e.key==='Escape'){ cancel(); } });
+    if(vinp) vinp.addEventListener('keydown', function(e){ if(e.key==='Escape'){ cancel(); } });
+    setTimeout(function(){
+        if(vinp){ vinp.focus(); vinp.select(); }
+        else if(qinp){ qinp.focus(); qinp.select(); }
+    }, 30);
+}
+
+/* Bundle component editor: variant search + qty + delete + ✓/✕/(↶) */
+function openComponentEditor(orderEl, order, it, comp){
+    var childEl = orderEl.querySelector('.em-item-child[data-comp-key="'+(comp.comp_key||comp.comp_id||'?')+'"]');
+    if(!childEl || childEl.classList.contains('editing')) return;
+    closeAllOpenEditors();
+    var ec = effComp(it, comp);
+    childEl.classList.add('editing');
+    childEl.innerHTML = '';
+    var ed = document.createElement('div'); ed.className='em-item-editor';
+    var revertBtn = ec.edited ? (
+        '<button type="button" class="ee-btn revert" title="Revert to original">'
+        +'<svg width="14" height="14" viewBox="0 0 14 14" fill="none">'
+        +'<path d="M2 6h7a3 3 0 0 1 0 6H6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>'
+        +'<path d="M4 4 2 6l2 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
+        +'</svg></button>'
+    ) : '';
+    ed.innerHTML =
+        '<input type="text" class="ee-vinput" placeholder="Search product..." value="'+esc(ec.name)+'">'
+        +'<span class="ee-mul"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>'
+        +'<input type="number" class="ee-qty" min="1" value="'+esc(String(ec.qty_per_set||1))+'">'
+        +'<button type="button" class="ee-btn ok" title="Save">'
+        +'<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 7l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>'
+        +'<button type="button" class="ee-btn cancel" title="Cancel">'
+        +'<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>'
+        +revertBtn
+        +'<div class="ee-sug"></div>';
+    childEl.appendChild(ed);
+    var vinp = ed.querySelector('.ee-vinput');
+    var qinp = ed.querySelector('.ee-qty');
+    var sug  = ed.querySelector('.ee-sug');
+    var okBtn = ed.querySelector('.ee-btn.ok');
+    var cancelBtn = ed.querySelector('.ee-btn.cancel');
+    var revertEl = ed.querySelector('.ee-btn.revert');
+    var pickedVariantId = (pendingEdits[it.item_id] && pendingEdits[it.item_id].components && pendingEdits[it.item_id].components[comp.comp_id] && pendingEdits[it.item_id].components[comp.comp_id].variant_id) || null;
+    var pickedVariantName = null;
+    var pickedVariantPhoto = null;   // photo of the chosen component → into pendingEdits
+    var searchTimer = null;
+    function positionSug(){
+        var r = vinp.getBoundingClientRect();
+        sug.style.left = r.left + 'px';
+        sug.style.top  = (r.bottom + 2) + 'px';
+        sug.style.width = r.width + 'px';
+    }
+    function renderSug(items, query){
+        sug.innerHTML='';
+        var inner = document.createElement('div'); inner.className='ee-sug-scroll';
+        sug.appendChild(inner);
+        inner.addEventListener('wheel', function(e){
+            var h = inner.scrollHeight - inner.clientHeight;
+            if(h <= 0){ e.preventDefault(); return; }
+            var top = inner.scrollTop;
+            if((e.deltaY < 0 && top <= 0) || (e.deltaY > 0 && top >= h - 0.5)) e.preventDefault();
+        }, {passive:false});
+        if(!items.length){
+            var r = document.createElement('div'); r.className='ee-sug-row empty';
+            r.textContent = (query && query.length>=2) ? 'Nothing found' : 'Enter at least 2 characters';
+            inner.appendChild(r); positionSug(); sug.classList.add('open'); return;
+        }
+        items.forEach(function(v){
+            var r = document.createElement('div'); r.className='ee-sug-row';
+            var photo = v.photo
+                ? '<img class="ee-sug-photo" src="'+esc(v.photo)+'" alt="">'
+                : '<div class="ee-sug-photo"></div>';
+            var st = parseInt(v.stock,10)||0;
+            var stockHtml = st > 0
+                ? '<span class="ee-sug-stock" style="color:#16a34a">'+st+' pcs</span>'
+                : '<span class="ee-sug-stock" style="color:#dc2626">None</span>';
+            r.innerHTML = photo
+                +'<div class="ee-sug-info">'
+                +  '<span class="ee-sug-name">'+esc(v.name)+'</span>'
+                +  '<span class="ee-sug-meta">'
+                +    '<span class="ee-sug-sku">'+esc(v.sku||'—')+'</span>'+stockHtml
+                +  '</span>'
+                +'</div>';
+            r.addEventListener('click', function(){
+                pickedVariantId = v.id;
+                pickedVariantName = v.name;
+                pickedVariantPhoto = v.photo || '';
+                vinp.value = v.name;
+                sug.classList.remove('open');
+                commit();
+            });
+            inner.appendChild(r);
+        });
+        positionSug(); sug.classList.add('open');
+    }
+    function doSearch(){
+        var q = vinp.value.trim();
+        if(q === ec.name){ sug.classList.remove('open'); return; }
+        if(q.length < 2){ renderSug([], q); return; }
+        fetch('/admin/orders/invoice/search-variants/?q='+encodeURIComponent(q), {credentials:'same-origin'})
+            .then(function(r){ return r.json(); })
+            .then(function(data){ renderSug(data.results||[], q); })
+            .catch(function(){ renderSug([], q); });
+    }
+    var bodyEl2 = document.getElementById('or-export-body');
+    function _closeSugOnScroll(){ sug.classList.remove('open'); }
+    if(bodyEl2) bodyEl2.addEventListener('scroll', _closeSugOnScroll, {passive:true});
+    window.addEventListener('resize', _closeSugOnScroll);
+    vinp.addEventListener('input', function(){
+        pickedVariantId = null; pickedVariantName = null; pickedVariantPhoto = null;
+        clearTimeout(searchTimer); searchTimer = setTimeout(doSearch, 200);
+    });
+    vinp.addEventListener('focus', function(){ if(vinp.value.trim().length>=2) doSearch(); });
+    document.addEventListener('click', function _outside(e){
+        if(!ed.contains(e.target)){ sug.classList.remove('open'); }
+    });
+    function ensureCompsBucket(){
+        var p = pendingEdits[it.item_id] || {};
+        if(!p.components) p.components = {};
+        pendingEdits[it.item_id] = p;
+        return p.components;
+    }
+    function commit(){
+        if(!comp.comp_id){ cancel(); return; }
+        var newQty = parseInt(qinp.value, 10);
+        if(!(newQty > 0)) newQty = ec.qty_per_set || 1;
+        var comps = ensureCompsBucket();
+        var rec = comps[comp.comp_id] ? Object.assign({}, comps[comp.comp_id]) : {};
+        var changed = false;
+        if(pickedVariantId && pickedVariantId !== comp.variant_id){
+            rec.variant_id = pickedVariantId;
+            rec.variant_name = pickedVariantName || vinp.value;
+            if(pickedVariantPhoto!=null) rec.photo = pickedVariantPhoto;
+            changed = true;
+        }
+        if(newQty !== (comp.qty_per_set||1)){
+            rec.quantity = newQty;
+            changed = true;
+        }
+        if(rec.delete) delete rec.delete;
+        if(changed) comps[comp.comp_id] = rec;
+        else if(!Object.keys(rec).length) delete comps[comp.comp_id];
+        childEl.classList.remove('editing');
+        rerenderComponentLine(orderEl, order, it, comp);
+        recalcOrderSummary(orderEl, order);
+    }
+    function cancel(){
+        childEl.classList.remove('editing');
+        rerenderComponentLine(orderEl, order, it, comp);
+        recalcOrderSummary(orderEl, order);
+    }
+    function revert(){
+        var comps = ensureCompsBucket();
+        delete comps[comp.comp_id];
+        if(!Object.keys(comps).length){
+            delete pendingEdits[it.item_id].components;
+            if(!Object.keys(pendingEdits[it.item_id]).length) delete pendingEdits[it.item_id];
+        }
+        childEl.classList.remove('editing');
+        rerenderComponentLine(orderEl, order, it, comp);
+        recalcOrderSummary(orderEl, order);
+    }
+    okBtn.addEventListener('click', commit);
+    cancelBtn.addEventListener('click', cancel);
+    if(revertEl) revertEl.addEventListener('click', revert);
+    qinp.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); commit(); } if(e.key==='Escape') cancel(); });
+    vinp.addEventListener('keydown', function(e){ if(e.key==='Escape') cancel(); });
+    setTimeout(function(){ vinp.focus(); vinp.select(); }, 30);
+}
+
+var exportToken = '';
+function openExportModal(){
+    /* A new token on every open: it is later used to pick up the finished files. */
+    exportToken = 'e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    var cf = document.getElementById('or-export-confirm');
+    if (cf) { cf.style.display = ''; cf.disabled = false; cf.textContent = 'Download'; }
+    var cn = document.getElementById('or-export-cancel');
+    if (cn) cn.textContent = 'Cancel';
+    /* Restore the fields hidden by the result panel of the previous export. */
+    ['or-export-fname', 'or-export-include-packing'].forEach(function(id){
+        var el = document.getElementById(id);
+        var row = el && el.closest('.em-fname, .em-opt');
+        if (row) row.style.display = '';
+    });
+    var ids=Array.from(selectedIds); if(!ids.length) return;
+    pendingEdits = {};  // reset the edits for a new session
+    var orders=ids.map(function(id){ return selectedData[id]; }).filter(Boolean);
+    /* The same order as in the docx (Order.objects...order_by('created_at')):
+       old orders on top → new ones at the bottom.
+     */
+    orders.sort(function(a, b){
+        var ka = a.created_at || '', kb = b.created_at || '';
+        if (ka === kb) return (a.id||0) - (b.id||0);
+        return ka < kb ? -1 : 1;
+    });
+    /* "Packing" is a summary page across several orders; for a single one it is
+       redundant,
+       so the checkbox is unchecked by default (it can be checked manually). Set on EVERY
+       open, otherwise the state would remain from the previous export.
+     */
+    var pkCb = document.getElementById('or-export-include-packing');
+    if (pkCb) pkCb.checked = orders.length > 1;
+    var dLabels={'nova_poshta':'Nova Poshta','pickup':'Pickup','ukr_poshta':'Ukrposhta'};
+    document.getElementById('or-export-fname').value=defaultFilename();
+    var body=document.getElementById('or-export-body'); body.innerHTML='';
+    orders.forEach(function(o){
+        var div=document.createElement('div'); div.className='em-order'; div.dataset.orderId=o.id;
+        var phone = (o.customer_phone||'').replace(/\D/g,'');
+        if (phone.length === 12 && phone.startsWith('380')) {
+            phone = '+380 ' + phone.substr(3,2) + ' ' + phone.substr(5,3) + ' ' + phone.substr(8,2) + ' ' + phone.substr(10,2);
+        } else if (phone) {
+            phone = '+' + phone;
+        }
+        var head='<div class="em-order-head"><span class="em-order-num">#'+esc(o.order_number)+'</span>'
+            +(o.delivery_type==='pickup'?'<span class="em-order-name">Pickup</span>':'')
+            +(o.customer_name?'<span class="em-order-name">'+esc(o.customer_name)+'</span>':'')
+            +(phone?'<span class="em-order-phone">'+esc(phone)+'</span>':'')
+            +(o.delivery_type==='pickup'?'':'<span class="em-order-addr">'+esc(dLabels[o.delivery_type]||o.delivery_type||'')+(o.delivery_address?': '+esc(o.delivery_address):'')+'</span>')+'</div>';
+        /* Order export options: payment at our expense + include comment.
+           The word "comment" is clickable and opens the editor.
+         */
+        var noteText = (o.manager_comment || '').trim();
+        var linkCls = 'em-note-link ' + (noteText ? 'has-text' : 'is-empty');
+        var opts = '<div class="em-order-opts">'
+            +'<label><input type="checkbox" class="em-opt-pay-we" data-order-id="'+o.id+'"'+(o.payment_method==='own_expense'?' checked':'')+'> Payment at our expense</label>'
+            +'<label><input type="checkbox" class="em-opt-note" data-order-id="'+o.id+'"> '
+            +'Include <span class="'+linkCls+'" data-order-id="'+o.id+'">comment</span> in docx</label>'
+            +'</div>';
+        /* Inline editor — just a textarea, no extra badges.
+           If a manager comment exists, the panel is open right away (so the manager sees
+           the comment without an extra click).
+         */
+        var note = '<div class="em-order-note'+(noteText ? ' open' : '')+'" data-order-id="'+o.id+'">'
+            +'<textarea class="em-note-edit" data-order-id="'+o.id+'" placeholder="Enter a comment...">'+esc(noteText)+'</textarea>'
+            +'</div>';
+        /* We create the container; the line markup itself is built by rerenderItemLine */
+        var wrap = document.createElement('div'); wrap.className='em-items';
+        (o.items||[]).forEach(function(it,idx){
+            var skipCollect = it.is_drop || it.is_course;
+            var checked = skipCollect ? '' : 'checked';
+            var cls = 'em-item'
+                + (it.is_drop?' is-drop':'')
+                + (it.is_course?' is-course':'')
+                + (skipCollect?' excluded':'');
+            /* <div>, not <label>: otherwise a click on any element inside (photo,
+               text, even a button) makes the checkbox flicker in some browsers.
+             */
+            var line = document.createElement('div');
+            line.className = cls;
+            line.dataset.itemId = it.item_id;
+            line.dataset.idx = String(idx+1);
+            wrap.appendChild(line);
+            // We fill in the content through the shared renderer (below)
+            line.innerHTML = '<input type="checkbox" class="em-item-cb" data-item-id="'+it.item_id+'" '+checked+'>';
+            if(it.is_bundle && it.bundle_items && it.bundle_items.length){
+                var kids = document.createElement('div'); kids.className = 'em-item-children';
+                kids.dataset.parentItem = String(it.item_id);
+                it.bundle_items.forEach(function(bi){
+                    var child = document.createElement('div'); child.className='em-item-child';
+                    child.dataset.compKey = String(bi.comp_key || bi.comp_id || '?');
+                    kids.appendChild(child);
+                });
+                wrap.appendChild(kids);
+            }
+        });
+        var summary = document.createElement('div'); summary.className='em-order-summary';
+        summary.innerHTML = '<span>Items: <b class="em-sum-qty">0</b></span>'
+            + '<span>To pay: <b class="em-sum-price">0 ₴</b></span>';
+        div.innerHTML = head + opts + note;
+        div.appendChild(wrap);
+        div.appendChild(summary);
+        body.appendChild(div);
+        /* We redraw every line item through rerenderItemLine — this gives the same markup
+           with the pencil button + the correct checkbox handler.
+         */
+        (o.items||[]).forEach(function(it){
+            rerenderItemLine(div, o, it);
+            if(it.is_bundle && it.bundle_items){
+                it.bundle_items.forEach(function(bi){ rerenderComponentLine(div, o, it, bi); });
+            }
+        });
+        recalcOrderSummary(div, o);
+        /* Click on the word "comment" (.em-note-link) — toggles the inline editor.
+           The "Include in docx" checkbox is a separate click and does not open
+           the editor.
+         */
+        var noteEl = div.querySelector('.em-order-note');
+        var linkEl = div.querySelector('.em-note-link');
+        if (noteEl && linkEl) {
+            var ta = noteEl.querySelector('.em-note-edit');
+            function autoResize() {
+                if (!ta) return;
+                ta.style.height = '0px';
+                var h = ta.scrollHeight;
+                if (h < 28) h = 28;
+                ta.style.height = h + 'px';
+            }
+            function syncLinkColor() {
+                var has = !!(ta && ta.value.trim());
+                linkEl.classList.toggle('has-text', has);
+                linkEl.classList.toggle('is-empty', !has);
+            }
+            if (ta) {
+                ta.addEventListener('input', function(){
+                    autoResize();
+                    syncLinkColor();
+                });
+                ta.style.height = '0px';
+                ta.style.height = Math.max(28, ta.scrollHeight) + 'px';
+            }
+            linkEl.addEventListener('click', function(e){
+                e.preventDefault(); e.stopPropagation();
+                var open = noteEl.classList.toggle('open');
+                if (open) {
+                    requestAnimationFrame(autoResize);
+                    setTimeout(autoResize, 0);
+                    if (ta) setTimeout(function(){ ta.focus(); }, 0);
+                }
+            });
+        }
+    });
+    document.getElementById('or-export-modal').classList.add('open');
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    setTimeout(function(){ document.getElementById('or-export-fname').select(); },50);
+}
+function closeExportModal(){
+    document.getElementById('or-export-modal').classList.remove('open');
+    document.documentElement.style.overflow = '';
+    document.body.style.overflow = '';
+}
+function submitDocx(fname){
+    var ids=Array.from(selectedIds);
+    var form=document.createElement('form'); form.method='POST'; form.action='/admin/orders/generate-docx/';
+    var m=document.cookie.match(/csrftoken=([^;]+)/);
+    var ci=document.createElement('input'); ci.type='hidden'; ci.name='csrfmiddlewaretoken'; ci.value=m?m[1]:''; form.appendChild(ci);
+    var fn=document.createElement('input'); fn.type='hidden'; fn.name='filename'; fn.value=fname; form.appendChild(fn);
+    var pk=document.getElementById('or-export-include-packing');
+    var ip=document.createElement('input'); ip.type='hidden'; ip.name='include_packing'; ip.value=(pk && pk.checked)?'1':'0'; form.appendChild(ip);
+    ids.forEach(function(id){ var inp=document.createElement('input'); inp.type='hidden'; inp.name='ids[]'; inp.value=id; form.appendChild(inp); });
+    /* Excluded order items: all checkboxes that are NOT checked */
+    document.querySelectorAll('#or-export-body .em-item-cb').forEach(function(cb){
+        if(!cb.checked){
+            var inp=document.createElement('input'); inp.type='hidden'; inp.name='excluded_item_ids[]'; inp.value=cb.dataset.itemId; form.appendChild(inp);
+        }
+    });
+    /* Order options: "payment at our expense" and "add manager comment". */
+    document.querySelectorAll('#or-export-body .em-opt-pay-we').forEach(function(cb){
+        if(cb.checked){
+            var inp=document.createElement('input'); inp.type='hidden'; inp.name='pay_we_order_ids[]'; inp.value=cb.dataset.orderId; form.appendChild(inp);
+        }
+    });
+    document.querySelectorAll('#or-export-body .em-opt-note').forEach(function(cb){
+        if(cb.checked){
+            var oid = cb.dataset.orderId;
+            var inp=document.createElement('input'); inp.type='hidden'; inp.name='note_order_ids[]'; inp.value=oid; form.appendChild(inp);
+            /* We take the text from the edited textarea, not from the comment hidden in the DB. */
+            var ta = document.querySelector('#or-export-body .em-note-edit[data-order-id="'+oid+'"]');
+            var txt = ta ? ta.value : '';
+            var inpTxt = document.createElement('input'); inpTxt.type='hidden';
+            inpTxt.name='note_text_'+oid; inpTxt.value = txt;
+            form.appendChild(inpTxt);
+        }
+    });
+    /* Inline edits: we send only the fields that were actually changed */
+    var editsPayload = {};
+    Object.keys(pendingEdits).forEach(function(k){
+        var rec = pendingEdits[k];
+        var clean = {};
+        if(rec.variant_id) clean.variant_id = rec.variant_id;
+        if(rec.quantity!=null) clean.quantity = rec.quantity;
+        if(rec.bundle_id) clean.bundle_id = rec.bundle_id;
+        if(rec.attach_photo) clean.attach_photo = true;
+        if(rec.components){
+            var comps = {};
+            Object.keys(rec.components).forEach(function(ck){
+                if(ck === 'new'){
+                    if(Array.isArray(rec.components.new) && rec.components.new.length){
+                        comps.new = rec.components.new.map(function(n){
+                            return { variant_id:n.variant_id, quantity:n.quantity || 1 };
+                        });
+                    }
+                    return;
+                }
+                var c = rec.components[ck];
+                var cc = {};
+                if(c.delete) cc.delete = true;
+                if(c.variant_id) cc.variant_id = c.variant_id;
+                if(c.quantity!=null) cc.quantity = c.quantity;
+                if(c.attach_photo) cc.attach_photo = true;
+                if(Object.keys(cc).length) comps[ck] = cc;
+            });
+            if(Object.keys(comps).length) clean.components = comps;
+        }
+        if(Object.keys(clean).length) editsPayload[k] = clean;
+    });
+    if(Object.keys(editsPayload).length){
+        var ej=document.createElement('input'); ej.type='hidden'; ej.name='edits_json'; ej.value=JSON.stringify(editsPayload); form.appendChild(ej);
+    }
+    /* Instruction options + export token. */
+    var inclIns = document.getElementById('or-export-include-instructions');
+    var wantIns = !inclIns || inclIns.checked;
+    /* We don't ask about duplex: the backend turns it on itself if at least one of the
+       instructions is two pages long. Copies per number of bundles are always made: a bundle
+       ALWAYS comes with an instruction, so three bundles in an order = three sheets.
+     */
+    [['export_token', exportToken],
+     ['include_instructions', wantIns ? '1' : '0'],
+    ].forEach(function(kv){
+        var i=document.createElement('input'); i.type='hidden'; i.name=kv[0]; i.value=kv[1]; form.appendChild(i);
+    });
+
+    /* fetch, not form.submit(): this POST MUTATES THE DB (stock, bundle stock,
+       totals), so it can't be repeated just to get a second file. One request produces
+       both files, and the browser picks them up ready-made by token — in two separate
+       clicks, because Chromium blocks a second download from a single gesture.
+     */
+    var btn = document.getElementById('or-export-confirm');
+    var oldLabel = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Preparing…';
+    var fd = new FormData(form);
+    fetch('/admin/orders/generate-docx/', { method:'POST', body: fd, credentials:'same-origin' })
+        .then(function(r){
+            if (r.headers.get('content-type','').indexOf('application/json') === -1) {
+                /* The backend responded with a file (old branch) or an error — we don't break. */
+                return r.blob().then(function(b){ return { _blob: b }; });
+            }
+            return r.json();
+        })
+        .then(function(d){
+            btn.disabled = false; btn.textContent = oldLabel;
+            if (d._blob) { closeExportModal(); return; }
+            renderExportResult(d);
+        })
+        .catch(function(e){
+            btn.disabled = false; btn.textContent = oldLabel;
+            alert('Export failed: ' + e);
+        });
+}
+
+/* Result panel instead of a modal: two separate clicks for the two files. */
+function renderExportResult(d){
+    var body = document.getElementById('or-export-body');
+    if (d.error) { body.innerHTML = '<div style="padding:20px;color:#b91c1c;">' + d.error + '</div>'; return; }
+
+    /* The result screen has only download buttons and warnings. The name field
+       and checkboxes apply to the NEXT export; here they would only confuse.
+     */
+    ['or-export-fname', 'or-export-include-packing'].forEach(function(id){
+        var el = document.getElementById(id);
+        var row = el && el.closest('.em-fname, .em-opt');
+        if (row) row.style.display = 'none';
+    });
+
+    /* Both buttons in one row: they are two equal files of the same export, not a
+       primary action and a secondary one. flex:1 — so they split the width equally.
+     */
+    var btn = 'flex:1;height:auto;text-align:center;padding:14px 16px;'
+            + 'text-decoration:none;line-height:1.35;';
+
+    var h = '<div style="padding:22px;display:flex;flex-direction:column;gap:14px;">';
+    h += '<div style="display:flex;gap:12px;">';
+    h += '<a class="em-btn primary" style="' + btn + '" href="' + d.docx_url + '">Orders (.docx)</a>';
+    if (d.pdf_url) {
+        h += '<a class="em-btn primary" style="' + btn + '" href="' + d.pdf_url + '">Instructions (.docx)</a>';
+    }
+    h += '</div>';
+    if (d.placeholders && d.placeholders.length) {
+        var n = d.placeholders.length;
+        var word = n === 1 ? ' bundle' : ' bundles';
+        /* We build the lines ONCE: the same lines go both to the screen and to the clipboard —
+           otherwise the copied text would eventually diverge from what the person sees.
+         */
+        var lines = d.placeholders.map(function(p){
+            return 'order ' + p.order_number + ' — ' + p.bundle + ': ' + p.reason +
+                   (p.summary ? ' (' + p.summary + ')' : '');
+        });
+        h += '<div style="border:1px solid #fecaca;background:#fef2f2;border-radius:8px;padding:12px 14px;">' +
+             '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
+             '<div style="font-weight:700;color:#b91c1c;font-size:13px;flex:1;">' +
+             n + word + ' without instructions — include a paper copy</div>' +
+             '<span role="button" tabindex="0" class="or-export-copy" ' +
+             'style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:5px;' +
+             'cursor:pointer;border:1px solid #fca5a5;background:#fff;color:#b91c1c;' +
+             'user-select:none;white-space:nowrap;">Copy</span></div>' +
+             '<ul style="margin:0;padding-left:18px;font-size:12px;color:#7f1d1d;">';
+        lines.forEach(function(t){ h += '<li>' + t + '</li>'; });
+        h += '</ul></div>';
+        pendingCopyText = lines.join('\n');
+    } else {
+        pendingCopyText = '';
+    }
+    /* Sheets where the composition was changed and the name was filled in by the machine. They are
+       PRINTED —
+       this is not an error but a place where the person needs to check the dose: recalculating it
+       automatically doesn't always work, and this is where that is stated.
+     */
+    if (d.substituted && d.substituted.length) {
+        var sl = d.substituted.map(function(p){
+            return 'order ' + p.order_number + ' — ' + p.bundle + ': ' + (p.summary || 'composition changed');
+        });
+        h += '<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:12px 14px;">' +
+             '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">' +
+             '<div style="font-weight:700;color:#92400e;font-size:13px;flex:1;">' +
+             'Changed composition — the instructions were filled in automatically, check the dose</div>' +
+             '<span role="button" tabindex="0" class="or-export-copy" ' +
+             'style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:5px;' +
+             'cursor:pointer;border:1px solid #fcd34d;background:#fff;color:#92400e;' +
+             'user-select:none;white-space:nowrap;">Copy</span></div>' +
+             '<ul style="margin:0;padding-left:18px;font-size:12px;color:#78350f;">';
+        sl.forEach(function(t){ h += '<li>' + t + '</li>'; });
+        h += '</ul></div>';
+        pendingCopyText = (pendingCopyText ? pendingCopyText + '\n' : '') + sl.join('\n');
+    }
+    (d.warnings || []).forEach(function(w){
+        h += '<div style="border:1px solid #e5e7eb;background:#f9fafb;border-radius:8px;padding:10px 12px;font-size:12px;color:#6b7280;">' + w + '</div>';
+    });
+    h += '</div>';
+    body.innerHTML = h;
+
+    /* There may be two buttons (unchecked and substituted), but they copy the same
+       thing — the whole list of warnings: the manager pastes it in one go.
+     */
+    Array.prototype.forEach.call(document.querySelectorAll('.or-export-copy'), function(btn){
+        btn.addEventListener('click', function(){ exportCopyText(pendingCopyText, btn); });
+    });
+
+    document.getElementById('or-export-confirm').style.display = 'none';
+    document.getElementById('or-export-cancel').textContent = 'Close';
+}
+
+/* Text of the last "no instruction" list — the same as on screen. */
+var pendingCopyText = '';
+
+function exportCopyText(text, btn){
+    function done(ok){
+        var old = btn.textContent;
+        btn.textContent = ok ? 'Copied' : 'Failed';
+        setTimeout(function(){ btn.textContent = old; }, 1800);
+    }
+    if (!text) { done(false); return; }
+    /* navigator.clipboard exists only in a secure context. Prod is on https, but
+       the local admin may be on http — then we fall back to textarea+execCommand,
+       otherwise the button would silently do nothing.
+     */
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(function(){ done(true); },
+                                                 function(){ done(false); });
+        return;
+    }
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+    done(ok);
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+    var genBtn=document.getElementById('or-gen-top-btn');
+    if(genBtn) genBtn.addEventListener('click', openExportModal);
+    document.getElementById('or-export-close').addEventListener('click', closeExportModal);
+    document.getElementById('or-export-cancel').addEventListener('click', closeExportModal);
+    document.getElementById('or-export-modal').addEventListener('click', function(e){ if(e.target===this) closeExportModal(); });
+    document.getElementById('or-export-confirm').addEventListener('click', function(){
+        /* closeExportModal() WAS here and was removed: the modal becomes a result panel
+           with links to both files.
+         */
+        submitDocx(document.getElementById('or-export-fname').value.trim() || defaultFilename());
+    });
+    updateActionBar();
+    if(window._updateCounter) window._updateCounter();
+    /* cl-bar is assembled in base_site.html on DOMContentLoaded — this is the only place
+       where our "Reset filters" button can be inserted.
+     */
+    _renderResetBtn();
+});
+
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') closePop(); });
+
+/* ── Init ── */
+/* We do NOT restore the list state on entry: we always show the fresh first page
+   that the server has already rendered (allData/srvMeta). Previously, restoring the state made
+   a repeated request to the server — and the table "reloaded by itself"/jumped
+   a second after opening. Filtering/sorting/pagination work within
+   the current session (without reload).
+ */
+function _hasActiveState(){
+    return !!(sortField || currentPage > 1 || (pageSize && pageSize !== (srvMeta.page_size||25)) ||
+        (F.numMode==='exact'&&F.numExact) || (F.numMode==='range'&&(F.numFrom||F.numTo)) ||
+        F.clientQ || (F.statuses&&F.statuses.length) || F.payment!=='all' || F.delivery!=='all' ||
+        F.dateMin || F.dateMax || F.priceMin!=null || F.priceMax!=null ||
+        (F.selectedItems&&F.selectedItems.length) || (F.drops&&F.drops.length) ||
+        F.commClient!=='all' || F.commManager!=='all' || F.commSource!=='all' || F.imported!=='all');
+}
+_loadState();
+_syncColBadges();
+if(_hasActiveState()){
+    /* Saved filters/sorting/page → apply in one request
+       (replaces the server's first render, without a "jump" a second later).
+     */
+    fetchOrders();
+} else {
+    renderRows(allData);
+}
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,353 @@
+{% extends "admin/change_form.html" %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  /* ── Page heading ── */
+  #content h1 { display: none !important; }
+
+  /* ── Name ── */
+  .field-name label { font-weight: normal !important; }
+  .field-name,
+  .field-name > div { padding-right: 0 !important; margin-right: 0 !important; }
+  .field-name > div { overflow: hidden; }
+  .field-name .vTextField {
+    display: block; width: 100% !important;
+    max-width: none !important; box-sizing: border-box;
+  }
+
+  /* ── Discount % ── */
+  /* 3-digit field (max 100). The #content specificity is needed to
+     override the global `.aligned .form-row input[type=number] {width:100% !important}`
+     in base_site.html (~line 3242).
+   */
+  #content .field-discount_percent input,
+  #content input#id_discount_percent,
+  #content-main .field-discount_percent input {
+    width: 56px !important; min-width: 56px !important; max-width: 56px !important;
+    box-sizing: border-box !important; padding: 0 6px !important; text-align: center !important;
+    display: inline-block !important;
+  }
+  /* Container with the field — do NOT stretch to full width, otherwise a lot of empty space
+     is left around the field.
+   */
+  #content .form-row.field-discount_percent > div {
+    width: auto !important; display: inline-block !important;
+  }
+  /* Specificity must be ≥ that of `#content-main .form-row { display: flex }` below,
+     otherwise `display: none` loses to the id selector.
+   */
+  #content-main .form-row.field-discount_start.field-discount_end,
+  #content-main .field-discount_start,
+  #content-main .field-discount_end { display: none !important; }
+
+  /* ── Action panel ── */
+  .submit-row:not(.submit-row-top) { display: none !important; }
+
+  /* ── Spacing ── */
+  #content-main .form-row { display: flex !important; align-items: flex-start !important; padding: 14px 20px !important; }
+  #content-main fieldset.module { margin-bottom: 0 !important; padding-bottom: 0 !important; }
+  #content-main fieldset.module .form-row:last-of-type { border-bottom: 1px solid #e5e7eb !important; }
+  .form-row label { font-weight: 400 !important; padding-top: 0 !important; float: none !important; }
+  #content-main .form-row > div { padding-top: 0 !important; }
+  #content-main .flex-container { align-items: flex-start !important; }
+  #content-main .flex-container.checkbox-row { align-items: center !important; }
+</style>
+{% include "admin/_form_guard.html" %}
+{% endblock %}
+
+{% block content_title %}{% endblock %}
+{% block object-tools %}{% endblock %}
+
+{% block submit_buttons_top %}
+{% include "admin/_submit_buttons_top.html" %}
+{% endblock %}
+{% block submit_buttons_bottom %}{% endblock %}
+
+{% block content %}
+{{ block.super }}
+<style>
+  /* Custom picker for the parent category — in the CRM style (like products/bundles). */
+  .cat-pick-trigger {
+    display: inline-flex; align-items: center;
+    height: 32px;
+    padding: 4px 10px; background: #fff;
+    border: 1px solid #d1d5db; border-radius: 4px;
+    cursor: pointer; font-size: 13px; color: #374151;
+    text-align: left; font: inherit; position: relative;
+    box-sizing: border-box;
+    /* Width is set from JS = popup width (exactly the longest row). */
+  }
+  .cat-pick-trigger:hover { border-color: #9ca3af; }
+  .cat-pick-trigger .cat-pick-ph { color: #9ca3af; }
+
+  .cat-pick-popup {
+    position: fixed; z-index: 99999;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.10);
+    overflow: hidden;
+  }
+  .cat-pick-popup-inner {
+    max-height: 300px; overflow-y: auto;
+    padding: 0;
+    white-space: nowrap;
+  }
+  .cat-pick-item {
+    position: relative;
+    padding: 6px 14px; font-size: 13px; color: #374151;
+    cursor: pointer; user-select: none;
+    transition: background .12s;
+    display: flex; align-items: center;
+  }
+  .cat-pick-item:hover { background: #f3f4f6; }
+  .cat-pick-item.is-selected { font-weight: 600; color: #111827; }
+  /* Special look for the "no parent" option (root category). */
+  .cat-pick-item.is-root {
+    color: #6b7280; font-style: italic;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .cat-pick-item.is-root.is-selected { color: #374151; }
+  /* Tree-lines in the popup — same style as in the category change_list. */
+  .cat-pick-item .cat-vline {
+    position: absolute; top: 0; bottom: 0; width: 2px;
+    background: #d1d5db; pointer-events: none;
+  }
+  .cat-pick-item .cat-vline.is-first { top: 8px; }
+  .cat-pick-item .cat-vline.is-last  { bottom: 50%; }
+  .cat-pick-item .cat-hline {
+    position: absolute; top: 50%; height: 2px;
+    background: #d1d5db; pointer-events: none;
+  }
+  .cat-pick-item .cat-elbow {
+    position: absolute;
+    background:
+      linear-gradient(#d1d5db, #d1d5db) left top / 2px calc(100% - 6px) no-repeat,
+      linear-gradient(#d1d5db, #d1d5db) right bottom / calc(100% - 6px) 2px no-repeat,
+      radial-gradient(circle 6px at top right, transparent 0 4px, #d1d5db 4px 6px, transparent 6px) left bottom / 6px 6px no-repeat;
+    pointer-events: none;
+  }
+</style>
+<script>
+(function() {
+  document.addEventListener('DOMContentLoaded', function() {
+    var sel = document.getElementById('id_parent');
+    if (!sel) return;
+
+    /* Hide the native select, put the custom trigger next to it. */
+    sel.style.display = 'none';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cat-pick-trigger';
+    sel.parentNode.insertBefore(btn, sel.nextSibling);
+
+    var popup = document.createElement('div');
+    popup.className = 'cat-pick-popup';
+    popup.style.display = 'none';
+    document.body.appendChild(popup);
+
+    /* Globally on the popup: right-click and middle button do nothing. */
+    ['mousedown','mouseup','click','auxclick'].forEach(function(ev){
+      popup.addEventListener(ev, function(e) {
+        if (e.button !== 0) { e.preventDefault(); e.stopPropagation(); }
+      }, true);
+    });
+
+    function updateBtn() {
+      var opt = sel.options[sel.selectedIndex];
+      if (opt && opt.value) {
+        btn.innerHTML = '';
+        btn.appendChild(document.createTextNode(opt.text));
+      } else {
+        btn.innerHTML = '<span class="cat-pick-ph">Not selected</span>';
+      }
+    }
+
+    function renderPopup() {
+      popup.innerHTML = '';
+      var inner = document.createElement('div');
+      inner.className = 'cat-pick-popup-inner';
+      popup.appendChild(inner);
+      /* Parse the options: Django adds a "— " prefix for each depth level.
+         Parse them out and draw the hierarchy with positioned lines.
+       */
+      var opts = Array.from(sel.options).map(function(opt) {
+        var t = opt.text || '';
+        var d = 0;
+        while (t.indexOf('— ') === 0) { d++; t = t.slice(2); }
+        return { opt: opt, name: t, depth: d };
+      });
+      /* For each index — whether it is the last child of its parent (at its own
+         depth) and, for each ancestor level, whether its chain has already ended.
+       */
+      function isLastAtDepth(i, d) {
+        for (var j = i + 1; j < opts.length; j++) {
+          if (opts[j].depth < d) return true;
+          if (opts[j].depth === d) return false;
+        }
+        return true;
+      }
+      var STEP = 18;        // step per level
+      var LINE_OFFSET = 18; // line at the center of the first letter of the parent's text
+      var GAP = 6;          // gap between hline and text
+      opts.forEach(function(o, i) {
+        var row = document.createElement('div');
+        row.className = 'cat-pick-item' + (o.opt.value === sel.value ? ' is-selected' : '');
+        if (o.depth > 0) {
+          /* Vlines for ancestor levels */
+          for (var lvl = 1; lvl < o.depth; lvl++) {
+            if (isLastAtDepth(i, lvl)) continue;
+            var v = document.createElement('span');
+            v.className = 'cat-vline';
+            v.style.left = (LINE_OFFSET + (lvl - 1) * STEP) + 'px';
+            row.appendChild(v);
+          }
+          var ownX = LINE_OFFSET + (o.depth - 1) * STEP;
+          var isFirstP = (i === 0 || opts[i - 1].depth < o.depth);
+          var isLastP  = isLastAtDepth(i, o.depth);
+          if (isLastP) {
+            var el = document.createElement('span');
+            el.className = 'cat-elbow';
+            el.style.left = ownX + 'px';
+            el.style.top = isFirstP ? '8px' : '0';
+            el.style.height = isFirstP ? 'calc(50% - 6px)' : 'calc(50% + 2px)';
+            el.style.width = (STEP - GAP) + 'px';
+            row.appendChild(el);
+          } else {
+            var v = document.createElement('span');
+            v.className = 'cat-vline';
+            v.style.left = ownX + 'px';
+            if (isFirstP) v.classList.add('is-first');
+            row.appendChild(v);
+            var hl = document.createElement('span');
+            hl.className = 'cat-hline';
+            hl.style.left = ownX + 'px';
+            hl.style.width = (STEP - GAP) + 'px';
+            row.appendChild(hl);
+          }
+          row.style.paddingLeft = (ownX + STEP) + 'px';
+        }
+        var txt = document.createElement('span');
+        if (!o.opt.value) {
+          /* "No parent" — root category. */
+          row.classList.add('is-root');
+          txt.textContent = 'No parent category (root)';
+        } else {
+          txt.textContent = o.name || '—';
+        }
+        row.appendChild(txt);
+        row.addEventListener('mousedown', function(e) {
+          if (e.button !== 0) { e.preventDefault(); e.stopPropagation(); return; }
+          e.preventDefault();
+          sel.value = o.opt.value;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+          updateBtn();
+          closePop();
+          if (window.pgMarkDirty) window.pgMarkDirty();
+        });
+        inner.appendChild(row);
+      });
+    }
+
+    function openPop() {
+      renderPopup();
+      var r = btn.getBoundingClientRect();
+      popup.style.left = (r.left + window.scrollX) + 'px';
+      popup.style.top  = (r.bottom + window.scrollY + 4) + 'px';
+      /* The popup picks its own width by content — no minWidth from the button. */
+      popup.style.minWidth = '';
+      popup.style.display = 'block';
+    }
+    function closePop() { popup.style.display = 'none'; }
+    /* Measure the popup's real width once and set the same width on the
+       button — so the button and the dropdown list have the same width.
+     */
+    function syncTriggerWidth() {
+      renderPopup();
+      popup.style.visibility = 'hidden';
+      popup.style.display = 'block';
+      var w = Math.ceil(popup.getBoundingClientRect().width);
+      popup.style.display = 'none';
+      popup.style.visibility = '';
+      if (w) btn.style.width = w + 'px';
+    }
+
+    /* Initial width sync: button = popup, by the longest row. */
+    syncTriggerWidth();
+
+    btn.addEventListener('mousedown', function(e) {
+      if (e.button !== 0) { e.preventDefault(); e.stopPropagation(); return; }
+      e.stopPropagation();
+      popup.style.display === 'none' ? openPop() : closePop();
+    });
+    btn.addEventListener('contextmenu', function(e) {
+      e.stopPropagation(); /* keep the browser menu, but don't open the block */
+    });
+
+    document.addEventListener('mousedown', function(e) {
+      if (e.button !== 0) return;
+      if (popup.contains(e.target) || btn.contains(e.target)) return;
+      closePop();
+    }, true);
+
+    updateBtn();
+  });
+})();
+
+/* ── discount_percent: fixed width + input limit 0..100 ────────
+   The global CSS in base_site.html sets input[type=number] {width:100%!important}
+   with higher specificity. So we apply inline styles from JS — they can't be overridden.
+ */
+(function() {
+  document.addEventListener('DOMContentLoaded', function() {
+    var inp = document.getElementById('id_discount_percent');
+    if (!inp) return;
+    /* Inline styles have the highest priority (except !important in CSS — which an
+       inline style without !important does not beat; hence setProperty with 'important').
+     */
+    var s = inp.style;
+    s.setProperty('width', '36px', 'important');
+    s.setProperty('min-width', '36px', 'important');
+    s.setProperty('max-width', '36px', 'important');
+    /* Set each side explicitly — so the shorthand doesn't get rounded differently. */
+    s.setProperty('padding-top', '0', 'important');
+    s.setProperty('padding-bottom', '0', 'important');
+    s.setProperty('padding-left', '6px', 'important');
+    s.setProperty('padding-right', '6px', 'important');
+    /* The native number spinner may take ~16px on the right after submit/focus —
+       force-hide it in all states.
+     */
+    s.setProperty('-webkit-appearance', 'none', 'important');
+    s.setProperty('-moz-appearance', 'textfield', 'important');
+    s.setProperty('appearance', 'textfield', 'important');
+    s.setProperty('text-align', 'left', 'important');
+    s.setProperty('display', 'inline-block', 'important');
+    /* Limit input: 0..100. The browser's type=number does NOT block manually typed
+       digits > max, so we clamp it ourselves.
+     */
+    function clamp() {
+      if (inp.value === '' || inp.value === '-') return;
+      var v = parseFloat(inp.value);
+      if (isNaN(v)) { inp.value = ''; return; }
+      if (v < 0)   inp.value = '0';
+      if (v > 100) inp.value = '100';
+    }
+    inp.addEventListener('input', clamp);
+    inp.addEventListener('blur',  clamp);
+    /* Block keyboard input that would produce a 4th digit (>100) — an extra safeguard. */
+    inp.addEventListener('keydown', function(e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      var allowed = ['Backspace','Delete','Tab','Escape','Enter','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','.',','];
+      if (allowed.indexOf(e.key) !== -1) return;
+      if (!/^[0-9]$/.test(e.key)) return; // let other keys pass through as is
+      // prediction: what the value will be after the keypress
+      var start = inp.selectionStart, end = inp.selectionEnd;
+      var next = (inp.value.slice(0, start) + e.key + inp.value.slice(end));
+      var n = parseFloat(next);
+      if (!isNaN(n) && n > 100) { e.preventDefault(); }
+    });
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+@page {
+    size: A4;
+    margin: 1.2cm 1.4cm 2.1cm 1.4cm;
+    @frame footer {
+        -pdf-frame-content: footerContent;
+        bottom: 0.6cm; left: 1.4cm; right: 1.4cm; height: 1.4cm;
+    }
+}
+* { font-family: 'DejaVuSans'; }
+body { font-size: 9.5pt; color: #374151; }
+
+/* ── Green header (as in the email) ── */
+table.brandbar { width: 100%; background: #1a5c2a; }
+table.brandbar td { padding: 16px 20px; }
+.brand { font-size: 15pt; font-weight: bold; color: #ffffff; }
+
+/* ── Order heading (like the h2 in the email) ── */
+table.otitle { width: 100%; margin: 16px 0 12px 0; }
+.otitle .onum { font-size: 15pt; font-weight: bold; color: #111827; }
+.otitle .odate { text-align: right; font-size: 8.5pt; color: #9ca3af; vertical-align: bottom; }
+
+/* ── Info block (bordered, like in the email) ── */
+table.info { width: 100%; border: 0.75pt solid #e5e7eb; border-collapse: collapse; }
+table.info td { padding: 8px 16px; font-size: 9.5pt; border-bottom: 0.5pt solid #f3f4f6; vertical-align: top; }
+table.info tr.last td { border-bottom: none; }
+table.info .k { width: 145px; color: #6b7280; }
+table.info .v { width: 100%; color: #374151; }
+
+/* ── Order contents ── */
+.sect { font-size: 12.5pt; font-weight: bold; color: #111827; margin: 18px 0 8px 0; }
+
+table.items { width: 100%; border: 0.75pt solid #e5e7eb; border-collapse: collapse; }
+table.items td { padding: 10px 16px; border-bottom: 0.5pt solid #f3f4f6; vertical-align: top; }
+table.items tr.last td { border-bottom: none; }
+table.items td.photo { width: 76px; padding: 10px 12px 10px 16px; }
+img.thumb { width: 60px; height: 60px; }
+.ph-empty { width: 60px; height: 60px; background: #f3f4f6; }
+.pname { font-size: 9.5pt; font-weight: bold; color: #111827; }
+.pname a { color: #111827; text-decoration: none; }
+.psku { font-size: 8pt; color: #9ca3af; padding-top: 3px; }
+table.items td.amount { width: 115px; text-align: right; vertical-align: top; }
+.amount .sum { font-size: 9.5pt; font-weight: bold; color: #111827; white-space: nowrap; }
+.amount .unit { font-size: 8pt; color: #9ca3af; padding-top: 3px; white-space: nowrap; }
+
+/* ── Total (as in the email: right-aligned, no border) ── */
+table.total { width: 100%; margin-top: 12px; }
+table.total .tlbl { text-align: right; font-size: 11pt; color: #6b7280; vertical-align: middle; padding-right: 12px; }
+table.total .tval { text-align: right; font-size: 15pt; font-weight: bold; color: #111827; width: 150px; vertical-align: middle; }
+
+.comment { margin-top: 14px; font-size: 9pt; color: #6b7280; }
+.comment b { color: #374151; }
+
+/* ── Footer (2 lines, as in the email) ── */
+#footerContent { text-align: center; color: #9ca3af; }
+#footerContent .fline1 { padding-top: 8px; border-top: 0.5pt solid #f3f4f6; font-size: 8.5pt; color: #6b7280; }
+#footerContent .fphone { color: #374151; font-weight: bold; }
+#footerContent .fline2 { padding-top: 4px; font-size: 8pt; color: #9ca3af; }
+</style>
+</head>
+<body>
+
+<table class="brandbar"><tr><td><span class="brand">{{ site_name }}</span></td></tr></table>
+
+<table class="otitle">
+  <tr>
+    <td class="onum">Order #{{ order.order_number }}</td>
+    <td class="odate">{{ order.created_at|date:"d.m.Y H:i" }}</td>
+  </tr>
+</table>
+
+<table class="info">
+  <tr>
+    <td class="k">Full name</td>
+    <td class="v">{{ order.customer_name }}</td>
+  </tr>
+  <tr>
+    <td class="k">E-mail</td>
+    <td class="v">{{ order.customer_email }}</td>
+  </tr>
+  <tr>
+    <td class="k">Phone</td>
+    <td class="v">{{ order.customer_phone }}</td>
+  </tr>
+  <tr>
+    <td class="k">Delivery method</td>
+    <td class="v">{{ order.get_delivery_type_display }} (at the carrier's rates)</td>
+  </tr>
+  <tr class="last">
+    <td class="k">Address</td>
+    <td class="v">{{ order.delivery_address }}</td>
+  </tr>
+</table>
+
+<div class="sect">Order items</div>
+
+<table class="items">
+  {% for item in items %}
+  <tr{% if forloop.last %} class="last"{% endif %}>
+    <td class="photo">
+      {% if item.photo_url %}<img class="thumb" src="{{ item.photo_url }}" width="60" height="60" alt="">{% else %}<div class="ph-empty"></div>{% endif %}
+    </td>
+    <td class="name">
+      <div class="pname">{% if item.link %}<a href="{{ site_url }}{{ item.link }}">{{ item.name }}</a>{% else %}{{ item.name }}{% endif %}</div>
+      {% if item.sku %}<div class="psku">SKU: {{ item.sku }}</div>{% endif %}
+    </td>
+    <td class="amount">
+      <div class="sum">{{ item.total|floatformat:0 }} UAH</div>
+      {% if item.quantity > 1 %}<div class="unit">{{ item.price|floatformat:0 }} × {{ item.quantity }}</div>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+<table class="total">
+  <tr>
+    <td class="tlbl">Total</td>
+    <td class="tval">{{ order.total_price|floatformat:0 }} UAH</td>
+  </tr>
+</table>
+
+{% if order.comment %}
+<div class="comment"><b>Comment:</b> {{ order.comment }}</div>
+{% endif %}
+
+<div id="footerContent">
+  <div class="fline1">Questions? Call us: <span class="fphone">+380000000000</span></div>
+  <div class="fline2">© {{ site_name }} &nbsp;&nbsp; magiyaroslyn.com</div>
+</div>
+
+</body>
+</html>

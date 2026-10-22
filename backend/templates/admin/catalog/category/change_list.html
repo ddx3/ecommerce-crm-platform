@@ -1,0 +1,1332 @@
+{% extends "admin/change_list.html" %}
+{% load i18n %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  /* The drag-handle fills the whole cell so hover catches any point of the td.
+     By default ⠿ is arrow-colored (#9ca3af), and darkens on td hover.
+   */
+  td.field-drag_handle { cursor: grab; }
+  td.field-drag_handle:active { cursor: grabbing; }
+  .drag-handle {
+    cursor: inherit;
+    font-size: 18px;
+    color: #9ca3af;
+    user-select: none;
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 100%;
+    line-height: 1;
+    transition: color 0.12s;
+  }
+  /* Hover on the WHOLE cell — not just on the ⠿ itself. */
+  td.field-drag_handle:hover .drag-handle { color: #1f2937; }
+
+  /* ── Separate column for the chevron arrow (impossible to miss).
+     #result_list specificity — to override the general `#result_list tbody td`.
+   */
+  #result_list thead th.column-cat-toggle,
+  #result_list tbody td.cat-toggle-col {
+    width: 36px !important; min-width: 36px !important; max-width: 36px !important;
+    padding: 0 !important; text-align: center !important; vertical-align: middle !important;
+  }
+  /* The whole cell is clickable — the button takes 100% of the td's width and height.
+     By default the arrow is very light; on hover only the arrow color
+     darkens, the background doesn't change.
+   */
+  .cat-toggle {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 100%;
+    background: none; border: none; cursor: pointer; padding: 0;
+    color: #9ca3af; user-select: none;
+    transition: color 0.12s;
+  }
+  .cat-toggle:hover { color: #1f2937; }
+  /* SVG = chevron-right (›). By default no rotate → ›. .open → rotate(90) → ⌄.
+     Same scheme as .ntf-expand-btn (notifications).
+   */
+  .cat-toggle svg {
+    display: block; width: 18px; height: 18px;
+    transition: transform 0.15s ease;
+    transform-origin: center center;
+  }
+  .cat-toggle.open svg { transform: rotate(90deg); }
+
+  /* Counter of recursive children — a plain gray "(N)", next to the name. */
+  .cat-children-count {
+    margin-left: 6px; color: #9ca3af;
+    font-size: 12px; font-weight: 400; user-select: none;
+  }
+  /* Parent rows are slightly bolder — so the eye reads the structure right away. */
+  tr.cat-has-children th.field-display_name a,
+  tr.cat-has-children td.field-display_name a { font-weight: 600 !important; color: #1f2937 !important; }
+
+  /* ── Tree-lines in the NAME column ─────────────────────────────────────
+     Drawn as position:absolute layers in td.field-display_name (with
+     position:relative). Height is automatically 100% of the td — rows don't "jump".
+     overflow:visible — so the lines pass OVER the row-separator border.
+   */
+  #result_list tbody th.field-display_name,
+  #result_list tbody td.field-display_name { position: relative; overflow-x: clip !important; overflow-y: visible !important; }
+  /* Lines are 2px, color same as the checkbox. */
+  .cat-vline {
+    position: absolute; top: -1px; bottom: -1px; width: 2px;
+    background: #d1d5db; pointer-events: none; z-index: 2;
+  }
+  .cat-vline.is-first { top: 8px; }
+  /* --cat-y-shift is set from JS — pixel offset between the geometric center
+     of the cell and the visual center of the letter (measured via the Range API).
+   */
+  .cat-vline.is-last { bottom: calc(50% - var(--cat-y-shift, 0px)); }
+  .cat-hline {
+    position: absolute; top: 50%; height: 2px;
+    background: #d1d5db; pointer-events: none; z-index: 2;
+    transform: translateY(calc(-1px + var(--cat-y-shift, 0px)));
+  }
+  .cat-elbow {
+    position: absolute;
+    /* L-shape with a rounded corner via background (like vline/hline), not
+       border+radius — on Retina (Mac) a border blurred the line and it looked thinner.
+       Straight segments are exactly 2px, the corner is a radial-gradient arc (r=6px).
+     */
+    background:
+      linear-gradient(#d1d5db, #d1d5db) left top / 2px calc(100% - 6px) no-repeat,
+      linear-gradient(#d1d5db, #d1d5db) right bottom / calc(100% - 6px) 2px no-repeat,
+      radial-gradient(circle 6px at top right, transparent 0 4px, #d1d5db 4px 6px, transparent 6px) left bottom / 6px 6px no-repeat;
+    pointer-events: none; z-index: 2;
+  }
+
+  /* The insertion-point line is a separate absolute div (#cat-drop-line), NOT a pseudo-element
+     on <tr>: the browser turns ::after on a row into an anonymous table-cell, and with
+     table-layout:fixed
+     the name column collapsed to half. The overlay doesn't affect anything in the layout.
+   */
+  #cat-drop-line { position: fixed; height: 2px; background: #6b7280; z-index: 50; pointer-events: none; display: none; }
+  tr.cat-dragging { opacity: 0.4; }
+  /* During a custom category drag: "grabbing" cursor everywhere, no text selection. */
+  body.cat-dragging-active, body.cat-dragging-active * { cursor: grabbing !important; user-select: none !important; }
+  th.column-drag_handle { width: 30px; }
+
+  /* Table styling to match product table */
+  /* table-layout:fixed — so the NAME column width doesn't "jump" when expanding
+     subcategories. In auto mode the browser fit the column to the widest visible
+     row (deeply nested names with a big indent), so expanding stretched it.
+     We fix the widths of all columns except display_name; it takes the remainder and no
+     longer depends on content. IMPORTANT (Safari gotcha): widths in px only, no calc(%).
+   */
+  #result_list { border-collapse: collapse !important; border-top: none !important; --hairline-color: transparent; }
+  /* table#result_list (higher specificity than `#result_list`) — overrides the
+     global base_site.html `#result_list{table-layout:auto!important}`, which
+     comes LATER in the code and with equal specificity would win even against !important.
+   */
+  table#result_list { table-layout: fixed !important; width: 100% !important; }
+  #result_list thead th.action-checkbox-column { width: 38px !important; }
+  #result_list thead th.column-drag_handle { width: 30px !important; }
+  #result_list thead th.column-show_discount { width: 340px !important; }
+  #result_list thead th.column-is_active { width: 340px !important; }
+  /* column-cat-toggle (36px) is set above; column-display_name intentionally has no width —
+     it takes all the rest and keeps a stable width.
+   */
+  #result_list td, #result_list th { border-top: none !important; }
+  #result_list thead th {
+    background: #f9fafb !important; border-bottom: 1px solid #e5e7eb !important;
+    border-left: 1px solid #e5e7eb !important; padding: 10px 12px !important;
+    font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important;
+    letter-spacing: 0.4px !important; color: #6b7280 !important; white-space: nowrap !important;
+    vertical-align: middle !important; text-align: left !important;
+  }
+  #result_list thead th:first-child { border-left: none !important; }
+  #result_list tbody tr { border-bottom: 1px solid #e5e7eb !important; height: 56px; }
+  #result_list tbody tr.row1 { background: #fff !important; }
+  #result_list tbody tr.row2 { background: #f9fafb !important; }
+  #result_list tbody tr:hover { background: #eef0f3 !important; }
+  #result_list tbody td, #result_list tbody th {
+    padding: 8px 12px !important; font-size: 13px !important; vertical-align: middle !important;
+    border-left: 1px solid #e5e7eb !important; border-bottom: none !important;
+    font-weight: 400 !important; color: #374151 !important; overflow: hidden !important;
+    height: 56px !important; box-sizing: border-box !important;
+  }
+  #result_list tbody td:first-child, #result_list tbody th:first-child { border-left: none !important; }
+  #result_list tbody th a { color: #374151 !important; text-decoration: none !important; font-weight: 400 !important; }
+  /* Cancel the global line-clamp for categories: next to the <a> in the cell
+     there are the drag-handle, indent and chevron — they need inline flow
+   */
+  #result_list tbody th.field-display_name a,
+  #result_list tbody td.field-display_name a {
+    display: inline !important;
+    max-height: none !important;
+    -webkit-line-clamp: none !important;
+    overflow: visible !important;
+    line-height: inherit !important;
+  }
+  #result_list tbody th.field-display_name,
+  #result_list tbody td.field-display_name { white-space: nowrap; }
+  #result_list .field-is_active input[type=checkbox] {
+    width: 16px !important; height: 16px !important;
+    cursor: pointer !important; accent-color: #374151 !important; vertical-align: middle !important;
+  }
+
+  /* ── Clickable filter headers ──
+     pointer-events: auto !important — base_site.html sets inline
+     th.style.pointerEvents='none' on all #result_list thead th, which kills the click.
+   */
+  #result_list thead th.cat-flt-th {
+    cursor: pointer !important; user-select: none; position: relative;
+    padding-right: 26px !important;
+    pointer-events: auto !important;
+  }
+  #result_list thead th.cat-flt-th:hover, #result_list thead th.cat-flt-th.col-open { color: #1f2937 !important; background: #f3f4f6 !important; }
+  #result_list thead th.cat-flt-th.col-on { background: #d1d5db !important; color: #1f2937 !important; }
+  #result_list thead th .th-badge { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; pointer-events: none; color: #9ca3af; }
+  #result_list thead th.cat-flt-th:hover .th-badge, #result_list thead th.cat-flt-th.col-on .th-badge { color: #374151; }
+  /* Hide the standard Django sort arrows — we have our own badge. */
+  #result_list thead th.cat-flt-th .sortoptions { display: none !important; }
+
+  /* Master toggle in the header (column-cat-toggle): a single chevron button that
+     expands/collapses all branches. Size/hover — same as .cat-toggle.
+     pointer-events: auto !important — base_site.html sets inline
+     th.style.pointerEvents='none' on all #result_list thead th.
+   */
+  #result_list thead th.column-cat-toggle {
+    pointer-events: auto !important; cursor: pointer !important;
+  }
+  .cat-master-toggle {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 100%;
+    background: none; border: none; cursor: pointer; padding: 0;
+    color: #9ca3af; user-select: none;
+    transition: color 0.12s;
+  }
+  .cat-master-toggle:hover { color: #1f2937; }
+  .cat-master-toggle svg {
+    display: block; width: 18px; height: 18px;
+    transition: transform 0.15s ease;
+    transform-origin: center center;
+  }
+  .cat-master-toggle.open svg { transform: rotate(90deg); }
+
+  /* ── Flat mode when searching by name ──
+     Hide tree-lines, reset indent, hide chevron — just a list of what was found.
+   */
+  #result_list tbody.cat-flat-mode .cat-vline,
+  #result_list tbody.cat-flat-mode .cat-hline,
+  #result_list tbody.cat-flat-mode .cat-elbow { display: none !important; }
+  #result_list tbody.cat-flat-mode th.field-display_name,
+  #result_list tbody.cat-flat-mode td.field-display_name { padding-left: 12px !important; }
+  #result_list tbody.cat-flat-mode .cat-toggle { visibility: hidden !important; }
+  #result_list tbody.cat-flat-mode .cat-children-count { display: none !important; }
+  /* The category path (parent › child) is shown only in flat mode.
+     Segments and separators have the same spacing; the › arrow is larger than the text.
+   */
+  .cat-flat-path { display: none; }
+  #result_list tbody.cat-flat-mode .cat-flat-path { display: inline; }
+  #result_list tbody.cat-flat-mode .cat-flat-path:empty { display: none; }
+  .cat-path-name { color: #9ca3af; font-size: 12px; }
+  .cat-path-sep  { color: #9ca3af; font-size: 16px; margin: 0 8px; line-height: 1; vertical-align: -1px; }
+
+  /* Highlight mode: highlight matched rows, structure preserved. */
+  #result_list tbody tr.cat-search-hit,
+  #result_list tbody tr.cat-search-hit.row1,
+  #result_list tbody tr.cat-search-hit.row2 { background: #fef9c3 !important; }
+  #result_list tbody tr.cat-search-hit:hover { background: #fef08a !important; }
+
+  /* ── Popover ── */
+  #cat-flt-pop {
+    display: none; position: fixed; z-index: 9999; background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0 0 6px 6px;
+    box-shadow: 0 6px 16px rgba(0,0,0,.18);
+    overflow: hidden;
+    width: 200px;
+  }
+  #cat-flt-pop.open { display: block; }
+  .fp-pop-body { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+  .fp-search { width: 100%; box-sizing: border-box; height: 28px; padding: 0 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; outline: none; }
+  .fp-search:focus { border-color: #9ca3af; }
+  .fp-item { display: flex; align-items: center; gap: 6px; padding: 0; font-size: 13px; line-height: 1; color: #374151; }
+  .fp-item input[type=radio] {
+    appearance: none; -webkit-appearance: none;
+    width: 14px; height: 14px; flex-shrink: 0;
+    border: 1.5px solid #d1d5db; border-radius: 50%;
+    background: #fff; cursor: pointer; position: relative;
+    margin: 0; transition: background .12s, border-color .12s;
+  }
+  .fp-item input[type=radio]:hover { border-color: #9ca3af; }
+  .fp-item input[type=radio]:checked { background: #1f2937; border-color: #1f2937; }
+  .fp-item input[type=radio]:checked::after {
+    content: ''; position: absolute; left: 3px; top: 0px;
+    width: 4px; height: 8px; border: 1.5px solid #fff;
+    border-top: none; border-left: none; transform: rotate(45deg);
+  }
+</style>
+{% endblock %}
+
+{% block footer %}
+{{ block.super }}
+<script>
+(function () {
+  var REORDER_URL = '/admin/catalog/reorder-categories/';
+  var STORAGE_KEY = 'cat_collapsed';
+  var tbody = document.querySelector('#result_list tbody');
+  if (!tbody) return;
+
+  var dragGroup    = [];
+  var parentMap    = {};
+  var collapsed    = {};  /* pk -> true */
+
+  /* ── Persist collapse state ──
+     localStorage is the SINGLE source of truth for the collapse state. The master toggle and the
+     filters
+     (2nd IIFE below) write state directly to localStorage, without touching this in-memory
+     copy. So BEFORE changing/applying state we resync via
+     loadCollapsed(), otherwise a click on a chevron after "collapse all" computes
+     visibility
+     from stale state (everything expanded) → expands the whole tree + saveCollapsed
+     overwrites the master toggle's state.
+   */
+  function loadCollapsed() {
+    try { var s = localStorage.getItem(STORAGE_KEY); collapsed = s ? JSON.parse(s) : {}; } catch(e) { collapsed = {}; }
+  }
+  loadCollapsed();
+  function saveCollapsed() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(collapsed)); } catch(e) {}
+  }
+
+  /* ── Row helpers ── */
+  function getAllRows() {
+    return Array.from(tbody.querySelectorAll('tr'));
+  }
+  /* Only visible rows — used for drag targets */
+  function getRows() {
+    return getAllRows().filter(function(r) { return r.style.display !== 'none'; });
+  }
+
+  function buildParentMap() {
+    var m = {};
+    getAllRows().forEach(function(r) {
+      var h = r.querySelector('.drag-handle');
+      if (h) m[h.dataset.pk] = h.dataset.parentPk || '';
+    });
+    return m;
+  }
+
+  function isDescendantOf(pk, ancestorPk) {
+    var p = parentMap[pk];
+    while (p) {
+      if (p === ancestorPk) return true;
+      p = parentMap[p];
+    }
+    return false;
+  }
+
+  /* ── Collapse ── */
+  function isVisible(pk) {
+    var ppk = parentMap[pk];
+    if (!ppk) return true;
+    if (collapsed[ppk]) return false;
+    return isVisible(ppk);
+  }
+
+  function applyVisibility() {
+    loadCollapsed();  /* resync with localStorage (master toggle/filters of the 2nd IIFE) */
+    getAllRows().forEach(function(row) {
+      var h = row.querySelector('.drag-handle');
+      if (!h) return;
+      row.style.display = isVisible(h.dataset.pk) ? '' : 'none';
+    });
+    tbody.querySelectorAll('.cat-toggle').forEach(function(btn) {
+      if (collapsed[btn.dataset.pk]) {
+        btn.classList.remove('open');
+      } else {
+        btn.classList.add('open');
+      }
+    });
+    rezebra();
+    /* Synchronously recompute the filler placeholder (.tbl-pad-fill): rows were just
+       shown/hidden → the table height changed. The global ResizeObserver
+       does this with an 80ms debounce, and during that time a taller table + the old (too big)
+       fill give an INSTANT vertical scroll (flicker). We compute it right here, in the
+       same task → the browser paints a single frame without flicker.
+     */
+    if (window.padChangelistTable) {
+      window.padChangelistTable(document.getElementById('result_list'));
+    }
+  }
+
+  function rezebra() {
+    var i = 0;
+    getAllRows().forEach(function(row) {
+      if (row.style.display === 'none') return;
+      row.classList.remove('row1', 'row2');
+      row.classList.add(i % 2 === 0 ? 'row1' : 'row2');
+      i++;
+    });
+  }
+
+  /* Adds a separate cat-toggle-col column once (between the drag-handle and the name). */
+  function ensureToggleColumn() {
+    var headRow = document.querySelector('#result_list thead tr');
+    if (headRow && !headRow.querySelector('th.column-cat-toggle')) {
+      var dragHead = headRow.querySelector('th.column-drag_handle');
+      if (dragHead) {
+        var th = document.createElement('th');
+        th.className = 'column-cat-toggle';
+        th.scope = 'col';
+        dragHead.parentNode.insertBefore(th, dragHead.nextSibling);
+      }
+    }
+    getAllRows().forEach(function(tr) {
+      if (tr.querySelector('td.cat-toggle-col')) return;
+      var dragTd = tr.querySelector('td.field-drag_handle');
+      if (!dragTd) return;
+      var td = document.createElement('td');
+      td.className = 'cat-toggle-col';
+      dragTd.parentNode.insertBefore(td, dragTd.nextSibling);
+    });
+  }
+
+  function addToggleButtons() {
+    /* parent -> [child_pk, ...] — for recursive counting of all descendants. */
+    var directChildren = {};
+    getAllRows().forEach(function(r) {
+      var h = r.querySelector('.drag-handle');
+      if (h && h.dataset.parentPk) {
+        var p = h.dataset.parentPk;
+        (directChildren[p] = directChildren[p] || []).push(h.dataset.pk);
+      }
+    });
+    /* Recursive counter: all descendants (children + grandchildren + great-grandchildren). */
+    var totalDescendants = {};
+    function countAll(pk) {
+      if (totalDescendants[pk] != null) return totalDescendants[pk];
+      var kids = directChildren[pk] || [];
+      var n = kids.length;
+      for (var i = 0; i < kids.length; i++) n += countAll(kids[i]);
+      totalDescendants[pk] = n;
+      return n;
+    }
+
+    /* chevron-right (›). `currentColor` — so the color comes from CSS .cat-toggle.
+       Size/stroke-width identical to .ntf-expand-btn in notifications.
+     */
+    var CHEVRON = '<svg viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+    /* Depth: for each pk — number of parent hops. */
+    function depthOf(pk) {
+      var d = 0, p = parentMap[pk];
+      while (p) { d++; p = parentMap[p]; }
+      return d;
+    }
+    /* Whether this pk is the LAST child of its parent (for └ instead of ├). */
+    function isLastChild(pk) {
+      var p = parentMap[pk]; if (!p) return false;
+      var sibs = directChildren[p] || [];
+      return sibs[sibs.length - 1] === pk;
+    }
+    /* Whether this pk is the FIRST child of its parent (top offset in its own vline). */
+    function isFirstChild(pk) {
+      var p = parentMap[pk]; if (!p) return false;
+      var sibs = directChildren[p] || [];
+      return sibs[0] === pk;
+    }
+    /* For each ancestor we check whether it is also last — if so,
+       we don't draw the vertical line at its level inside the descendant.
+     */
+    function ancestorIsLast(pk, level) {
+      // level=0 is pk itself; we need the ancestor at the given level, counting from the bottom
+      var cur = pk;
+      while (level > 0 && cur) { cur = parentMap[cur]; level--; }
+      return cur ? isLastChild(cur) : false;
+    }
+
+    var STEP = 20;        // step per level inside the name column
+    var LINE_OFFSET = 16; // verticals start under the 1st letter of the parent's name
+    var GAP = 6;          // gap between the end of the hline and the start of the text
+
+    getAllRows().forEach(function(row) {
+      var h = row.querySelector('.drag-handle');
+      if (!h) return;
+      var nameCell = row.querySelector('th.field-display_name, td.field-display_name')
+                  || row.querySelector('th, td');
+      var toggleCell = row.querySelector('td.cat-toggle-col');
+      var link = row.querySelector('th.field-display_name a, td.field-display_name a')
+              || row.querySelector('th a, td a');
+      if (!link) return;
+      var pk = h.dataset.pk;
+      var isParent = !!(directChildren[pk] && directChildren[pk].length);
+      var depth = depthOf(pk);
+      row.classList.toggle('cat-has-children', isParent);
+
+      /* Remove the standard padding-left in the link span (replaced by tree-lines). */
+      var indentSpan = link.querySelector('span[style*="padding-left"]');
+      if (indentSpan) indentSpan.style.paddingLeft = '0';
+
+      /* ── Tree-lines in the name cell ── (first remove the old ones — idempotent for re-draw) */
+      if (nameCell) nameCell.querySelectorAll('.cat-vline, .cat-hline, .cat-elbow').forEach(function(el){ el.remove(); });
+      if (depth > 0 && nameCell) {
+        /* Vlines for all ancestor levels (lvl < depth) */
+        for (var lvl = 1; lvl < depth; lvl++) {
+          var ancLvlFromBottom = depth - lvl;
+          if (ancestorIsLast(pk, ancLvlFromBottom)) continue;
+          var v = document.createElement('span');
+          v.className = 'cat-vline';
+          v.style.left = (LINE_OFFSET + (lvl - 1) * STEP) + 'px';
+          nameCell.appendChild(v);
+        }
+        /* Own level: for the last child — rounded elbow; otherwise — vline + hline. */
+        var ownX = LINE_OFFSET + (depth - 1) * STEP;
+        var isFirst = isFirstChild(pk);
+        var isLast  = isLastChild(pk);
+        if (isLast) {
+          var el = document.createElement('span');
+          el.className = 'cat-elbow';
+          el.style.left = ownX + 'px';
+          el.style.top = isFirst ? '8px' : '-1px';
+          /* height uses --cat-y-shift (visual center measured from JS).
+             +2/-7 (not +1/-8) — compensates half the border width (border 2px,
+             border center = bottom edge - 1px).
+           */
+          el.style.height = isFirst
+            ? 'calc(50% - 7px + var(--cat-y-shift, 0px))'
+            : 'calc(50% + 2px + var(--cat-y-shift, 0px))';
+          el.style.width = (STEP - GAP) + 'px';
+          nameCell.appendChild(el);
+        } else {
+          var v = document.createElement('span');
+          v.className = 'cat-vline';
+          v.style.left = ownX + 'px';
+          if (isFirst) v.classList.add('is-first');
+          nameCell.appendChild(v);
+          var hl = document.createElement('span');
+          hl.className = 'cat-hline';
+          hl.style.left = ownX + 'px';
+          hl.style.width = (STEP - GAP) + 'px';
+          nameCell.appendChild(hl);
+        }
+        /* Shift the text to the right so it doesn't overlap the hline. */
+        var pad = (ownX + STEP) + 'px';
+        nameCell.style.setProperty('padding-left', pad, 'important');
+      } else if (nameCell) {
+        nameCell.style.removeProperty('padding-left');
+      }
+
+      /* ── Chevron in its own cat-toggle-col column ── */
+      if (toggleCell) {
+        toggleCell.innerHTML = '';
+        if (isParent) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.dataset.pk = pk;
+          btn.className = 'cat-toggle' + (collapsed[pk] ? '' : ' open');
+          btn.innerHTML = CHEVRON;
+          btn.title = collapsed[pk] ? 'Expand' : 'Collapse';
+          toggleCell.appendChild(btn);
+          btn.addEventListener('click', function(e) {
+            e.preventDefault(); e.stopPropagation();
+            loadCollapsed();  /* pick up the master toggle/filters state before toggling, so as not to overwrite it */
+            collapsed[pk] = !collapsed[pk];
+            saveCollapsed();
+            applyVisibility();
+            this.classList.toggle('open', !collapsed[pk]);
+            this.title = collapsed[pk] ? 'Expand' : 'Collapse';
+          });
+        }
+      }
+
+      /* The "(N)" counter — recursively all descendants, next to the name. First remove the
+         old counter (idempotent for re-draw without a reload).
+       */
+      if (nameCell) nameCell.querySelectorAll('.cat-children-count').forEach(function(el){ el.remove(); });
+      if (isParent) {
+        var n = countAll(pk);
+        var cnt = document.createElement('span');
+        cnt.className = 'cat-children-count';
+        cnt.title = n + ' subcategories (recursive)';
+        cnt.textContent = '(' + n + ')';
+        link.parentNode.insertBefore(cnt, link.nextSibling);
+      }
+    });
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Category DRAG & DROP (rewritten) — the "3 zones per row" model:
+       • top third of the target row  → insert BEFORE it (same parent);
+       • middle                       → INSIDE (become the first child of the target — parent
+         change);
+     The insertion point is shown by ONE clean line (upper half of the row → before,
+     lower → after the entire subtree). We drag the node TOGETHER with all its descendants; the node
+     becomes a sibling of the target row (takes over its parent → both reordering and moving to
+     another parent work). Dropping onto itself/its own descendant is not allowed (cycle
+     protection).
+     After the drop we move the rows in place and REDRAW indents/lines
+     on the client (redrawTree), WITHOUT a reload. It was the badly timed redraw of the lines
+     that caused the jerking.
+     ════════════════════════════════════════════════════════════════════
+   */
+  function getGroup(row) {
+    var h = row.querySelector('.drag-handle');
+    if (!h) return [row];
+    var pk = h.dataset.pk;
+    return getAllRows().filter(function(r) {
+      var rh = r.querySelector('.drag-handle');
+      if (!rh) return false;
+      return rh.dataset.pk === pk || isDescendantOf(rh.dataset.pk, pk);
+    });
+  }
+  function inGroup(row) { return dragGroup.indexOf(row) !== -1; }
+
+  /* Last row (including hidden ones) in the root's subtree */
+  function getSubtreeEnd(root) {
+    var h = root.querySelector('.drag-handle');
+    if (!h) return root;
+    var pk  = h.dataset.pk;
+    var all = getAllRows();
+    var end = all.indexOf(root);
+    for (var i = end + 1; i < all.length; i++) {
+      var rh = all[i].querySelector('.drag-handle');
+      if (rh && isDescendantOf(rh.dataset.pk, pk)) end = i; else break;
+    }
+    return all[end];
+  }
+  function rowPkOf(r)     { var h = r.querySelector('.drag-handle'); return h ? h.dataset.pk : null; }
+  function rowParentOf(r) { var h = r.querySelector('.drag-handle'); return h ? (h.dataset.parentPk || '') : ''; }
+
+  /* ── Drag state ── */
+  var dropTarget = null;  /* { target, mode: 'before'|'after' } */
+
+  function dropLineEl() {
+    var el = document.getElementById('cat-drop-line');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'cat-drop-line';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  function clearIndicators() {
+    var el = document.getElementById('cat-drop-line');
+    if (el) el.style.display = 'none';
+  }
+
+  /* Row under the cursor + zone (half of the row). The target is only a VISIBLE row outside
+     the group being dragged. Upper half → before, lower → after the subtree.
+   */
+  function catComputeDrop(clientY) {
+    var rowsV = getRows().filter(function(r) { return !inGroup(r); });
+    if (!rowsV.length) return null;
+    if (clientY < rowsV[0].getBoundingClientRect().top) {
+      return { target: rowsV[0], mode: 'before' };
+    }
+    var under = rowsV[rowsV.length - 1];
+    for (var i = 0; i < rowsV.length; i++) {
+      var rect = rowsV[i].getBoundingClientRect();
+      if (clientY < rect.bottom) { under = rowsV[i]; break; }
+    }
+    if (inGroup(under)) return null;
+    var rc = under.getBoundingClientRect();
+    var before = clientY < rc.top + rc.height / 2;
+    return { target: under, mode: before ? 'before' : 'after' };
+  }
+
+  /* refNode (insert BEFORE it) + new parent_pk: the node becomes a sibling of the target. */
+  function dropPlacement(t) {
+    if (t.mode === 'before') return { ref: t.target, parentPk: rowParentOf(t.target) };
+    return { ref: getSubtreeEnd(t.target).nextElementSibling, parentPk: rowParentOf(t.target) };
+  }
+
+  /* The drop changes nothing (the element is already at this place and has the same parent) — then
+     don't show the line.
+   */
+  function isNoOpDrop(t) {
+    var pl = dropPlacement(t);
+    var dragged  = dragGroup[0];
+    var groupEnd = dragGroup[dragGroup.length - 1];
+    if ((pl.parentPk || '') !== rowParentOf(dragged)) return false;  // parent change is not a no-op
+    return pl.ref === dragged || pl.ref === groupEnd.nextElementSibling;
+  }
+
+  function showIndicator(t) {
+    /* We ALWAYS draw the line in one place for one gap — at the TOP of the row
+       BEFORE which we insert (ref). So "after A" and "before B" (the same
+       gap) give the same position — the line doesn't jump between neighboring rows.
+       If inserting at the very end (ref=null) — at the BOTTOM of the last visible row.
+       Drawn as a separate div overlay (not ::after on <tr>) so as not to affect column widths.
+     */
+    var ref = dropPlacement(t).ref;
+    while (ref && ref.style.display === 'none') ref = ref.nextElementSibling;
+    var y;
+    if (ref) {
+      y = ref.getBoundingClientRect().top;
+    } else {
+      var rowsV = getRows();
+      if (!rowsV.length) { clearIndicators(); return; }
+      y = rowsV[rowsV.length - 1].getBoundingClientRect().bottom;
+    }
+    var tbl = document.getElementById('result_list').getBoundingClientRect();
+    var el = dropLineEl();
+    el.style.left   = tbl.left + 'px';
+    el.style.width  = tbl.width + 'px';
+    el.style.top    = (y - 1) + 'px';
+    el.style.display = 'block';
+  }
+
+  /* Snapshot of "pk:parent" in DOM order — to avoid saving/reloading on a no-op */
+  function orderKey() {
+    return getAllRows().map(function(r) {
+      var h = r.querySelector('.drag-handle');
+      return h ? (h.dataset.pk + ':' + (h.dataset.parentPk || '')) : '';
+    }).join('|');
+  }
+
+  function initDrag() {
+    getAllRows().forEach(function(row) {
+      var handle = row.querySelector('.drag-handle');
+      if (!handle) return;
+      handle.addEventListener('mousedown', function(e) {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        parentMap  = buildParentMap();
+        dragGroup  = getGroup(row);
+        dropTarget = null;
+        dragGroup.forEach(function(r) { r.classList.add('cat-dragging'); });
+        document.body.classList.add('cat-dragging-active');
+
+        function onMove(ev) {
+          if (!dragGroup.length) return;
+          var t = catComputeDrop(ev.clientY);
+          if (t && isNoOpDrop(t)) t = null;  // don't show the line where nothing will change
+          dropTarget = t;
+          if (t) showIndicator(t); else clearIndicators();
+        }
+        function onUp() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          dragGroup.forEach(function(r) { r.classList.remove('cat-dragging'); });
+          document.body.classList.remove('cat-dragging-active');
+          clearIndicators();
+          var t = dropTarget; dropTarget = null;
+          if (dragGroup.length && t && !inGroup(t.target)) {
+            var before = orderKey();
+            var pl = dropPlacement(t);
+            dragGroup.forEach(function(r) { tbody.insertBefore(r, pl.ref); });
+            var dh = dragGroup[0].querySelector('.drag-handle');
+            if (dh) dh.dataset.parentPk = pl.parentPk || '';
+            if (orderKey() !== before) {
+              redrawTree();   /* redraw indents/lines in place — without reload */
+              saveOrder();
+            }
+          }
+          dragGroup = [];
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+  }
+
+  /* Redraw the tree in place after the drop: update parentMap, indents,
+     tree-lines, counters and visibility — WITHOUT reloading the page.
+   */
+  function redrawTree() {
+    parentMap = buildParentMap();
+    addToggleButtons();
+    applyVisibility();
+  }
+
+  function saveOrder() {
+    /* The reorder_categories backend expects {order:[{id, sort_order, parent_id}]}.
+       sort_order is the global row index (output order = order_by sort_order).
+     */
+    var order = [];
+    var i = 0;
+    getAllRows().forEach(function(r) {
+      var h = r.querySelector('.drag-handle');
+      if (!h) return;
+      order.push({
+        id: parseInt(h.dataset.pk, 10),
+        sort_order: i++,
+        parent_id: h.dataset.parentPk ? parseInt(h.dataset.parentPk, 10) : null
+      });
+    });
+    return fetch(REORDER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+      body: JSON.stringify({ order: order })
+    });
+  }
+
+  function getCookie(name) {
+    var m = document.cookie.match('(?:^|;)\\s*' + name + '=([^;]*)');
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+
+  /* ── Checkbox cascade: selecting a parent → selects all descendants (recursively).
+     Unchecking the parent also unchecks the descendants. There is intentionally no reverse link
+     (child→parent):
+     selecting one descendant must not force-select
+     the parent (that would change the meaning of "selected only this subcategory").
+   */
+  function rowPk(row) {
+    var h = row.querySelector('.drag-handle');
+    return h ? h.dataset.pk : null;
+  }
+  function descendantRows(pk) {
+    return getAllRows().filter(function(r) {
+      var rpk = rowPk(r);
+      return rpk && isDescendantOf(rpk, pk);
+    });
+  }
+  tbody.addEventListener('change', function(e) {
+    var cb = e.target;
+    if (!cb || cb.name !== '_selected_action' || cb.type !== 'checkbox') return;
+    var row = cb.closest('tr');
+    if (!row) return;
+    var pk = rowPk(row);
+    if (!pk) return;
+    descendantRows(pk).forEach(function(r) {
+      var dcb = r.querySelector('input[name="_selected_action"]');
+      if (dcb && dcb.checked !== cb.checked) dcb.checked = cb.checked;
+    });
+  });
+
+  /* ── Instant-save for the "Visible" checkbox (is_active) ──
+     The standard bottom submit-row is hidden by global CSS, and the cl-bar has no
+     "Save" button — so list_editable has nothing to save with. We save immediately
+     on click via AJAX (as in the brands list).
+   */
+  tbody.addEventListener('change', function(e) {
+    var cb = e.target;
+    if (!cb || cb.type !== 'checkbox' || !cb.closest('td.field-is_active')) return;
+    var row = cb.closest('tr');
+    var h = row && row.querySelector('.drag-handle');
+    if (!h) return;
+    fetch('/admin/catalog/save-category-field/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+      body: JSON.stringify({ id: parseInt(h.dataset.pk, 10), field: 'is_active', value: cb.checked })
+    }).then(function(r){
+      /* If a status filter is active — redraw the list (the row leaves/enters
+         the filter). The DOM checkbox already shows the new value.
+       */
+      if (r.ok && typeof window._catReapplyStatus === 'function') window._catReapplyStatus();
+    });
+  });
+
+  /* ── Init ── */
+  parentMap = buildParentMap();
+  ensureToggleColumn();
+  addToggleButtons();
+  applyVisibility();
+  initDrag();
+
+})();
+
+/* ── Popup filters in 3 columns ── */
+(function() {
+  var resultList = document.getElementById('result_list');
+  if (!resultList) return;
+  var tbody = resultList.querySelector('tbody');
+  var thead = resultList.querySelector('thead');
+  if (!tbody || !thead) return;
+
+  var STATE_KEY = 'cat_list_state_v1';
+  /* qMode: 'flat' — show only what was found (hierarchy is lost);
+     'tree' — show the whole tree, highlight matched rows.
+   */
+  var F = {q:'', qMode:'flat', discount:'all', status:'all'};
+  try {
+    var raw = localStorage.getItem(STATE_KEY);
+    if (raw) Object.assign(F, JSON.parse(raw));
+  } catch(e){}
+  function saveState(){ try{ localStorage.setItem(STATE_KEY, JSON.stringify(F)); }catch(e){} }
+
+  /* Create the popup container */
+  var pop = document.createElement('div'); pop.id = 'cat-flt-pop';
+  document.body.appendChild(pop);
+  var popOwner = null;
+
+  function parentMap2(){
+    var m = {};
+    tbody.querySelectorAll('tr').forEach(function(r){
+      var h = r.querySelector('.drag-handle');
+      if (h) m[h.dataset.pk] = h.dataset.parentPk || '';
+    });
+    return m;
+  }
+
+  /* Standard collapse logic (same as in the primary IIFE) — needed
+     to correctly restore visibility after resetting the filters.
+   */
+  function readCollapsed(){
+    try { var s = localStorage.getItem('cat_collapsed'); return s ? JSON.parse(s) : {}; } catch(e){ return {}; }
+  }
+  function applyCollapseVisibility(){
+    tbody.classList.remove('cat-flat-mode');
+    /* Restore the original tree-indent padding-left that we reset in flat mode. */
+    tbody.querySelectorAll('th.field-display_name[data-orig-padding-left], td.field-display_name[data-orig-padding-left]').forEach(function(cell){
+      cell.style.setProperty('padding-left', cell.dataset.origPaddingLeft, 'important');
+    });
+    var pm = parentMap2();
+    var collapsed = readCollapsed();
+    function isVisibleByCollapse(pk){
+      var ppk = pm[pk];
+      if (!ppk) return true;
+      if (collapsed[ppk]) return false;
+      return isVisibleByCollapse(ppk);
+    }
+    var i = 0;
+    tbody.querySelectorAll('tr').forEach(function(r){
+      var h = r.querySelector('.drag-handle');
+      if (!h) return;
+      var show = isVisibleByCollapse(h.dataset.pk);
+      r.style.display = show ? '' : 'none';
+      if (show){
+        r.classList.remove('row1','row2');
+        r.classList.add(i % 2 === 0 ? 'row1' : 'row2');
+        i++;
+      }
+    });
+  }
+
+  function rowMatches(row){
+    if (F.q){
+      var link = row.querySelector('.field-display_name a, th.field-display_name a, td.field-display_name a');
+      var name = link ? link.textContent.trim() : '';
+      if (name.toLowerCase().indexOf(F.q.toLowerCase()) === -1) return false;
+    }
+    var discCell = row.querySelector('.field-show_discount');
+    var discText = discCell ? discCell.textContent.trim() : '';
+    var hasDisc = discText && discText !== '—' && discText !== '';
+    if (F.discount === 'yes' && !hasDisc) return false;
+    if (F.discount === 'no' && hasDisc) return false;
+    var cb = row.querySelector('.field-is_active input[type=checkbox]');
+    var isActive = cb && cb.checked;
+    if (F.status === 'active' && !isActive) return false;
+    if (F.status === 'inactive' && isActive) return false;
+    return true;
+  }
+
+  function hasActiveFilter(){
+    return !!(F.q || F.discount !== 'all' || F.status !== 'all');
+  }
+
+  /* Collect the category name by pk — for building breadcrumbs. */
+  function nameByPk(){
+    var m = {};
+    tbody.querySelectorAll('tr').forEach(function(r){
+      var h = r.querySelector('.drag-handle'); if (!h) return;
+      var a = r.querySelector('.field-display_name a, th.field-display_name a, td.field-display_name a');
+      m[h.dataset.pk] = a ? a.textContent.trim() : '';
+    });
+    return m;
+  }
+  function ensurePathSpan(row, pm, names){
+    var h = row.querySelector('.drag-handle'); if (!h) return;
+    var link = row.querySelector('.field-display_name a, th.field-display_name a, td.field-display_name a');
+    if (!link) return;
+    var span = row.querySelector('.cat-flat-path');
+    if (!span){
+      span = document.createElement('span'); span.className = 'cat-flat-path';
+      link.parentNode.insertBefore(span, link);
+    }
+    var parts = []; var p = pm[h.dataset.pk];
+    while (p){ if (names[p]) parts.unshift(names[p]); p = pm[p]; }
+    if (!parts.length){ span.innerHTML = ''; return; }
+    var html = '';
+    parts.forEach(function(nm){
+      html += '<span class="cat-path-name">' + nm.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>';
+      html += '<span class="cat-path-sep">›</span>';
+    });
+    span.innerHTML = html;
+  }
+
+  function clearHighlights(){
+    tbody.querySelectorAll('tr.cat-search-hit').forEach(function(r){ r.classList.remove('cat-search-hit'); });
+  }
+
+  function applyCatFilters(){
+    if (!hasActiveFilter()){
+      tbody.classList.remove('cat-flat-mode');
+      clearHighlights();
+      return;  /* standard collapse logic works as is */
+    }
+    var pm = parentMap2();
+    var rows = Array.from(tbody.querySelectorAll('tr'));
+
+    /* qMode determines the name-search behavior:
+       - 'tree' (highlight): structure preserved, matched rows yellow, collapse hierarchy works;
+       - 'flat' (default): show only matched rows, without ancestors and tree-lines.
+     */
+    var qActive = !!F.q;
+    var treeMode = qActive && F.qMode === 'tree';
+    var flatMode = qActive && !treeMode;
+    tbody.classList.toggle('cat-flat-mode', flatMode);
+    if (!treeMode) clearHighlights();
+
+    /* TREE mode: the whole structure is shown, matched rows are highlighted.
+       If there are also discount/status filters — apply them as a hiding filter on top.
+     */
+    if (treeMode){
+      /* Expand the ancestors of matched rows so that the matched row is visible. */
+      var collapsed = readCollapsed();
+      var changedCollapse = false;
+      rows.forEach(function(r){
+        var h = r.querySelector('.drag-handle'); if (!h) return;
+        if (rowMatches(r)){
+          var p = pm[h.dataset.pk];
+          while (p){ if (collapsed[p]){ delete collapsed[p]; changedCollapse = true; } p = pm[p]; }
+        }
+      });
+      if (changedCollapse){
+        try { localStorage.setItem('cat_collapsed', JSON.stringify(collapsed)); } catch(e){}
+        tbody.querySelectorAll('.cat-toggle').forEach(function(btn){
+          if (collapsed[btn.dataset.pk]) btn.classList.remove('open');
+          else btn.classList.add('open');
+        });
+      }
+      /* Standard collapse visibility. */
+      applyCollapseVisibility();
+      /* If discount/status are active — apply them as a hierarchy filter. */
+      var hasOtherFilter = (F.discount !== 'all') || (F.status !== 'all');
+      if (hasOtherFilter){
+        var visible = {};
+        rows.forEach(function(r){
+          var h = r.querySelector('.drag-handle'); if (!h) return;
+          /* For discount/status - separately, without F.q (so that name matches don't affect them here). */
+          var savedQ = F.q; F.q = '';
+          if (rowMatches(r)) visible[h.dataset.pk] = 1;
+          F.q = savedQ;
+        });
+        Object.keys(visible).forEach(function(pk){
+          var p = pm[pk]; while (p){ visible[p] = 1; p = pm[p]; }
+        });
+        var k = 0;
+        rows.forEach(function(r){
+          var h = r.querySelector('.drag-handle'); if (!h) return;
+          if (r.style.display === 'none') return;
+          var show = !!visible[h.dataset.pk];
+          r.style.display = show ? '' : 'none';
+          if (show){
+            r.classList.remove('row1','row2');
+            r.classList.add(k % 2 === 0 ? 'row1' : 'row2'); k++;
+          }
+        });
+      }
+      /* Highlight matched. */
+      clearHighlights();
+      rows.forEach(function(r){
+        if (r.style.display === 'none') return;
+        if (rowMatches(r)) r.classList.add('cat-search-hit');
+      });
+      return;
+    }
+
+    if (flatMode){
+      var names = nameByPk();
+      var i = 0;
+      rows.forEach(function(r){
+        var h = r.querySelector('.drag-handle');
+        if (!h) return;
+        var show = rowMatches(r);
+        r.style.display = show ? '' : 'none';
+        if (show){
+          /* Reset the inline-style padding-left set by the primary IIFE for tree indent (its
+             !important overrides our CSS). Keep the original in a data attribute so it can be
+             restored when leaving flat mode.
+           */
+          var nameCell = r.querySelector('th.field-display_name, td.field-display_name');
+          if (nameCell){
+            var cur = nameCell.style.paddingLeft;
+            if (cur && !nameCell.dataset.origPaddingLeft){
+              nameCell.dataset.origPaddingLeft = cur;
+            }
+            /* Set inline 12px !important so all rows get the same indent regardless of tree depth.
+             */
+            nameCell.style.setProperty('padding-left', '12px', 'important');
+          }
+          ensurePathSpan(r, pm, names);
+          r.classList.remove('row1','row2');
+          r.classList.add(i % 2 === 0 ? 'row1' : 'row2');
+          i++;
+        }
+      });
+      return;
+    }
+
+    /* Hierarchical mode: matched + all ancestors. */
+    var visible = {};
+    rows.forEach(function(r){
+      var h = r.querySelector('.drag-handle');
+      if (!h) return;
+      if (rowMatches(r)) visible[h.dataset.pk] = 1;
+    });
+    Object.keys(visible).forEach(function(pk){
+      var p = pm[pk];
+      while (p){ visible[p] = 1; p = pm[p]; }
+    });
+    var i = 0;
+    rows.forEach(function(r){
+      var h = r.querySelector('.drag-handle');
+      if (!h) return;
+      var show = !!visible[h.dataset.pk];
+      r.style.display = show ? '' : 'none';
+      if (show){
+        r.classList.remove('row1','row2');
+        r.classList.add(i % 2 === 0 ? 'row1' : 'row2');
+        i++;
+      }
+    });
+  }
+
+  function update(){ saveState(); paintHeader(); applyCatFilters(); renderResetBtn(); }
+
+  function paintHeader(){
+    thead.querySelectorAll('th.cat-flt-th').forEach(function(th){
+      var col = th.dataset.col;
+      var on = (col==='q'&&F.q) || (col==='discount'&&F.discount!=='all') || (col==='status'&&F.status!=='all');
+      th.classList.toggle('col-on', on);
+      var badge = th.querySelector('.th-badge');
+      if (badge) badge.innerHTML = on ? '<svg width="9" height="10" viewBox="0 0 10 11" fill="#374151"><path d="M0 0h10L6.5 5v6h-3V5z"/></svg>' : '';
+    });
+  }
+
+  function closePop(){
+    pop.classList.remove('open');
+    if (popOwner){ popOwner.classList.remove('col-open'); popOwner = null; }
+  }
+  function openPop(th, buildFn){
+    if (popOwner === th && pop.classList.contains('open')){ closePop(); return; }
+    closePop();
+    popOwner = th;
+    pop.innerHTML = '';
+    var resetBar = document.createElement('button'); resetBar.type='button';
+    resetBar.textContent = 'Reset filter';
+    resetBar.style.cssText = 'display:block;width:100%;padding:10px;border:none;border-bottom:1px solid #e5e7eb;background:none;color:#dc2626;font-size:13px;font-weight:500;cursor:pointer;text-align:left;';
+    resetBar.addEventListener('click', function(){ resetCol(th.dataset.col); closePop(); });
+    resetBar.addEventListener('mouseenter', function(){ this.style.background='#fef2f2'; });
+    resetBar.addEventListener('mouseleave', function(){ this.style.background='none'; });
+    pop.appendChild(resetBar);
+    buildFn();
+    var rect = th.getBoundingClientRect();
+    var w = 200;
+    pop.style.width = w + 'px';
+    pop.style.left = (window.clFlipLeft ? window.clFlipLeft(rect, w, 8) : Math.max(8, Math.min(rect.left, window.innerWidth - w - 8))) + 'px';
+    pop.classList.add('open');
+    pop.style.top = (window.clFlipTop ? window.clFlipTop(rect, pop.offsetHeight, 0) : (rect.bottom)) + 'px';
+    th.classList.add('col-open');
+  }
+
+  function resetCol(col){
+    if (col==='q'){ F.q = ''; F.qMode = 'flat'; clearHighlights(); }
+    if (col==='discount') F.discount = 'all';
+    if (col==='status')   F.status = 'all';
+    update();
+    if (!hasActiveFilter()) applyCollapseVisibility();
+  }
+
+  function popBody(){
+    var d = document.createElement('div'); d.className = 'fp-pop-body';
+    pop.appendChild(d); return d;
+  }
+  function radioList(cont, opts, getVal, setVal){
+    var grp = 'fp-cat-' + Date.now();
+    opts.forEach(function(o){
+      var row = document.createElement('label'); row.className = 'fp-item';
+      row.style.cssText = 'cursor:pointer;';
+      var rb = document.createElement('input'); rb.type='radio'; rb.name=grp; rb.checked = getVal()===o[0];
+      rb.addEventListener('change', function(){ if (rb.checked){ setVal(o[0]); update(); } });
+      row.appendChild(rb); row.appendChild(document.createTextNode(' '+o[1]));
+      cont.appendChild(row);
+    });
+  }
+  function buildNamePop(){
+    var b = popBody();
+    /* Mode: show only what was found OR highlight in the tree (more convenient for drag-drop). */
+    radioList(b, [['flat','Found only'],['tree','Highlight in tree']],
+      function(){ return F.qMode || 'flat'; },
+      function(v){ F.qMode = v; });
+    var sep = document.createElement('div'); sep.style.cssText = 'height:1px;background:#e5e7eb;margin:0 -10px;';
+    b.appendChild(sep);
+    var inp = document.createElement('input'); inp.type='text'; inp.className='fp-search';
+    inp.placeholder = 'Search by name...'; inp.value = F.q;
+    inp.addEventListener('input', function(){ F.q = inp.value; update(); });
+    b.appendChild(inp);
+    setTimeout(function(){ inp.focus(); }, 40);
+  }
+  function buildDiscountPop(){
+    var b = popBody();
+    radioList(b, [['all','All'],['yes','With discount'],['no','No discount']],
+      function(){return F.discount;}, function(v){F.discount=v;});
+  }
+  function buildStatusPop(){
+    var b = popBody();
+    radioList(b, [['all','All'],['active','Active'],['inactive','Inactive']],
+      function(){return F.status;}, function(v){F.status=v;});
+  }
+
+  /* Mark thead - clickable filter headers.
+     Search by class OR by text content (Django may vary class names).
+   */
+  function decorateHeader(){
+    var ths = thead.querySelectorAll('th');
+    ths.forEach(function(th){
+      var col = null;
+      var classes = th.className || '';
+      if (/column-display_name\b/.test(classes))         col = 'q';
+      else if (/column-show_discount\b/.test(classes))   col = 'discount';
+      else if (/column-is_active\b/.test(classes))       col = 'status';
+      else {
+        var txt = (th.textContent || '').trim().toLowerCase();
+        if (txt === 'name')      col = 'q';
+        else if (txt === 'discount') col = 'discount';
+        else if (txt === 'visible' || txt === 'display' || txt === 'activity' || txt === 'status') col = 'status';
+      }
+      if (!col) return;
+      th.classList.add('cat-flt-th');
+      th.dataset.col = col;
+      /* Remove the standard sort link - we have our own mechanism. */
+      var sortLink = th.querySelector('a');
+      if (sortLink){
+        var span = document.createElement('span'); span.textContent = sortLink.textContent;
+        sortLink.parentNode.replaceChild(span, sortLink);
+      }
+      var badge = document.createElement('span'); badge.className = 'th-badge';
+      th.appendChild(badge);
+      th.addEventListener('click', function(e){
+        e.stopPropagation();
+        if (col==='q') openPop(th, buildNamePop);
+        else if (col==='discount') openPop(th, buildDiscountPop);
+        else if (col==='status') openPop(th, buildStatusPop);
+      });
+    });
+  }
+
+  /* "Reset filters" button in submit-row.cl-bar. */
+  function renderResetBtn(){
+    var bar = document.querySelector('.submit-row.cl-bar'); if (!bar) return;
+    var btn = bar.querySelector('#cat-reset-filters');
+    var active = hasActiveFilter();
+    if (active && !btn){
+      btn = document.createElement('button');
+      btn.type='button'; btn.id='cat-reset-filters';
+      btn.className='cl-top-btn'; btn.textContent='Reset filters';
+      btn.addEventListener('click', function(){
+        F.q=''; F.qMode='flat'; F.discount='all'; F.status='all'; update();
+        clearHighlights();
+        applyCollapseVisibility();
+      });
+      var del = bar.querySelector('.cl-top-btn-danger');
+      if (del) bar.insertBefore(btn, del); else bar.appendChild(btn);
+    } else if (!active && btn){ btn.remove(); }
+  }
+
+  /* Click outside - close the popup. */
+  document.addEventListener('click', function(e){
+    if (e.button !== 0) return;
+    if (!pop.contains(e.target) && !e.target.closest('th.cat-flt-th')) closePop();
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') closePop();
+  });
+  /* Re-apply the filter after a click on the chevron so it doesn't get overridden. */
+  tbody.addEventListener('click', function(e){
+    if (e.target.closest('.cat-toggle')) setTimeout(applyCatFilters, 0);
+  });
+
+  /* Programmatically measure the visual center of the letter via the Range API and set the CSS
+     variable --cat-y-shift. All tree lines (hline, vline.is-last, elbow) use this variable, so they
+     align exactly on the letter.
+   */
+  function measureYShift(){
+    var cell = tbody.querySelector('.field-display_name');
+    if (!cell) return 0;
+    var link = cell.querySelector('a');
+    if (!link) return 0;
+    var textNode = null;
+    for (var n = link.firstChild; n; n = n.nextSibling){
+      if (n.nodeType === 3 && n.textContent.trim()){ textNode = n; break; }
+    }
+    if (!textNode) return 0;
+    var range = document.createRange();
+    range.selectNodeContents(textNode);
+    var tr = range.getBoundingClientRect();
+    var cr = cell.getBoundingClientRect();
+    var cellCenter = cr.top + cr.height / 2;
+    var textCenter = tr.top + tr.height / 2;
+    return textCenter - cellCenter;  /* +N = text is below the geometric center */
+  }
+  function applyYShift(){
+    var s = measureYShift();
+    document.documentElement.style.setProperty('--cat-y-shift', s.toFixed(2) + 'px');
+  }
+
+  /* Master toggle in the column-cat-toggle header: one button to expand/collapse all parent
+     branches at once.
+   */
+  function ensureMasterToggle(){
+    var th = thead.querySelector('th.column-cat-toggle');
+    if (!th || th.querySelector('.cat-master-toggle')) return;
+    th.style.cursor = 'pointer';
+    th.style.pointerEvents = 'auto';
+    th.style.textAlign = 'center';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cat-master-toggle';
+    btn.title = 'Expand / collapse all';
+    btn.innerHTML = '<svg viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    th.appendChild(btn);
+    function syncState(){
+      var collapsed = readCollapsed();
+      var anyCollapsed = false;
+      for (var k in collapsed){ if (collapsed[k]){ anyCollapsed = true; break; } }
+      btn.classList.toggle('open', !anyCollapsed);
+      btn.title = anyCollapsed ? 'Expand all' : 'Collapse all';
+    }
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      var collapsed = readCollapsed();
+      var anyCollapsed = false;
+      for (var k in collapsed){ if (collapsed[k]){ anyCollapsed = true; break; } }
+      var newCollapsed = {};
+      if (!anyCollapsed){
+        /* Everything expanded → collapse all: record all pks that have .cat-toggle. */
+        tbody.querySelectorAll('.cat-toggle').forEach(function(b){ newCollapsed[b.dataset.pk] = true; });
+      }
+      /* otherwise, if anything is collapsed, expand everything fully (newCollapsed={}). */
+      try { localStorage.setItem('cat_collapsed', JSON.stringify(newCollapsed)); } catch(e){}
+      tbody.querySelectorAll('.cat-toggle').forEach(function(b){
+        if (newCollapsed[b.dataset.pk]) b.classList.remove('open');
+        else b.classList.add('open');
+      });
+      applyCollapseVisibility();
+      syncState();
+    });
+    /* If something inside the primary IIFE clicked the chevron button, sync the master state.
+     */
+    tbody.addEventListener('click', function(e){
+      if (e.target.closest('.cat-toggle')) setTimeout(syncState, 0);
+    });
+    syncState();
+  }
+
+  /* Bridge to the first IIFE (instant-save of the "Visible" checkbox): after is_active
+     changes it lets the filter be redrawn, but ONLY when a status filter is active - then the row
+     disappears/appears immediately. We don't touch the tree/collapse.
+   */
+  window._catReapplyStatus = function(){
+    if (F.status !== 'all') applyCatFilters();
+  };
+
+  decorateHeader();
+  paintHeader();
+  ensureMasterToggle();
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', renderResetBtn);
+  } else { renderResetBtn(); }
+  applyCatFilters();
+  applyYShift();
+  /* Re-measure on resize (zoom/window size can change the metrics). */
+  window.addEventListener('resize', applyYShift);
+})();
+</script>
+{% endblock %}

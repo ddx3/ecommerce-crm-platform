@@ -1,0 +1,1541 @@
+{% extends "admin/base_site.html" %}
+{% block content_title %}{% endblock %}
+{% block extrahead %}{{ block.super }}
+<style>
+/* ── Page chrome — make chat fill the content area exactly ── */
+html, body { height: 100%; }
+body { overflow: hidden; }
+#content, #content-main { padding: 0 !important; margin: 0 !important; height: 100vh; box-sizing: border-box; position: relative; }
+#content { background: #fff; }
+
+/* ── Wrapper ── */
+.cx {
+    display: flex; height: 100vh; min-height: 480px;
+    background: #fff; border-top: 1px solid #e5e7eb;
+}
+
+/* ───────────────────────────────────────────────────────────────────────
+   Conversations list (left)
+   ─────────────────────────────────────────────────────────────────────── */
+.cx-list { width: 360px; min-width: 360px; max-width: 360px;
+    border-right: 1px solid #e5e7eb;
+    display: flex; flex-direction: column; background: #fff; }
+
+.cx-list-top {
+    height: 53px; box-sizing: border-box;
+    display: flex; align-items: center;
+    padding: 0 12px; border-bottom: 1px solid #e5e7eb;
+    background: #fafafa;
+}
+
+.cx-search { position: relative; width: 100%; }
+.cx-search input {
+    width: 100% !important; height: 32px !important;
+    padding: 0 12px !important; margin: 0 !important;
+    border: 1px solid #d1d5db !important; border-radius: 4px !important;
+    font-size: 13px !important; line-height: 32px !important;
+    box-sizing: border-box !important; outline: none !important;
+    background: #fff !important; color: #111827 !important;
+    transition: border-color .12s !important;
+}
+.cx-search input:focus { border-color: #9ca3af !important; }
+.cx-search input::placeholder { color: #9ca3af; }
+
+.cx-tabs { display: flex; padding: 0 4px; border-bottom: 1px solid #e5e7eb; background: #fafafa; }
+.cx-tab {
+    flex: 1; padding: 9px 8px; font-size: 13px; font-weight: 600;
+    background: transparent; border: none; cursor: pointer; color: #9ca3af !important;
+    position: relative; transition: color .12s;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    line-height: 1; font-family: inherit; user-select: none;
+}
+.cx-tab:hover { color: #374151 !important; }
+.cx-tab.active { color: #111827 !important; }
+.cx-tab.active::after {
+    content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px;
+    height: 2px; background: #374151; border-radius: 1px;
+}
+/* Tab counter — "(N)" in parentheses, as in the CRM sidebar. */
+.cx-tab-badge {
+    color: #9ca3af !important; font-size: 13px; font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+.cx-tab-badge::before { content: '('; }
+.cx-tab-badge::after  { content: ')'; }
+.cx-tab-badge.zero { display: none; }
+
+.cx-list-body { flex: 1; overflow-y: auto; }
+
+.cx-empty {
+    padding: 40px 24px; text-align: center; color: #9ca3af; font-size: 13px;
+}
+
+/* List item — Telegram/Intercom style */
+.cx-row {
+    display: flex; gap: 11px; padding: 12px 14px; cursor: pointer;
+    border-bottom: 1px solid #f3f4f6; transition: background .1s;
+    align-items: flex-start;
+}
+.cx-row:hover { background: #f9fafb; }
+.cx-row.active { background: #eef0f3; }
+.cx-row { position: relative; }
+.cx-row.is-closed .cx-row-name,
+.cx-row.is-closed .cx-row-preview,
+.cx-row.is-closed .cx-row-time,
+.cx-row.is-closed .cx-avatar { opacity: 0.55; }
+.cx-row.is-closed.active .cx-row-name,
+.cx-row.is-closed.active .cx-row-preview,
+.cx-row.is-closed.active .cx-row-time,
+.cx-row.is-closed.active .cx-avatar { opacity: 0.75; }
+
+.cx-avatar {
+    width: 38px; height: 38px; border-radius: 50%;
+    border: 1px solid #e5e7eb; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 600; font-size: 13px; flex-shrink: 0;
+    text-transform: uppercase; user-select: none;
+}
+.cx-avatar[data-tone="0"] { background: #1f2937; }
+.cx-avatar[data-tone="1"] { background: #374151; }
+.cx-avatar[data-tone="2"] { background: #4b5563; }
+.cx-avatar[data-tone="3"] { background: #2563eb; }
+.cx-avatar[data-tone="4"] { background: #4338ca; }
+.cx-avatar[data-tone="5"] { background: #7c3aed; }
+.cx-avatar[data-tone="6"] { background: #b45309; }
+.cx-avatar[data-tone="7"] { background: #be185d; }
+.cx-avatar.guest { background: #9ca3af; }
+
+.cx-row-body { flex: 1; min-width: 0; }
+.cx-row-line1 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cx-row-name {
+    font-weight: 600; font-size: 13.5px; color: #111827;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
+}
+.cx-row-time { font-size: 11px; color: #9ca3af; white-space: nowrap; flex-shrink: 0; }
+.cx-row-line2 {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-top: 3px; min-height: 17px;
+}
+.cx-row-preview {
+    flex: 1; min-width: 0; font-size: 12.5px; color: #6b7280;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    line-height: 1.3;
+}
+.cx-row-preview .who { color: #9ca3af; }
+.cx-row-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+.cx-pill {
+    display: inline-block; font-size: 9.5px; font-weight: 600;
+    padding: 1px 7px; border-radius: 9px; line-height: 14px;
+    text-transform: uppercase; letter-spacing: 0.3px;
+}
+.cx-pill.open   { background: #e0e7ff; color: #3730a3; }
+.cx-pill.closed { background: #f3f4f6; color: #6b7280; }
+.cx-pill.guest  { background: #f3f4f6; color: #6b7280; }
+.cx-pill.user   { background: #dbeafe; color: #1e40af; }
+
+/* Unread — "(N)" in parentheses, as in the CRM sidebar. */
+.cx-unread {
+    color: #9ca3af; font-size: 13px; font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+.cx-unread::before { content: '('; }
+.cx-unread::after  { content: ')'; }
+
+/* ───────────────────────────────────────────────────────────────────────
+   Chat panel (right)
+   ─────────────────────────────────────────────────────────────────────── */
+.cx-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; background: #fafafa; }
+
+.cx-panel-empty {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #9ca3af; gap: 14px; user-select: none;
+}
+.cx-panel-empty-icon { width: 64px; height: 64px; color: #d1d5db; }
+.cx-panel-empty-text { font-size: 14px; }
+
+.cx-panel-header {
+    padding: 0 18px; border-bottom: 1px solid #e5e7eb; background: #fafafa;
+    display: flex; align-items: center; gap: 14px;
+    height: 53px; box-sizing: border-box;
+}
+/* The info block stretches to the avatar height (40px): name — to the top edge, meta — to the bottom. */
+.cx-panel-header-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; height: 40px; }
+.cx-panel-header-name {
+    font-size: 14px; font-weight: 600; color: #111827;
+    display: flex; align-items: center; gap: 8px;
+}
+.cx-panel-header-meta {
+    font-size: 11.5px; color: #6b7280;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 0;
+    /* raise it a bit so the line sits on the bottom edge of the circle and the descenders (g, p)
+       do not hang below it
+     */
+    margin-bottom: 2px;
+}
+.cx-panel-header-meta .item { display: inline-flex; align-items: center; padding: 0 10px; border-left: 1px solid #e5e7eb; line-height: 14px; }
+.cx-panel-header-meta .item:first-child { padding-left: 0; border-left: none; }
+.cx-panel-header-meta .label { color: #9ca3af; margin-right: 4px; text-transform: uppercase; font-size: 10px; letter-spacing: 0.3px; font-weight: 600; }
+.cx-panel-header-meta a { color: #374151; text-decoration: none; }
+.cx-panel-header-meta a:hover { color: #111827; text-decoration: underline; }
+
+.cx-panel-header .cx-avatar { cursor: default; }
+
+.cx-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.cx-btn {
+    height: 32px; padding: 0 10px;
+    font-size: 13px; font-weight: 500; line-height: normal;
+    border: 1px solid #d1d5db; border-radius: 4px;
+    background: #fff; color: #374151;
+    cursor: pointer; box-sizing: border-box;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: inherit; -webkit-appearance: none; appearance: none;
+    text-decoration: none; box-shadow: none; text-shadow: none;
+}
+.cx-btn:hover { background: #f3f4f6; border-color: #9ca3af; color: #1f2937; }
+.cx-btn.primary { background: #1f2937; color: #fff; border-color: #1f2937; }
+.cx-btn.primary:hover { background: #111827; border-color: #111827; color: #fff; }
+.cx-btn.danger { color: var(--err-fg); border-color: var(--err-border); background: #fff; }
+.cx-btn.danger:hover { background: var(--err-bg); border-color: var(--err-border); color: var(--err-fg); }
+
+/* Messages area */
+.cx-messages {
+    flex: 1; overflow-y: auto; padding: 18px 22px 12px;
+    background: #fafafa;
+    display: flex; flex-direction: column; gap: 4px;
+    align-items: stretch;
+}
+.cx-messages-inner {
+    width: 100%; max-width: 880px; margin: 0 auto;
+    display: flex; flex-direction: column; gap: 4px;
+}
+.cx-divider {
+    text-align: center; margin: 10px 0; position: relative;
+}
+.cx-divider span {
+    display: inline-block; padding: 3px 12px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+    font-size: 11px; color: #6b7280; font-weight: 500;
+}
+
+.cx-msg { display: flex; gap: 8px; max-width: 78%; }
+.cx-msg.right { margin-left: auto; flex-direction: row-reverse; }
+.cx-msg.right .cx-msg-avatar { display: none; }
+.cx-msg.system { max-width: 100%; justify-content: center; }
+
+.cx-msg-avatar {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: 1px solid #e5e7eb;
+    box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 12px; font-weight: 600;
+    background: #9ca3af;
+    flex-shrink: 0; align-self: flex-end;  /* fixed size, pinned to the bottom of the bubble */
+    user-select: none;
+}
+.cx-msg-bubble {
+    padding: 8px 12px; border-radius: 14px;
+    font-size: 13.5px; line-height: 1.45;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+    word-wrap: break-word; white-space: pre-wrap;
+    max-width: 100%;
+}
+.cx-msg-bubble.is-file { padding: 6px; }
+.cx-msg-bubble.is-file.has-text { padding: 6px 6px 8px; }
+/* Image messages — Telegram-style:
+   • image-only: no bubble at all, thin gray border on the image itself
+   • image + caption: image and text live in ONE bubble; the image fills
+     the bubble's top edge-to-edge, caption sits below with normal padding. */
+.cx-msg-bubble.is-image:not(.has-text) {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+}
+.cx-att-img {
+    display: block; max-width: 320px; max-height: 320px;
+    width: auto; height: auto; border-radius: 14px; cursor: zoom-in; object-fit: cover;
+    background: #f3f4f6;
+}
+.cx-msg-bubble.is-image:not(.has-text) .cx-att-img {
+    border: 1px solid #d1d5db;
+}
+/* Mirror the chat-bubble "tail" — small radius on the speech corner */
+.cx-msg.left  .cx-msg-bubble.is-image:not(.has-text) .cx-att-img { border-bottom-left-radius: 4px; }
+.cx-msg.right .cx-msg-bubble.is-image:not(.has-text) .cx-att-img { border-bottom-right-radius: 4px; }
+/* Combined image+caption: image keeps the light gray outline; text below
+   is a regular chat bubble (dark for manager, white for customer).
+   Image and text bubble are visually attached — flat edge between them. */
+.cx-msg-bubble.is-image.has-text {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+}
+.cx-msg-bubble.is-image.has-text .cx-att-img {
+    max-width: 100%;
+    border: 1px solid #d1d5db;
+    border-bottom: none;
+    border-radius: 14px 14px 0 0;
+    background: #fff;
+}
+.cx-msg-bubble.is-image.has-text .cx-att-text {
+    margin: 0; padding: 8px 12px;
+    font-size: 13.5px; line-height: 1.45;
+    border-radius: 0 0 14px 14px;
+    word-wrap: break-word; white-space: pre-wrap;
+    box-sizing: border-box;
+}
+.cx-msg.left  .cx-msg-bubble.is-image.has-text .cx-att-text {
+    background: #fff; color: #1f2937;
+    border: 1px solid #d1d5db; border-top: none;
+    border-bottom-left-radius: 4px;
+}
+.cx-msg.right .cx-msg-bubble.is-image.has-text .cx-att-text {
+    background: #1f2937; color: #fff;
+    border: 1px solid #1f2937; border-top: none;
+    border-bottom-right-radius: 4px;
+}
+.cx-att-text { padding: 4px 8px 0; }
+.cx-att-file {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; border-radius: 9px;
+    background: rgba(0,0,0,.04); color: inherit; text-decoration: none;
+    min-width: 200px; max-width: 320px; transition: background .12s;
+}
+.cx-msg.right .cx-att-file { background: rgba(255,255,255,.10); color: #fff; }
+.cx-att-file:hover { background: rgba(0,0,0,.08); }
+.cx-msg.right .cx-att-file:hover { background: rgba(255,255,255,.16); }
+.cx-att-file svg { width: 22px; height: 22px; flex-shrink: 0; opacity: .8; }
+.cx-att-file-info { flex: 1; min-width: 0; }
+.cx-att-file-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cx-att-file-size { font-size: 11px; opacity: .65; margin-top: 1px; }
+.cx-msg.left .cx-msg-bubble {
+    background: #fff; border: 1px solid #e5e7eb; color: #1f2937;
+    border-bottom-left-radius: 4px;
+}
+.cx-msg.right .cx-msg-bubble {
+    background: #1f2937; color: #fff;
+    border-bottom-right-radius: 4px;
+}
+.cx-msg.system .cx-msg-bubble {
+    background: #fef9c3; border: 1px solid #fde68a; color: #854d0e;
+    font-size: 12px; padding: 6px 12px;
+}
+.cx-msg-time { font-size: 10px; opacity: .7; margin-top: 3px; display: block; }
+.cx-msg.right .cx-msg-time { text-align: right; }
+
+/* Inline time (WhatsApp/Telegram style) — sits at bottom-right of the text */
+.cx-msg-flex { display: flex; align-items: flex-end; gap: 8px; }
+.cx-msg-flex .cx-msg-text { flex: 1; min-width: 0; word-wrap: break-word; white-space: pre-wrap; }
+.cx-msg-time-inline {
+    font-size: 10px; line-height: 1; opacity: .7;
+    flex-shrink: 0; padding-bottom: 3px; white-space: nowrap;
+}
+/* File-only time — small label aligned to the right under the file row */
+.cx-msg-time-file {
+    font-size: 10px; line-height: 1; opacity: .7;
+    text-align: right; padding: 4px 4px 0;
+}
+
+/* Image-only: floating time pill over the bottom-right of the image */
+.cx-msg-img-wrap { position: relative; display: inline-block; line-height: 0; }
+.cx-msg-img-wrap .cx-msg-time-overlay {
+    position: absolute; bottom: 6px; right: 6px;
+    font-size: 10px; line-height: 1; color: #fff;
+    background: rgba(0,0,0,.45);
+    padding: 2px 6px; border-radius: 999px;
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+}
+
+.cx-msg-grouped + .cx-msg-grouped .cx-msg-avatar { visibility: hidden; }
+.cx-msg-grouped + .cx-msg-grouped .cx-msg-bubble { border-top-left-radius: 4px; }
+.cx-msg.right.cx-msg-grouped + .cx-msg.right.cx-msg-grouped .cx-msg-bubble { border-top-right-radius: 4px; border-bottom-right-radius: 14px; }
+
+.cx-empty-msgs {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    color: #9ca3af; font-size: 13px;
+}
+/* Spinner for the message loading state */
+.cx-spinner {
+    width: 36px; height: 36px;
+    border: 3px solid #e5e7eb;
+    border-top-color: #6b7280;
+    border-radius: 50%;
+    animation: cx-spin .8s linear infinite;
+}
+@keyframes cx-spin { to { transform: rotate(360deg); } }
+
+/* Message actions — shown on hover, only for own messages */
+.cx-msg-actions {
+    display: flex; align-items: center; gap: 2px;
+    align-self: center; opacity: 0; transition: opacity .12s;
+}
+.cx-msg:hover .cx-msg-actions { opacity: 1; }
+.cx-msg-actbtn {
+    border: none; background: none; cursor: pointer; line-height: 0;
+    padding: 4px; color: #9ca3af; display: flex; transition: color .12s;
+}
+.cx-msg-actbtn:hover { color: #374151; }
+.cx-msg-actbtn.danger:hover { color: var(--err-fg); }
+.cx-msg-edited { font-style: italic; margin-right: 4px; }
+
+/* Inline message editor */
+.cx-msg-editor { display: flex; flex-direction: column; gap: 6px; width: 320px; max-width: 100%; }
+.cx-msg-editor-ta {
+    width: 100%; box-sizing: border-box; resize: vertical; min-height: 62px;
+    padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 10px;
+    font: inherit; font-size: 13.5px; line-height: 1.45;
+}
+.cx-msg-editor-ta:focus { outline: none; border-color: #6b7280; }
+.cx-msg-editor-btns { display: flex; gap: 6px; justify-content: flex-end; }
+.cx-btn.cx-btn-icon { padding: 5px 8px; }
+
+/* Input area — flat, CRM-form style */
+.cx-input-wrap {
+    padding: 12px 22px 14px; border-top: 1px solid #e5e7eb; background: #fff;
+}
+.cx-input-inner { max-width: 880px; margin: 0 auto; }
+.cx-input-row {
+    display: flex; gap: 8px; align-items: stretch;
+}
+.cx-iconbtn {
+    height: 36px; width: 36px;
+    border-radius: 6px; cursor: pointer; flex-shrink: 0; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid #d1d5db; background: #fff; color: #6b7280;
+    transition: background .1s, color .1s, border-color .1s;
+    box-sizing: border-box;
+}
+.cx-iconbtn:hover { background: #f9fafb; color: #1f2937; border-color: #9ca3af; }
+.cx-iconbtn svg { width: 16px; height: 16px; }
+.cx-attach-staged {
+    display: none; flex-wrap: wrap; gap: 6px;
+    margin-bottom: 8px;
+}
+.cx-attach-staged.is-shown { display: flex; }
+.cx-staged-item {
+    position: relative; display: inline-flex; align-items: center; gap: 8px;
+    /* padding-right for the cross 28px + 4px right */
+    padding: 4px 36px 4px 4px;
+    background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px;
+    font-size: 12px; color: #374151; max-width: 240px;
+}
+.cx-staged-item-thumb {
+    width: 28px; height: 28px; border-radius: 4px; object-fit: cover;
+    background: #f3f4f6; border: 1px solid #d1d5db; flex-shrink: 0;
+    cursor: zoom-in; transition: filter .15s;
+}
+.cx-staged-item-thumb:hover { filter: brightness(0.82); }
+.cx-staged-item-thumb-placeholder {
+    width: 28px; height: 28px; border-radius: 4px;
+    background: #e5e7eb; color: #6b7280; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+}
+.cx-staged-item-thumb-placeholder svg { width: 16px; height: 16px; }
+.cx-staged-item-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 160px;
+}
+.cx-staged-item-clear {
+    /* margin-top instead of transform:translateY — no subpixel shift on hover re-render.
+       Sized to the height of .cx-staged-item (≈28px) — a large clickable area.
+     */
+    position: absolute; top: 50%; right: 4px; margin-top: -14px;
+    width: 28px; height: 28px; padding: 0;
+    background: none; border: none; cursor: pointer;
+    color: #6b7280;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: color .12s;
+}
+.cx-staged-item-clear:hover { color: #b91c1c; }
+.cx-staged-item-clear svg { width: 16px; height: 16px; display: block; }
+
+/* Lightbox for image previews */
+#cxLightbox { display: none; position: fixed; inset: 0; z-index: 99999; background: rgba(0,0,0,.85); align-items: center; justify-content: center; cursor: zoom-out; }
+#cxLightbox.is-open { display: flex; }
+#cxLightbox img { max-width: 92vw; max-height: 92vh; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,.5); }
+.cx-input-row textarea {
+    flex: 1; resize: none;
+    padding: 7px 12px !important; margin: 0 !important;
+    font-size: 13px !important; line-height: 20px !important;
+    border: 1px solid #d1d5db !important; border-radius: 6px !important;
+    outline: none !important; box-sizing: border-box !important;
+    font-family: inherit !important;
+    min-height: 36px !important; height: 36px; max-height: 160px;
+    background: #fff !important; color: #111827 !important;
+    transition: border-color .12s !important;
+    overflow: hidden;
+}
+.cx-input-row textarea:focus { border-color: #6b7280 !important; }
+.cx-input-row textarea::placeholder { color: #9ca3af; }
+.cx-send {
+    height: 36px; width: 36px;
+    border-radius: 6px; cursor: pointer; flex-shrink: 0; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #1f2937; color: #fff; border: 1px solid #1f2937;
+    transition: background .1s, border-color .1s;
+    box-sizing: border-box;
+}
+.cx-send:hover { background: #111827; border-color: #111827; }
+.cx-send:disabled { background: #d1d5db; border-color: #d1d5db; cursor: not-allowed; }
+.cx-send svg { width: 16px; height: 16px; }
+
+/* Closed state input lock */
+.cx-input-locked {
+    padding: 14px; border-top: 1px solid #e5e7eb; background: #f9fafb;
+    text-align: center; font-size: 12.5px; color: #6b7280;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cx" id="cx">
+  <!-- LEFT: list -->
+  <div class="cx-list">
+    <div class="cx-list-top">
+      <div class="cx-search">
+        <input type="text" id="cxSearch" placeholder="Search conversations" autocomplete="off">
+      </div>
+    </div>
+    <div class="cx-tabs">
+      <button class="cx-tab active" data-status="open">Active <span class="cx-tab-badge zero" id="cxTabOpen">0</span></button>
+      <button class="cx-tab" data-status="closed">Closed <span class="cx-tab-badge zero" id="cxTabClosed">0</span></button>
+      <button class="cx-tab" data-status="all">All <span class="cx-tab-badge zero" id="cxTabAll">0</span></button>
+    </div>
+    <div class="cx-list-body" id="cxList">
+      <div class="cx-empty">Loading…</div>
+    </div>
+  </div>
+
+  <!-- RIGHT: panel -->
+  <div class="cx-panel" id="cxPanel">
+    <div class="cx-panel-empty">
+      <svg class="cx-panel-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <div class="cx-panel-empty-text">Select a conversation from the list on the left</div>
+    </div>
+  </div>
+</div>
+<div id="cxLightbox" onclick="this.classList.remove('is-open')"><img alt=""></div>
+
+<script>
+(function() {
+'use strict';
+
+// ── Helpers ────────────────────────────────────────────────────────────
+const csrftoken = (document.cookie.split('; ').find(r => r.startsWith('csrftoken=')) || '').split('=')[1] || '';
+
+async function api(url, opts = {}) {
+    const init = {
+        method: opts.method || 'GET',
+        credentials: 'same-origin',
+        headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' },
+    };
+    if (opts.body !== undefined) {
+        init.headers['Content-Type'] = 'application/json';
+        init.body = JSON.stringify(opts.body);
+    }
+    const res = await fetch(url, init);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+}
+
+function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+
+
+function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+
+function formatListTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const now = new Date();
+    const time = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    const sameDay = d.toDateString() === now.toDateString();
+    if (sameDay) return time;
+    const yest = new Date(now); yest.setDate(now.getDate() - 1);
+    if (d.toDateString() === yest.toDateString()) return 'Yesterday ' + time;
+    const diff = (now - d) / 86400000;
+    if (diff < 7) return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()] + ' ' + time;
+    return pad2(d.getDate()) + '.' + pad2(d.getMonth()+1) + ' ' + time;
+}
+
+function formatBubbleTime(iso) {
+    const d = new Date(iso);
+    return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+}
+
+function formatDateLabel(d) {
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) return 'Today';
+    const yest = new Date(now); yest.setDate(now.getDate() - 1);
+    if (d.toDateString() === yest.toDateString()) return 'Yesterday';
+    const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    let s = d.getDate() + ' ' + months[d.getMonth()];
+    if (d.getFullYear() !== now.getFullYear()) s += ' ' + d.getFullYear();
+    return s;
+}
+
+function avatarInitial(name) {
+    const s = (name || '').trim();
+    if (!s) return '?';
+    const parts = s.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return s.substring(0, 2).toUpperCase();
+}
+
+function avatarTone(seed) {
+    const s = String(seed || '');
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    return Math.abs(h) % 8;
+}
+
+// ── Notifications: sound + title pulse ────────────────────────────────
+let _audioCtx = null;
+function playBeep() {
+    try {
+        if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const ctx = _audioCtx;
+        if (ctx.state === 'suspended') ctx.resume();
+        const beep = (freq, when, dur) => {
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'sine'; o.frequency.value = freq;
+            g.gain.setValueAtTime(0, ctx.currentTime + when);
+            g.gain.linearRampToValueAtTime(0.08, ctx.currentTime + when + 0.01);
+            g.gain.linearRampToValueAtTime(0, ctx.currentTime + when + dur);
+            o.connect(g); g.connect(ctx.destination);
+            o.start(ctx.currentTime + when);
+            o.stop(ctx.currentTime + when + dur + 0.02);
+        };
+        beep(880, 0, 0.10);
+        beep(1320, 0.12, 0.10);
+    } catch {}
+}
+
+function bumpTitle() {
+    state.titleUnread++;
+    document.title = '🔔 (' + state.titleUnread + ') ' + state.titleBaseDoc;
+}
+
+function resetTitle() {
+    state.titleUnread = 0;
+    document.title = state.titleBaseDoc;
+}
+
+window.addEventListener('focus', resetTitle);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) resetTitle(); });
+
+// ── State ──────────────────────────────────────────────────────────────
+const VALID_TABS = ['open', 'closed', 'all'];
+const _initialUrl = new URL(location.href);
+const _initialTab = _initialUrl.searchParams.get('tab');
+const _initialConv = parseInt(_initialUrl.searchParams.get('conv'), 10) || null;
+const _initialQ = (_initialUrl.searchParams.get('q') || '').trim();
+
+function syncUrlState() {
+    const u = new URL(location.href);
+    if (state.activeId) u.searchParams.set('conv', state.activeId);
+    else u.searchParams.delete('conv');
+    if (state.statusFilter && state.statusFilter !== 'open') u.searchParams.set('tab', state.statusFilter);
+    else u.searchParams.delete('tab');
+    if (state.search) u.searchParams.set('q', state.search);
+    else u.searchParams.delete('q');
+    history.replaceState(null, '', u.pathname + (u.search || '') + u.hash);
+}
+
+const state = {
+    conversations: [],   // current filtered/loaded list
+    activeId: null,
+    activeMessages: [],
+    activeConv: null,
+    activeHasMore: false,
+    activeLoading: false,
+    statusFilter: VALID_TABS.includes(_initialTab) ? _initialTab : 'open',
+    search: _initialQ,
+    ws: null,
+    dashboardWs: null,
+    counts: { open: 0, closed: 0 },
+    previewCache: new Map(),  // conversation_id → last message text
+    titleBaseDoc: document.title || 'Customer chat',
+    titleUnread: 0,
+    editingMsgId: null,   // id of the message currently being edited inline
+};
+
+// ── DOM ────────────────────────────────────────────────────────────────
+const elList = document.getElementById('cxList');
+const elPanel = document.getElementById('cxPanel');
+const elSearch = document.getElementById('cxSearch');
+const tabBtns = document.querySelectorAll('.cx-tab');
+const elTabOpen = document.getElementById('cxTabOpen');
+const elTabClosed = document.getElementById('cxTabClosed');
+const elTabAll = document.getElementById('cxTabAll');
+
+// ── List rendering ─────────────────────────────────────────────────────
+function renderList() {
+    if (state.conversations.length === 0) {
+        elList.innerHTML = '<div class="cx-empty">' +
+            (state.search ? 'Nothing found' : 'No conversations') + '</div>';
+        return;
+    }
+    const html = state.conversations.map(c => {
+        const isActive = c.id === state.activeId;
+        const time = formatListTime(c.last_message_at);
+        const unread = c.unread_for_manager > 0
+            ? `<span class="cx-unread">${c.unread_for_manager > 9 ? '9+' : c.unread_for_manager}</span>`
+            : '';
+        const statusCls = c.status === 'open' ? 'open' : 'closed';
+        const statusLbl = c.status === 'open' ? 'open' : 'closed';
+
+        let preview = state.previewCache.get(c.id);
+        if (!preview && c.last_message_text) {
+            preview = (c.last_message_sender === 'manager' ? 'You: ' : '') + c.last_message_text;
+            state.previewCache.set(c.id, preview);
+        }
+        const previewHtml = preview
+            ? `<div class="cx-row-preview">${escapeHtml(preview)}</div>`
+            : `<div class="cx-row-preview"><span class="who">No messages</span></div>`;
+
+        const tone = avatarTone(c.user_id ? 'u' + c.user_id : 'g' + c.guest_id);
+        const isGuest = !c.user_id;
+        const avatarCls = isGuest ? 'cx-avatar guest' : 'cx-avatar';
+        const avatarToneAttr = isGuest ? '' : `data-tone="${tone}"`;
+
+        const isClosed = c.status === 'closed';
+        return `
+            <div class="cx-row ${isActive ? 'active' : ''} ${isClosed ? 'is-closed' : ''}" data-id="${c.id}">
+                <div class="${avatarCls}" ${avatarToneAttr}>${escapeHtml(avatarInitial(c.display_name))}</div>
+                <div class="cx-row-body">
+                    <div class="cx-row-line1">
+                        <div class="cx-row-name">${escapeHtml(c.display_name)}</div>
+                        <div class="cx-row-time">${escapeHtml(time)}</div>
+                    </div>
+                    <div class="cx-row-line2">
+                        ${previewHtml}
+                        <div class="cx-row-meta">
+                            ${unread}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    elList.innerHTML = html;
+    elList.querySelectorAll('.cx-row').forEach(el => {
+        el.addEventListener('click', () => openConversation(parseInt(el.dataset.id, 10)));
+    });
+}
+
+function updateTabBadges() {
+    const fmt = n => n > 99 ? '99+' : String(n);
+    const total = state.counts.open + state.counts.closed;
+    elTabOpen.textContent = fmt(state.counts.open);
+    elTabOpen.classList.toggle('zero', state.counts.open === 0);
+    elTabClosed.textContent = fmt(state.counts.closed);
+    elTabClosed.classList.toggle('zero', state.counts.closed === 0);
+    elTabAll.textContent = fmt(total);
+    elTabAll.classList.toggle('zero', total === 0);
+}
+
+// ── List fetching ──────────────────────────────────────────────────────
+async function loadConversations() {
+    const params = new URLSearchParams({ status: state.statusFilter });
+    if (state.search) params.set('q', state.search);
+    try {
+        const data = await api('/admin/chat/api/conversations/?' + params);
+        state.conversations = data.conversations || [];
+        // Build preview cache from DB by hitting a per-conv summary? We don't have last message text
+        // in the list payload yet — fetch lazily if needed; for now leave previewCache as-is.
+        // Update counts (rough — based on current filter we may not have all)
+        if (state.statusFilter === 'all') {
+            state.counts.open = state.conversations.filter(c => c.status === 'open').length;
+            state.counts.closed = state.conversations.filter(c => c.status === 'closed').length;
+        } else if (state.statusFilter === 'open') {
+            state.counts.open = state.conversations.length;
+        } else if (state.statusFilter === 'closed') {
+            state.counts.closed = state.conversations.length;
+        }
+        // Also refresh totals across both for badges
+        if (state.statusFilter !== 'all') {
+            try {
+                const [openD, closedD] = await Promise.all([
+                    state.statusFilter === 'open' ? Promise.resolve({ conversations: state.conversations })
+                        : api('/admin/chat/api/conversations/?status=open'),
+                    state.statusFilter === 'closed' ? Promise.resolve({ conversations: state.conversations })
+                        : api('/admin/chat/api/conversations/?status=closed'),
+                ]);
+                state.counts.open = (openD.conversations || []).length;
+                state.counts.closed = (closedD.conversations || []).length;
+            } catch {}
+        }
+        updateTabBadges();
+        renderList();
+    } catch (e) {
+        console.error('list load failed', e);
+        elList.innerHTML = '<div class="cx-empty">Loading error</div>';
+    }
+}
+
+// ── Panel rendering ────────────────────────────────────────────────────
+function renderPanel() {
+    if (!state.activeId || !state.activeConv) {
+        elPanel.innerHTML = `
+            <div class="cx-panel-empty">
+                <svg class="cx-panel-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <div class="cx-panel-empty-text">Select a conversation from the list on the left</div>
+            </div>`;
+        return;
+    }
+    const conv = state.activeConv;
+    const isOpen = conv.status === 'open';
+    const tone = avatarTone(conv.user_id ? 'u' + conv.user_id : 'g' + conv.guest_id);
+    const contactEmail = conv.contact_email || conv.guest_email || '';
+    const contactPhone = conv.contact_phone || conv.guest_phone || '';
+    const avatarBlock = `<div class="cx-avatar ${conv.user_id ? '' : 'guest'}" ${conv.user_id ? `data-tone="${tone}"` : ''} style="width:40px;height:40px;font-size:14px;">${escapeHtml(avatarInitial(conv.display_name))}</div>`;
+
+    const metaParts = [];
+    if (contactEmail) metaParts.push(`<span class="item copy-on-click" data-copy="${escapeHtml(contactEmail)}" title="Copy email">${escapeHtml(contactEmail)}</span>`);
+    if (contactPhone) metaParts.push(`<span class="item copy-on-click" data-copy="${escapeHtml(contactPhone)}" title="Copy phone">${escapeHtml(contactPhone)}</span>`);
+    const metaHtml = metaParts.join('');
+    const closeBtn = isOpen
+        ? `<button class="cx-btn danger" id="cxClose">Close</button>`
+        : `<button class="cx-btn" id="cxReopen">Reopen</button>`;
+
+    const inputBlock = isOpen
+        ? `<div class="cx-input-wrap">
+            <div class="cx-input-inner">
+                <div class="cx-attach-staged" id="cxAttachStaged"></div>
+                <div class="cx-input-row">
+                    <button type="button" class="cx-iconbtn" id="cxAttach" aria-label="Attach files" title="Attach files (up to 3)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.96 8.83l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                    </button>
+                    <input type="file" id="cxFile" multiple style="display:none;" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip,.rar,.7z">
+                    <textarea id="cxTextarea" rows="1" placeholder="Reply to the customer…"></textarea>
+                    <button class="cx-send" id="cxSend" disabled aria-label="Send" title="Send">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                    </button>
+                </div>
+            </div>
+           </div>`
+        : `<div class="cx-input-locked">Conversation closed.</div>`;
+
+    elPanel.innerHTML = `
+        <div class="cx-panel-header">
+            ${avatarBlock}
+            <div class="cx-panel-header-info">
+                <div class="cx-panel-header-name">
+                    <span class="copy-on-click" data-copy="${escapeHtml(conv.display_name)}" title="Copy name">${escapeHtml(conv.display_name)}</span>
+                </div>
+                <div class="cx-panel-header-meta">${metaHtml}</div>
+            </div>
+            <div class="cx-actions">
+                ${closeBtn}
+                <button class="cx-btn danger cx-btn-icon" id="cxDelete" title="Delete conversation" aria-label="Delete conversation">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/></svg>
+                </button>
+            </div>
+        </div>
+        <div class="cx-messages" id="cxMessages"></div>
+        ${inputBlock}
+    `;
+
+    renderMessages();
+
+    document.getElementById('cxClose')?.addEventListener('click', closeConversation);
+    document.getElementById('cxReopen')?.addEventListener('click', reopenConversation);
+    document.getElementById('cxDelete')?.addEventListener('click', deleteConversation);
+    const ta = document.getElementById('cxTextarea');
+    const sendBtn = document.getElementById('cxSend');
+    const fileInput = document.getElementById('cxFile');
+    const attachBtn = document.getElementById('cxAttach');
+    const stagedBox = document.getElementById('cxAttachStaged');
+
+    state.staged = [];
+
+    const MAX_FILES = 3;
+    const MAX_BYTES = 10 * 1024 * 1024;
+
+    const updateSendBtn = () => {
+        const hasContent = (ta?.value || '').trim().length > 0 || state.staged.length > 0;
+        if (sendBtn) sendBtn.disabled = !hasContent;
+    };
+
+    const renderStaged = () => {
+        if (!stagedBox) return;
+        if (state.staged.length === 0) {
+            stagedBox.classList.remove('is-shown');
+            stagedBox.innerHTML = '';
+            return;
+        }
+        stagedBox.classList.add('is-shown');
+        stagedBox.innerHTML = state.staged.map((s, i) => {
+            const isImage = s.file.type.startsWith('image/');
+            const thumb = isImage
+                ? `<img class="cx-staged-item-thumb" src="${escapeHtml(s.thumbUrl)}" alt="">`
+                : `<span class="cx-staged-item-thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>`;
+            return `
+                <div class="cx-staged-item" data-idx="${i}">
+                    ${thumb}
+                    <span class="cx-staged-item-name" title="${escapeHtml(s.file.name)}">${escapeHtml(s.file.name)} · ${escapeHtml(formatBytes(s.file.size))}</span>
+                    <button type="button" class="cx-staged-item-clear" data-idx="${i}" aria-label="Delete">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                    </button>
+                </div>`;
+        }).join('');
+        stagedBox.querySelectorAll('.cx-staged-item-clear').forEach(btn => {
+            btn.addEventListener('click', e => {
+                const idx = parseInt(e.currentTarget.dataset.idx, 10);
+                const removed = state.staged.splice(idx, 1)[0];
+                if (removed?.thumbUrl) URL.revokeObjectURL(removed.thumbUrl);
+                renderStaged();
+                updateSendBtn();
+            });
+        });
+        /* Click on the thumbnail — open full screen in the lightbox. */
+        stagedBox.querySelectorAll('.cx-staged-item-thumb').forEach(img => {
+            img.addEventListener('click', () => {
+                const lb = document.getElementById('cxLightbox');
+                const lbImg = lb?.querySelector('img');
+                if (lb && lbImg) {
+                    lbImg.src = img.src;
+                    lb.classList.add('is-open');
+                }
+            });
+        });
+    };
+
+    state._renderStaged = () => { renderStaged(); updateSendBtn(); };
+
+    const stageFiles = (files) => {
+        let rejected = 0;
+        let overflowed = false;
+        for (const f of files) {
+            if (state.staged.length >= MAX_FILES) { overflowed = true; break; }
+            if (!f) continue;
+            if (f.size > MAX_BYTES) { rejected++; continue; }
+            state.staged.push({
+                file: f,
+                thumbUrl: f.type.startsWith('image/') ? URL.createObjectURL(f) : null,
+            });
+        }
+        renderStaged();
+        updateSendBtn();
+        if (overflowed) alert('You can attach no more than ' + MAX_FILES + ' files');
+        if (rejected) alert('File size cannot exceed 10 MB');
+    };
+
+    if (ta) {
+        ta.addEventListener('input', () => {
+            ta.style.height = 'auto';
+            ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
+            updateSendBtn();
+        });
+        ta.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        ta.addEventListener('paste', e => {
+            const items = e.clipboardData && e.clipboardData.items;
+            if (!items) return;
+            const pasted = [];
+            for (let i = 0; i < items.length; i++) {
+                const it = items[i];
+                if (it.kind === 'file' && it.type && it.type.startsWith('image/')) {
+                    const f = it.getAsFile();
+                    if (!f) continue;
+                    const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+                    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+                    pasted.push(new File([f], `screenshot-${stamp}-${pasted.length + 1}.${ext}`, { type: f.type }));
+                }
+            }
+            if (pasted.length) {
+                e.preventDefault();
+                stageFiles(pasted);
+            }
+        });
+        ta.focus();
+    }
+    sendBtn?.addEventListener('click', sendMessage);
+
+    attachBtn?.addEventListener('click', () => fileInput?.click());
+    fileInput?.addEventListener('change', e => {
+        const files = Array.from(e.target.files || []);
+        if (files.length) stageFiles(files);
+        e.target.value = '';
+    });
+}
+
+function formatBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function renderMessages() {
+    const container = document.getElementById('cxMessages');
+    if (!container) return;
+    if (state.activeMessages.length === 0) {
+        if (state.activeLoading) {
+            container.innerHTML = '<div class="cx-empty-msgs"><div class="cx-spinner" aria-label="Loading"></div></div>';
+        } else {
+            container.innerHTML = '<div class="cx-empty-msgs">No messages yet</div>';
+        }
+        return;
+    }
+    let lastDate = '';
+    let prev = null;
+    let html = '<div class="cx-messages-inner">';
+    if (state.activeLoading) {
+        /* Loading older messages — a small spinner at the top */
+        html += '<div style="display:flex;justify-content:center;padding:8px;"><div class="cx-spinner" style="width:22px;height:22px;border-width:2px;"></div></div>';
+    } else if (state.activeHasMore) {
+        html += '<div style="text-align:center;color:#9ca3af;font-size:11px;padding:6px;">Scroll up to see older messages</div>';
+    }
+
+    state.activeMessages.forEach(m => {
+        const d = new Date(m.created_at);
+        const dStr = d.toDateString();
+        if (dStr !== lastDate) {
+            html += `<div class="cx-divider"><span>${escapeHtml(formatDateLabel(d))}</span></div>`;
+            lastDate = dStr;
+            prev = null;
+        }
+
+        const isManager = m.sender_type === 'manager';
+        const isSystem = m.sender_type === 'system' || m.sender_type === 'bot';
+        const cls = isSystem ? 'system' : (isManager ? 'right' : 'left');
+
+        if (isSystem) {
+            html += `<div class="cx-msg system"><div class="cx-msg-bubble">${escapeHtml(m.text)}</div></div>`;
+            prev = m;
+            return;
+        }
+
+        // Inline editing of your own message
+        if (isManager && m.id === state.editingMsgId) {
+            html += `
+                <div class="cx-msg right" data-msg-id="${m.id}">
+                    <div class="cx-msg-avatar"></div>
+                    <div style="flex:1;min-width:0;">
+                        <div class="cx-msg-editor">
+                            <textarea class="cx-msg-editor-ta">${escapeHtml(m.text)}</textarea>
+                            <div class="cx-msg-editor-btns">
+                                <button type="button" class="cx-btn" data-act="edit-cancel">Cancel</button>
+                                <button type="button" class="cx-btn primary" data-act="edit-save" data-msg-id="${m.id}">Save</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            prev = m;
+            return;
+        }
+
+        const grouped = prev && prev.sender_type === m.sender_type
+            && (new Date(m.created_at) - new Date(prev.created_at)) < 60 * 1000;
+        const groupedCls = grouped ? 'cx-msg-grouped' : '';
+
+        const sname = m.sender_name || (isManager ? 'Manager' : 'Customer');
+        const tone = avatarTone(sname);
+        const avatarColor = isManager ? `data-tone="${tone}"` : '';
+        const avatarBg = isManager ? '' : 'background:#9ca3af;';
+
+        const att = m.attachment;
+        const hasText = !!m.text;
+        const imageOnly = att && att.kind === 'image' && !hasText;
+        const fileOnly = att && att.kind === 'file' && !hasText;
+        const timeStr = escapeHtml(formatBubbleTime(m.created_at));
+        const editedMark = m.edited_at ? '<span class="cx-msg-edited" title="Edited">edited</span>' : '';
+        const inlineTime = `<span class="cx-msg-time-inline">${editedMark}${timeStr}</span>`;
+        const textWithTime = (txt) => `<div class="cx-msg-flex"><div class="cx-msg-text">${escapeHtml(txt)}</div>${inlineTime}</div>`;
+
+        let bubbleCls = '';
+        let bubbleInner = '';
+        if (att) {
+            bubbleCls = att.kind === 'image' ? 'is-image' : 'is-file';
+            if (hasText) bubbleCls += ' has-text';
+            if (att.kind === 'image') {
+                if (imageOnly) {
+                    bubbleInner = `<div class="cx-msg-img-wrap">`
+                        + `<img class="cx-att-img" src="${escapeHtml(att.url)}" alt="${escapeHtml(att.name)}" data-fullsize="${escapeHtml(att.url)}">`
+                        + `<span class="cx-msg-time-overlay">${timeStr}</span>`
+                        + `</div>`;
+                } else {
+                    bubbleInner = `<img class="cx-att-img" src="${escapeHtml(att.url)}" alt="${escapeHtml(att.name)}" data-fullsize="${escapeHtml(att.url)}">`;
+                }
+            } else {
+                const sizeStr = att.size ? formatBytes(att.size) : '';
+                bubbleInner = `<a href="${escapeHtml(att.url)}" target="_blank" rel="noopener" download="${escapeHtml(att.name)}" class="cx-att-file">`
+                    + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`
+                    + `<div class="cx-att-file-info"><div class="cx-att-file-name">${escapeHtml(att.name)}</div>${sizeStr ? `<div class="cx-att-file-size">${escapeHtml(sizeStr)}</div>` : ''}</div>`
+                    + `</a>`;
+                if (fileOnly) {
+                    bubbleInner += `<div class="cx-msg-time-file">${timeStr}</div>`;
+                }
+            }
+            if (hasText) bubbleInner += `<div class="cx-att-text">${textWithTime(m.text)}</div>`;
+        } else {
+            bubbleInner = textWithTime(m.text);
+        }
+
+        const canEdit = isManager && !att;
+        const msgActions = isManager ? `
+                <div class="cx-msg-actions">
+                    ${canEdit ? `<button type="button" class="cx-msg-actbtn" data-act="edit" data-msg-id="${m.id}" title="Edit" aria-label="Edit">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                    </button>` : ''}
+                    <button type="button" class="cx-msg-actbtn danger" data-act="delete" data-msg-id="${m.id}" title="Delete" aria-label="Delete">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/></svg>
+                    </button>
+                </div>` : '';
+
+        html += `
+            <div class="cx-msg ${cls} ${groupedCls}"${isManager ? ` data-msg-id="${m.id}"` : ''}>
+                <div class="cx-msg-avatar" ${avatarColor} style="${avatarBg}">${escapeHtml(avatarInitial(sname))}</div>
+                <div>
+                    <div class="cx-msg-bubble ${bubbleCls}">${bubbleInner}</div>
+                </div>
+                ${msgActions}
+            </div>
+        `;
+        prev = m;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+    container.scrollTop = container.scrollHeight;
+
+    // Wire up image lightbox
+    container.querySelectorAll('.cx-att-img').forEach(img => {
+        img.addEventListener('click', () => {
+            const lb = document.getElementById('cxLightbox');
+            const lbImg = lb?.querySelector('img');
+            if (lb && lbImg) {
+                lbImg.src = img.dataset.fullsize || img.src;
+                lb.classList.add('is-open');
+            }
+        });
+    });
+
+    // Message actions: editing / deleting your own
+    container.querySelectorAll('.cx-msg-actbtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = parseInt(btn.dataset.msgId, 10);
+            if (btn.dataset.act === 'edit') startEditMessage(id);
+            else if (btn.dataset.act === 'delete') deleteMessage(id);
+        });
+    });
+    container.querySelector('[data-act="edit-cancel"]')?.addEventListener('click', () => {
+        state.editingMsgId = null;
+        renderMessages();
+    });
+    container.querySelector('[data-act="edit-save"]')?.addEventListener('click', e => {
+        const id = parseInt(e.currentTarget.dataset.msgId, 10);
+        const ta = container.querySelector('.cx-msg-editor-ta');
+        saveEditMessage(id, ta ? ta.value : '');
+    });
+    const editTa = container.querySelector('.cx-msg-editor-ta');
+    if (editTa) {
+        editTa.focus();
+        editTa.setSelectionRange(editTa.value.length, editTa.value.length);
+        editTa.addEventListener('keydown', e => {
+            if (e.key === 'Escape') { state.editingMsgId = null; renderMessages(); }
+        });
+    }
+
+    // Update preview cache from last visible message
+    if (state.activeMessages.length > 0) {
+        const last = state.activeMessages[state.activeMessages.length - 1];
+        const previewBody = last.text || (last.attachment ? '📎 ' + last.attachment.name : '');
+        const previewLabel = (last.sender_type === 'manager' ? 'You: ' : '') + previewBody;
+        state.previewCache.set(state.activeId, previewLabel);
+    }
+}
+
+// ── Conversation operations ────────────────────────────────────────────
+async function openConversation(id) {
+    state.activeId = id;
+    state.activeMessages = [];
+    state.activeHasMore = false;
+    /* Mark the loading so that renderMessages shows "Loading…"
+       instead of "No messages yet" while the fetch is in progress.
+     */
+    state.activeLoading = true;
+    state.activeConv = state.conversations.find(c => c.id === id) || null;
+    syncUrlState();
+    renderList();
+    renderPanel();
+    try {
+        const data = await api('/admin/chat/api/conversations/' + id + '/?limit=50');
+        state.activeMessages = data.messages || [];
+        state.activeHasMore = !!data.has_more;
+        state.activeConv = data.conversation;
+        const idx = state.conversations.findIndex(c => c.id === id);
+        if (idx >= 0) {
+            state.conversations[idx] = { ...state.activeConv, unread_for_manager: 0 };
+        }
+        /* Clear loading BEFORE renderPanel, otherwise renderMessages sees
+           activeLoading=true and draws a second spinner at the top of the list.
+         */
+        state.activeLoading = false;
+        api('/admin/chat/api/conversations/' + id + '/read/', { method: 'POST', body: {} }).catch(()=>{});
+        renderPanel();
+        renderList();
+        connectConversationWs(id);
+        wireScrollLoader();
+    } catch (e) {
+        state.activeLoading = false;
+        console.error('open failed', e);
+    }
+}
+
+function wireScrollLoader() {
+    const container = document.getElementById('cxMessages');
+    if (!container) return;
+    container.addEventListener('scroll', () => {
+        if (container.scrollTop < 60 && state.activeHasMore && !state.activeLoading) {
+            loadMoreMessages();
+        }
+    }, { passive: true });
+}
+
+async function loadMoreMessages() {
+    const container = document.getElementById('cxMessages');
+    if (!container || state.activeLoading || !state.activeHasMore) return;
+    const oldest = state.activeMessages[0];
+    if (!oldest) return;
+    state.activeLoading = true;
+    const prevScrollHeight = container.scrollHeight;
+    const prevScrollTop = container.scrollTop;
+    try {
+        const data = await api('/admin/chat/api/conversations/' + state.activeId + '/?before=' + oldest.id + '&limit=50');
+        const older = data.messages || [];
+        if (older.length) {
+            state.activeMessages = older.concat(state.activeMessages);
+            state.activeHasMore = !!data.has_more;
+            /* Clear loading before renderMessages so that the small spinner
+               at the top of the list does not remain after loading more.
+             */
+            state.activeLoading = false;
+            renderMessages();
+            const newH = container.scrollHeight;
+            container.scrollTop = newH - prevScrollHeight + prevScrollTop;
+        } else {
+            state.activeHasMore = false;
+            state.activeLoading = false;
+        }
+    } catch (e) {
+        state.activeLoading = false;
+        console.error('load more failed', e);
+    }
+}
+
+async function sendMessage() {
+    const ta = document.getElementById('cxTextarea');
+    if (!ta) return;
+    const text = (ta.value || '').trim();
+    const files = (state.staged || []).map(s => s.file);
+    if (!state.activeId) return;
+    if (!text && files.length === 0) return;
+    ta.value = '';
+    ta.style.height = 'auto';
+    const sendBtn = document.getElementById('cxSend');
+    if (sendBtn) sendBtn.disabled = true;
+
+    try {
+        if (files.length > 0) {
+            const fd = new FormData();
+            if (text) fd.append('text', text);
+            files.forEach(f => fd.append('file', f));
+            const res = await fetch('/admin/chat/api/conversations/' + state.activeId + '/messages/', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'X-CSRFToken': csrftoken },
+                body: fd,
+            });
+            if (!res.ok) throw new Error('upload failed');
+            const data = await res.json();
+            const newMsgs = data.messages || (data.message ? [data.message] : []);
+            for (const m of newMsgs) {
+                if (!state.activeMessages.some(x => x.id === m.id)) {
+                    state.activeMessages.push(m);
+                }
+            }
+            renderMessages();
+            // clear staged previews
+            (state.staged || []).forEach(s => { if (s.thumbUrl) URL.revokeObjectURL(s.thumbUrl); });
+            state.staged = [];
+            state._renderStaged && state._renderStaged();
+        } else if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            state.ws.send(JSON.stringify({ action: 'message', text }));
+        } else {
+            const data = await api('/admin/chat/api/conversations/' + state.activeId + '/messages/', {
+                method: 'POST', body: { text }
+            });
+            const newMsgs = data.messages || (data.message ? [data.message] : []);
+            for (const m of newMsgs) {
+                if (!state.activeMessages.some(x => x.id === m.id)) {
+                    state.activeMessages.push(m);
+                }
+            }
+            renderMessages();
+        }
+    } catch (e) {
+        ta.value = text;
+        ta.dispatchEvent(new Event('input'));   // field height and button state — for the restored text
+        if (sendBtn) sendBtn.disabled = false;
+        alert('Failed to send the message');
+    }
+}
+
+async function closeConversation() {
+    if (!state.activeId) return;
+    if (!confirm('Close the conversation?')) return;
+    try {
+        const r = await api('/admin/chat/api/conversations/' + state.activeId + '/close/', { method: 'POST', body: {} });
+        if (r.conversation) state.activeConv = r.conversation;
+        await loadConversations();
+        renderPanel();
+    } catch (e) { console.error('close failed', e); }
+}
+
+async function reopenConversation() {
+    if (!state.activeId) return;
+    try {
+        const r = await api('/admin/chat/api/conversations/' + state.activeId + '/reopen/', { method: 'POST', body: {} });
+        if (r.conversation) state.activeConv = r.conversation;
+        await loadConversations();
+        renderPanel();
+    } catch (e) { console.error('reopen failed', e); }
+}
+
+async function deleteConversation() {
+    if (!state.activeId) return;
+    if (!confirm('Delete the conversation completely? All messages will be lost permanently.')) return;
+    const id = state.activeId;
+    try {
+        await api('/admin/chat/api/conversations/' + id + '/delete/', { method: 'POST', body: {} });
+        removeConversationLocal(id);
+    } catch (e) {
+        console.error('delete conversation failed', e);
+        alert('Failed to delete the conversation');
+    }
+}
+
+async function deleteMessage(msgId) {
+    if (!state.activeId) return;
+    if (!confirm('Delete this message?')) return;
+    try {
+        await api('/admin/chat/api/conversations/' + state.activeId + '/messages/' + msgId + '/delete/',
+            { method: 'POST', body: {} });
+        removeMessageLocal(msgId);
+    } catch (e) {
+        console.error('delete message failed', e);
+        alert('Failed to delete the message');
+    }
+}
+
+function startEditMessage(msgId) {
+    state.editingMsgId = msgId;
+    renderMessages();
+}
+
+async function saveEditMessage(msgId, text) {
+    const trimmed = (text || '').trim();
+    if (!trimmed) { alert('The message text cannot be empty'); return; }
+    try {
+        const r = await api('/admin/chat/api/conversations/' + state.activeId + '/messages/' + msgId + '/edit/',
+            { method: 'POST', body: { text: trimmed } });
+        state.editingMsgId = null;
+        if (r.message) applyMessageUpdate(r.message);
+        else renderMessages();
+    } catch (e) {
+        console.error('edit message failed', e);
+        alert('Failed to save changes');
+    }
+}
+
+// Local application of changes — shared by optimistic actions and WebSocket events.
+// Idempotent: a repeated call with the same data breaks nothing.
+function removeConversationLocal(id) {
+    /* Locally update counts by the status of the deleted conversation,
+       so the tab badges change instantly, without a reload.
+     */
+    const conv = state.conversations.find(c => c.id === id);
+    if (conv) {
+        if (conv.status === 'open') state.counts.open = Math.max(0, state.counts.open - 1);
+        else state.counts.closed = Math.max(0, state.counts.closed - 1);
+    }
+    state.conversations = state.conversations.filter(c => c.id !== id);
+    state.previewCache.delete(id);
+    if (state.activeId === id) {
+        state.activeId = null;
+        state.activeConv = null;
+        state.activeMessages = [];
+        state.editingMsgId = null;
+        if (state.ws) { try { state.ws.close(); } catch {} state.ws = null; }
+        syncUrlState();
+        renderPanel();
+    }
+    renderList();
+    updateTabBadges();
+}
+
+function removeMessageLocal(msgId) {
+    const before = state.activeMessages.length;
+    state.activeMessages = state.activeMessages.filter(m => m.id !== msgId);
+    if (state.activeMessages.length !== before) {
+        if (state.editingMsgId === msgId) state.editingMsgId = null;
+        renderMessages();
+    }
+}
+
+function applyMessageUpdate(msg) {
+    const idx = state.activeMessages.findIndex(m => m.id === msg.id);
+    if (idx >= 0) {
+        state.activeMessages[idx] = msg;
+        renderMessages();
+    }
+}
+
+// ── WebSocket: dashboard ───────────────────────────────────────────────
+function connectDashboard() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${proto}//${location.host}/ws/chat/dashboard/`;
+    const ws = new WebSocket(url);
+    state.dashboardWs = ws;
+
+    ws.onmessage = (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            if (data.type === 'message') handleIncomingMessage(data.payload);
+            else if (data.type === 'conversation') handleConversationUpdate(data.payload);
+            else if (data.type === 'message_updated') applyMessageUpdate(data.payload);
+            else if (data.type === 'message_deleted') removeMessageLocal(data.payload.id);
+            else if (data.type === 'conversation_deleted') removeConversationLocal(data.payload.id);
+        } catch {}
+    };
+    ws.onclose = () => { setTimeout(connectDashboard, 3000); };
+    ws.onerror = () => { try { ws.close(); } catch {} };
+}
+
+function handleIncomingMessage(msg) {
+    const previewBody = msg.text || (msg.attachment ? '📎 ' + msg.attachment.name : '');
+    state.previewCache.set(msg.conversation_id,
+        (msg.sender_type === 'manager' ? 'You: ' : '') + previewBody);
+
+    const conv = state.conversations.find(c => c.id === msg.conversation_id);
+    if (conv) {
+        conv.last_message_at = msg.created_at;
+        if (msg.sender_type === 'customer' && msg.conversation_id !== state.activeId) {
+            conv.unread_for_manager = (conv.unread_for_manager || 0) + 1;
+        }
+        state.conversations = state.conversations.filter(c => c.id !== conv.id);
+        state.conversations.unshift(conv);
+        renderList();
+    } else {
+        loadConversations();
+    }
+
+    if (msg.conversation_id === state.activeId) {
+        if (!state.activeMessages.some(m => m.id === msg.id)) {
+            state.activeMessages.push(msg);
+            renderMessages();
+        }
+    }
+
+    // Beep + title bump only for incoming customer messages
+    if (msg.sender_type === 'customer') {
+        playBeep();
+        if (document.hidden || msg.conversation_id !== state.activeId) bumpTitle();
+    }
+}
+
+function handleConversationUpdate(conv) {
+    const idx = state.conversations.findIndex(c => c.id === conv.id);
+    if (idx >= 0) state.conversations[idx] = conv;
+    else state.conversations.unshift(conv);
+    renderList();
+    if (conv.id === state.activeId) {
+        state.activeConv = conv;
+        renderPanel();
+    }
+}
+
+// ── WebSocket: per-conversation ────────────────────────────────────────
+function connectConversationWs(id) {
+    if (state.ws) {
+        try { state.ws.close(); } catch {}
+        state.ws = null;
+    }
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${proto}//${location.host}/ws/chat/${id}/`;
+    const ws = new WebSocket(url);
+    state.ws = ws;
+
+    ws.onmessage = (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            if (data.type === 'message' && data.payload.conversation_id === state.activeId) {
+                if (!state.activeMessages.some(m => m.id === data.payload.id)) {
+                    state.activeMessages.push(data.payload);
+                    renderMessages();
+                }
+                if (data.payload.sender_type === 'customer' && state.ws?.readyState === WebSocket.OPEN) {
+                    state.ws.send(JSON.stringify({ action: 'read' }));
+                }
+            }
+            else if (data.type === 'message_updated') applyMessageUpdate(data.payload);
+            else if (data.type === 'message_deleted') removeMessageLocal(data.payload.id);
+            else if (data.type === 'conversation_deleted') removeConversationLocal(data.payload.id);
+        } catch {}
+    };
+    ws.onclose = () => { state.ws = null; };
+    ws.onerror = () => { try { ws.close(); } catch {} };
+}
+
+// ── Wiring ─────────────────────────────────────────────────────────────
+tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        tabBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.statusFilter = btn.dataset.status;
+        syncUrlState();
+        loadConversations();
+    });
+});
+
+let searchDebounce = null;
+elSearch.addEventListener('input', () => {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => {
+        state.search = elSearch.value.trim();
+        syncUrlState();
+        loadConversations();
+    }, 300);
+});
+
+// Restore initial UI state from URL (tab + search)
+tabBtns.forEach(b => b.classList.toggle('active', b.dataset.status === state.statusFilter));
+if (state.search) elSearch.value = state.search;
+
+// Init
+if (!document.title) document.title = 'Customer chat';
+state.titleBaseDoc = document.title;
+loadConversations().then(() => {
+    if (_initialConv) openConversation(_initialConv);
+});
+connectDashboard();
+
+
+})();
+</script>
+{% endblock %}

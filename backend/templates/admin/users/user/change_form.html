@@ -1,0 +1,540 @@
+{% extends "admin/change_form.html" %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+/* ── Fieldsets ── */
+#content-main fieldset.module { padding-bottom: 0 !important; margin-bottom: 0 !important; }
+#content-main fieldset.module > h2 {
+    padding: 14px 20px !important; margin: 0 !important;
+    font-size: 11px !important; font-weight: 700 !important;
+    text-transform: uppercase !important; letter-spacing: 0.5px !important;
+    color: #9ca3af !important; border-bottom: 1px solid #f3f4f6 !important;
+}
+#content-main .form-row { padding: 14px 20px !important; }
+#content-main fieldset.module .form-row:last-of-type { border-bottom: 1px solid #e5e7eb !important; }
+.form-row label { font-weight: 400 !important; }
+/* Fix Django default 2px padding-top on inner div */
+#content-main .form-row > div { padding-top: 0 !important; }
+/* Prevent label stretch from adding extra space below content */
+#content-main .flex-container { align-items: flex-start !important; }
+#content-main .inline-group { padding-top: 0 !important; margin-top: 0 !important; }
+
+/* ── Flex rows (label + input) ── */
+.flex-container { display: flex !important; align-items: flex-start !important; flex: 1 !important; min-width: 0 !important; }
+.flex-container > label { width: 160px !important; min-width: 160px !important; flex-shrink: 0 !important; font-weight: 400 !important; color: var(--body-quiet-color) !important; font-size: 13px !important; padding: 0 14px 0 0 !important; margin: 0 !important; }
+
+/* ── Inputs ── */
+.vTextField { width: 400px !important; max-width: 100%; }
+#id_np_city_ref { width: 400px !important; color: #9ca3af; }
+
+/* ── Hide clutter ── */
+#id_is_superuser_helptext { display: none; }
+
+/* ── Hide Django error blocks — we show red borders only ── */
+p.errornote { display: none !important; }
+.errorlist { display: none !important; }
+
+/* ── Required field error state ── */
+input.cl-field-error,
+input.cl-field-error:focus { border: 1px solid #dc2626 !important; box-shadow: none !important; outline: none !important; }
+
+/* ── Hide raw NP fields — picker handles them ── */
+.field-np_city, .field-np_city_ref, .field-np_warehouse { display: none !important; }
+
+/* ── NP delivery picker — same UI as on order form ── */
+.np-city-wrap { position: relative; }
+.np-city-inp { width: 400px; max-width: 100%; box-sizing: border-box; padding: 5px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; outline: none; }
+.np-city-inp:focus { border-color: #9ca3af; }
+/* Dropdown list — wider than the input, so long names/addresses don't get cut off. */
+.np-city-drop { position: fixed; z-index: 99999; background: #fff; border: 1px solid #d1d5db; border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,.12); max-height: 280px; overflow-y: auto; display: none; min-width: 560px; }
+.np-city-item { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #f3f4f6; }
+.np-city-item:hover { background: #f9fafb; }
+.np-city-name { font-weight: 500; color: #1f2937; }
+.np-wh-wrap { margin-top: 6px; display: none; position: relative; }
+.np-wh-inp { width: 400px; max-width: 100%; box-sizing: border-box; padding: 5px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; background: #fff; color: #374151; outline: none; }
+.np-wh-inp:focus { border-color: #9ca3af; }
+.np-wh-drop { position: fixed; z-index: 99999; background: #fff; border: 1px solid #d1d5db; border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,.12); display: none; min-width: 560px; }
+.np-wh-drop-inner { max-height: 320px; overflow-y: auto; }
+.np-wh-item { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #f3f4f6; color: #374151; }
+.np-wh-item:hover { background: #f9fafb; }
+.np-badge { display: none; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 4px; padding: 6px 10px; font-size: 13px; color: #374151; margin-top: 4px; max-width: 560px; }
+.np-change-btn { font-size: 11px; color: #6b7280; background: none; border: none; cursor: pointer; padding: 0; margin-left: 8px; text-decoration: underline; }
+.np-change-btn:hover { color: #374151; }
+</style>
+{% include "admin/_form_guard.html" %}
+{% endblock %}
+
+{% block content_title %}{% endblock %}
+{% block object-tools %}{% endblock %}
+
+{% block submit_buttons_top %}
+{% include "admin/_submit_buttons_top.html" %}
+{% endblock %}
+{% block submit_buttons_bottom %}{% endblock %}
+
+{% block admin_change_form_document_ready %}
+{{ block.super }}
+<script>
+(function(){
+    /* ── Fix labels ── */
+    var labelMap = {
+        'id_role':         'Role:',
+        'id_is_active':    'Active',
+        'id_is_staff':     'Admin (staff)',
+        'id_is_superuser': 'Superuser',
+    };
+    Object.keys(labelMap).forEach(function(id){
+        var el = document.querySelector('label[for="'+id+'"]');
+        if(el) el.textContent = labelMap[id];
+    });
+
+    /* ── Merge first_name + last_name → single full name field ── */
+    var fnRow = document.querySelector('.field-first_name');
+    var lnRow = document.querySelector('.field-last_name');
+    var fnInp = document.getElementById('id_first_name');
+    var lnInp = document.getElementById('id_last_name');
+    if(fnRow && lnRow && fnInp && lnInp){
+        /* Hide originals */
+        fnRow.style.display = 'none';
+        lnRow.style.display = 'none';
+
+        /* Build the full name row — structure like field-customer_name */
+        var pibRow = document.createElement('div');
+        pibRow.className = 'form-row field-pib';
+        var d1 = document.createElement('div');
+        var d2 = document.createElement('div');
+        var flex = document.createElement('div');
+        flex.className = 'flex-container';
+        var lbl = document.createElement('label');
+        lbl.setAttribute('for', 'id_pib');
+        lbl.textContent = 'Full name:';
+        var pibInp = document.createElement('input');
+        pibInp.type = 'text';
+        pibInp.id = 'id_pib';
+        pibInp.className = 'vTextField';
+        pibInp.value = [fnInp.value, lnInp.value].filter(Boolean).join(' ');
+
+        flex.appendChild(lbl); flex.appendChild(pibInp);
+        d2.appendChild(flex); d1.appendChild(d2); pibRow.appendChild(d1);
+        var emailRow = document.querySelector('.field-email');
+        var insertBefore = emailRow || fnRow;
+        insertBefore.parentNode.insertBefore(pibRow, insertBefore);
+
+        /* On change — sync to hidden fields + clear error */
+        pibInp.addEventListener('input', function(){
+            var parts = pibInp.value.trim().split(/\s+/);
+            fnInp.value = parts[0] || '';
+            lnInp.value = parts.slice(1).join(' ');
+            if(pibInp.value.trim()) pibInp.classList.remove('cl-field-error');
+        });
+
+        /* Sync before submit */
+        var form = document.querySelector('#content-main form') || document.querySelector('form[method="post"]:not(#logout-form)');
+        if(form) form.addEventListener('submit', function(e){
+            var parts = pibInp.value.trim().split(/\s+/);
+            fnInp.value = parts[0] || '';
+            lnInp.value = parts.slice(1).join(' ');
+
+            /* ── Client-side required validation ── */
+            var hasErr = false;
+
+            /* PIB */
+            if(!pibInp.value.trim()){
+                pibInp.classList.add('cl-field-error');
+                hasErr = true;
+            } else {
+                pibInp.classList.remove('cl-field-error');
+            }
+
+            /* Email */
+            var emailInp = document.getElementById('id_email');
+            if(emailInp && !emailInp.value.trim()){
+                emailInp.classList.add('cl-field-error');
+                hasErr = true;
+            } else if(emailInp){
+                emailInp.classList.remove('cl-field-error');
+            }
+
+            /* Phone — check digits count via hidden input */
+            var phoneInp = document.getElementById('id_phone');
+            var phoneDigits = phoneInp ? (phoneInp.value||'').replace(/\D/g,'') : '';
+            if(phoneDigits.length < 10){
+                if(phoneInp) phoneInp.classList.add('cl-field-error');
+                hasErr = true;
+            } else {
+                if(phoneInp) phoneInp.classList.remove('cl-field-error');
+            }
+
+            if(hasErr) e.preventDefault();
+        });
+
+        window._pibCancelSync = function(){
+            pibInp.value = [fnInp.value, lnInp.value].filter(Boolean).join(' ');
+        };
+    }
+
+    /* ── Phone mask for #id_phone (same as orders) ── */
+    (function(){
+        var inp = document.getElementById('id_phone');
+        if(!inp) return;
+
+        var STATIC = ['+','3','8','(','0',null,null,')',' ',null,null,null,'-',null,null,'-',null,null];
+        var SLOTS  = [5, 6, 9, 10, 11, 13, 14, 16, 17];
+        var FONT = 'inherit'; var FS = '13px'; var PAD = 8;
+
+        function extractDigits(val){
+            var d = (val||'').replace(/\D/g,'');
+            if(d.slice(0,3)==='380') d=d.slice(3);
+            else if(d.slice(0,2)==='38') d=d.slice(2);
+            else if(d[0]==='0') d=d.slice(1);
+            return d.slice(0,9).split('');
+        }
+        var digits = extractDigits(inp.value);
+
+        var ctx2d = document.createElement('canvas').getContext('2d');
+        ctx2d.font = FS+' '+FONT;
+        var CW = Math.ceil(ctx2d.measureText('0').width)+2;
+
+        var wrap = document.createElement('div');
+        wrap.style.cssText = 'position:relative;display:inline-flex;align-items:center;';
+        inp.parentNode.insertBefore(wrap, inp);
+        wrap.appendChild(inp);
+
+        var overlay = document.createElement('div');
+        overlay.className = 'ph-overlay';
+        overlay.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;display:flex;align-items:center;padding-left:'+PAD+'px;pointer-events:none;box-sizing:border-box;';
+        wrap.appendChild(overlay);
+
+        inp.style.cssText += 'font-family:'+FONT+';font-size:'+FS+';padding:5px '+PAD+'px;box-sizing:border-box;background:#fff;';
+        inp.style.setProperty('width','400px','important');
+        inp.style.setProperty('height','28px','important');
+        inp.style.setProperty('color','transparent','important');
+        inp.style.setProperty('caret-color','transparent','important');
+
+        var cursor = document.createElement('span');
+        cursor.className = 'ph-cursor';
+        cursor.style.cssText = 'visibility:hidden;width:1px;height:14px;background:#374151;margin:0 1px;animation:ph-blink 1s step-end infinite;vertical-align:middle;display:inline-block;';
+        var styleEl = document.createElement('style');
+        styleEl.textContent = '@keyframes ph-blink{0%,100%{opacity:1}50%{opacity:0}}'
+            /* The browser's autofill painted its own text over the overlay (the digits
+               overlapped). We make it transparent and remove the yellow background.
+             */
+            + '#id_phone:-webkit-autofill,#id_phone:-webkit-autofill:hover,#id_phone:-webkit-autofill:focus{-webkit-text-fill-color:transparent!important;transition:background-color 99999s ease-out 0s;}'
+            /* Ctrl+A selected the input's transparent text — the selection highlight (and in
+               WebKit the text itself) overlapped the overlay mask. We make the selection
+               fully transparent.
+             */
+            + '#id_phone::selection{background:transparent!important;color:transparent!important;-webkit-text-fill-color:transparent!important;}'
+            + '#id_phone::-moz-selection{background:transparent!important;color:transparent!important;}'
+            /* The visible selection is drawn on the overlay (the native one is hidden above): the
+               input's
+               text and the mask have different widths, so the native highlight didn't line up.
+             */
+            + '.ph-overlay.ph-sel span{background:#b3d4fc;}'
+            + '.ph-overlay.ph-sel .ph-cursor{visibility:hidden!important;background:transparent!important;}';
+        document.head.appendChild(styleEl);
+
+        inp.addEventListener('focus', function(){ cursor.style.visibility='visible'; });
+        inp.addEventListener('blur',  function(){ cursor.style.visibility='hidden'; });
+
+        function syncValue(){ inp.value = digits.length ? '+380'+digits.join('') : ''; }
+
+        function render(){
+            syncValue();
+            overlay.classList.remove('ph-sel');
+            overlay.innerHTML='';
+            var cursorPlaced=false;
+            STATIC.forEach(function(ch,i){
+                var si=SLOTS.indexOf(i);
+                if(si!==-1 && digits[si]===undefined && !cursorPlaced){ overlay.appendChild(cursor); cursorPlaced=true; }
+                var s=document.createElement('span');
+                s.style.cssText='display:inline-block;width:'+CW+'px;text-align:center;font-size:'+FS+';font-family:inherit;color:#374151;';
+                if(si!==-1){ s.textContent=digits[si]!==undefined?digits[si]:'_'; if(digits[si]===undefined) s.style.color='#9ca3af'; }
+                else { s.textContent=ch; }
+                overlay.appendChild(s);
+            });
+            if(!cursorPlaced) overlay.appendChild(cursor);
+        }
+        render();
+
+        var ALLOW=['Tab','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'];
+        function notify(){ inp.dispatchEvent(new Event('input', {bubbles:true})); }
+        inp.addEventListener('keydown',function(e){
+            if(e.ctrlKey||e.metaKey||ALLOW.indexOf(e.key)!==-1) return;
+            e.preventDefault();
+            /* Everything selected (Ctrl+A) → the next input/Backspace replaces the whole number. */
+            var selAll = inp.selectionStart===0 && inp.selectionEnd===(inp.value||'').length && (inp.value||'').length>0;
+            if(e.key==='Backspace'){ if(selAll){ digits=[]; render(); notify(); } else if(digits.length){ digits.pop(); render(); notify(); } }
+            else if(e.key==='Delete'){ digits=[]; render(); notify(); }
+            else if(/^\d$/.test(e.key)){ if(selAll) digits=[]; if(digits.length<9){ digits.push(e.key); render(); notify(); } }
+        });
+        inp.addEventListener('paste',function(e){ e.preventDefault(); digits=extractDigits((e.clipboardData||window.clipboardData).getData('text')); render(); notify(); });
+        inp.addEventListener('beforeinput',function(e){ e.preventDefault(); });
+        inp.addEventListener('drop',function(e){ e.preventDefault(); });
+        /* The value changed externally (browser autofill / click on a suggestion,
+           not through our keyboard mask) → we resync the digits and
+           repaint the overlay, otherwise the mask and the value overlap each other.
+         */
+        inp.addEventListener('input', function(){
+            var v = inp.value || '';
+            var cur = digits.length ? '+380'+digits.join('') : '';
+            if(v !== cur){ digits = extractDigits(v); render(); }
+        });
+        /* Visible selection on the overlay: when the input has a selection (Ctrl+A etc.) —
+           we highlight the mask; the native selection is hidden by the CSS above.
+         */
+        function _phSel(){ overlay.classList.toggle('ph-sel', document.activeElement===inp && inp.selectionStart!==inp.selectionEnd); }
+        inp.addEventListener('select', _phSel);
+        inp.addEventListener('keyup', _phSel);
+        inp.addEventListener('mouseup', function(){ setTimeout(_phSel, 0); });
+        inp.addEventListener('blur', function(){ overlay.classList.remove('ph-sel'); });
+
+        var form=inp.closest('form');
+        if(form) form.addEventListener('submit',syncValue);
+
+        /* expose for clCancelHook */
+        inp._phRestore = function(){
+            digits = extractDigits(inp.defaultValue || inp.getAttribute('value') || '');
+            render();
+        };
+    })();
+
+    /* ── Cancel hook — restore custom UI after form.reset() ── */
+    window.clCancelHook = function(){
+        /* PIB */
+        if(window._pibCancelSync) window._pibCancelSync();
+        /* Phone mask */
+        var inp = document.getElementById('id_phone');
+        if(inp && inp._phRestore) inp._phRestore();
+        /* Delivery picker reset to saved values */
+        var npCityInp = document.getElementById('id_np_city');
+        if(npCityInp && window._deliveryReinit) window._deliveryReinit();
+        /* Clear client-side error styles */
+        document.querySelectorAll('.cl-field-error').forEach(function(el){ el.classList.remove('cl-field-error'); });
+    };
+
+    /* ── HTML escape helper ── */
+    function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    /* ══════════════════════════════════════════
+       DELIVERY PICKER (Nova Poshta)
+    ══════════════════════════════════════════ */
+    (function(){
+        var npCityInp  = document.getElementById('id_np_city');
+        var npCityRef  = document.getElementById('id_np_city_ref');
+        var npWh       = document.getElementById('id_np_warehouse');
+        if(!npCityInp) return;
+
+        var npFieldset = npCityInp.closest('fieldset');
+        if(!npFieldset) return;
+
+        var LBL_STYLE = 'width:160px;min-width:160px;flex-shrink:0;font-size:13px;font-weight:400;color:#666;padding-right:14px;margin:0;display:inline-block;';
+
+        /* ── NP picker row ── */
+        var npRow = document.createElement('div');
+        npRow.className = 'form-row';
+        npRow.innerHTML =
+            '<div style="display:flex;align-items:flex-start;padding:0;"><label for="u-np-city-inp" style="'+LBL_STYLE+'">Nova Poshta:</label>' +
+            '<div>' +
+                '<div class="np-city-wrap"><input id="u-np-city-inp" class="np-city-inp" type="text" placeholder="Enter a city…" autocomplete="off"><div class="np-city-drop"></div></div>' +
+                '<div class="np-wh-wrap"><input type="text" class="np-wh-inp" placeholder="Enter or select a branch" autocomplete="off" readonly><div class="np-wh-drop"><div class="np-wh-drop-inner"></div></div></div>' +
+                '<div class="np-badge"><span class="np-badge-text"></span><button type="button" class="np-change-btn">Change</button></div>' +
+            '</div>' +
+            '</div>';
+        npFieldset.insertBefore(npRow, npFieldset.querySelector('.form-row'));
+
+        var cityInp   = npRow.querySelector('.np-city-inp');
+        var cityDrop  = npRow.querySelector('.np-city-drop');
+        var whWrap    = npRow.querySelector('.np-wh-wrap');
+        var whInp     = npRow.querySelector('.np-wh-inp');
+        var whDrop    = npRow.querySelector('.np-wh-drop');
+        var whInner   = npRow.querySelector('.np-wh-drop-inner');
+        var badge     = npRow.querySelector('.np-badge');
+        var badgeText = npRow.querySelector('.np-badge-text');
+
+        /* Large cities have thousands of points (Kyiv ~7600). Rendering all of them in the DOM
+           freezes
+           the browser, and the list runs off the screen. We keep the full array in JS, render
+           the first WH_RENDER_LIMIT, and the filter searches the FULL set.
+         */
+        var WH_RENDER_LIMIT = 50;
+        var allWhs = [];
+        function makeWhItem(wh){
+            var el = document.createElement('div'); el.className = 'np-wh-item';
+            el.textContent = wh.Description;
+            el.addEventListener('mousedown', function(e){
+                if(e.button !== 0) return;
+                e.preventDefault();
+                if(npWh) npWh.value = wh.Description;
+                whInp.value = wh.Description; whInp.setAttribute('readonly','');
+                whDrop.style.display = 'none';
+                showBadge(cityName + ', ' + wh.Description);
+            });
+            return el;
+        }
+        function renderWhList(q){
+            q = (q || '').trim().toLowerCase();
+            var matched = q ? allWhs.filter(function(wh){ return (wh.Description||'').toLowerCase().indexOf(q) !== -1; }) : allWhs;
+            whInner.innerHTML = '';
+            if(!matched.length){
+                whInner.innerHTML = '<div style="padding:10px 14px;font-size:13px;color:#9ca3af">No branches found</div>';
+                return false;
+            }
+            matched.slice(0, WH_RENDER_LIMIT).forEach(function(wh){ whInner.appendChild(makeWhItem(wh)); });
+            if(matched.length > WH_RENDER_LIMIT){
+                var more = document.createElement('div');
+                more.style.cssText = 'padding:8px 12px;font-size:12px;color:#9ca3af;border-top:1px solid #f3f4f6;';
+                more.textContent = (matched.length - WH_RENDER_LIMIT) + ' more — refine your search (number or street)';
+                whInner.appendChild(more);
+            }
+            return true;
+        }
+        var changeBtn = npRow.querySelector('.np-change-btn');
+
+        var cityRef   = npCityRef ? npCityRef.value : '';
+        var cityName  = npCityInp ? npCityInp.value : '';
+
+        /* Init NP with existing data */
+        if(npCityInp.value){
+            cityInp.value = npCityInp.value;
+            if(npWh && npWh.value) showBadge(npCityInp.value+', '+npWh.value);
+            else loadWarehouses(npCityRef ? npCityRef.value : '');
+        }
+        function resetPicker(){
+            badge.style.display='none';
+            cityInp.parentElement.style.display='';
+            cityInp.value=''; cityRef=''; cityName='';
+            cityDrop.style.display='none';
+            whWrap.style.display='none';
+            whDrop.style.display='none';
+            whInp.value=''; whInp.setAttribute('readonly','');
+            whInner.innerHTML='';
+            if(npCityInp) npCityInp.value='';
+            if(npCityRef) npCityRef.value='';
+            if(npWh) npWh.value='';
+        }
+
+        function showBadge(text){
+            badgeText.textContent=text;
+            badge.style.display='block';
+            cityInp.parentElement.style.display='none';
+            whWrap.style.display='none';
+        }
+
+        changeBtn.addEventListener('click', function(){
+            resetPicker();
+            cityInp.focus();
+            if(npCityInp) npCityInp.dispatchEvent(new Event('input', {bubbles:true}));
+        });
+
+        /* ── NP city / warehouse pickers ── */
+        var searchTimer=null;
+        cityInp.addEventListener('input', function(){
+            clearTimeout(searchTimer);
+            var q=cityInp.value.trim();
+            if(!q){ cityDrop.style.display='none'; return; }
+            searchTimer=setTimeout(function(){ searchCities(q); },300);
+        });
+        // Returning to the field with text already entered → show the results again.
+        cityInp.addEventListener('focus', function(){ if(cityInp.value.trim()) cityInp.dispatchEvent(new Event('input')); });
+
+        function posCityDrop(){
+            var r=cityInp.getBoundingClientRect();
+            cityDrop.style.top=(window.clFlipTop ? window.clFlipTop(r, cityDrop.offsetHeight, 0) : (r.bottom+2))+'px';
+            cityDrop.style.left=(window.clX ? window.clX(r.left) : r.left)+'px';
+        }
+
+        function searchCities(q){
+            cityDrop.innerHTML='<div style="padding:10px 14px;font-size:13px;color:#9ca3af">Searching…</div>';
+            posCityDrop(); cityDrop.style.display='block';
+            fetch('/admin/orders/nova-poshta/?method=searchSettlements&q='+encodeURIComponent(q),{credentials:'same-origin'})
+                .then(function(r){return r.json();})
+                .then(function(data){
+                    var items=(data.data&&data.data[0]&&data.data[0].Addresses)||[];
+                    cityDrop.innerHTML='';
+                    if(!items.length){cityDrop.innerHTML='<div style="padding:10px 14px;font-size:13px;color:#9ca3af">Nothing found</div>';return;}
+                    items.forEach(function(city){
+                        var el=document.createElement('div'); el.className='np-city-item';
+                        el.innerHTML='<div class="np-city-name">'+esc(city.Present||city.MainDescription)+'</div>';
+                        el.addEventListener('mousedown',function(e){
+                            if(e.button !== 0) return;
+                            e.preventDefault();
+                            cityRef=city.Ref||city.SettlementRef;
+                            cityName=city.Present||(city.MainDescription+(city.AreaDescription?', '+city.AreaDescription:''));
+                            cityInp.value=cityName; cityDrop.style.display='none';
+                            if(npCityInp) npCityInp.value=cityName;
+                            if(npCityRef) npCityRef.value=cityRef;
+                            if(npWh) npWh.value='';
+                            loadWarehouses(cityRef);
+                        });
+                        cityDrop.appendChild(el);
+                    });
+                    posCityDrop();
+                })
+                .catch(function(){cityDrop.innerHTML='<div style="padding:8px 12px;font-size:13px;color:#dc2626">Connection error</div>';});
+        }
+
+        function posWhDrop(){
+            var r=whInp.getBoundingClientRect();
+            whDrop.style.top=(window.clFlipTop ? window.clFlipTop(r, whDrop.offsetHeight, 0) : (r.bottom+2))+'px';
+            whDrop.style.left=(window.clX ? window.clX(r.left) : r.left)+'px';
+        }
+        function openWhDrop(){ posWhDrop(); whDrop.style.display='block'; }
+        whInp.addEventListener('focus', function(){
+            whInp.removeAttribute('readonly');
+            if(whInner.children.length) openWhDrop();
+        });
+        whInp.addEventListener('input', function(){
+            if(renderWhList(whInp.value)) openWhDrop(); else whDrop.style.display = 'none';
+        });
+
+        function loadWarehouses(ref){
+            if(!ref) return;
+            whInp.value=''; whInp.setAttribute('readonly','');
+            whWrap.style.display='block';
+            whInner.innerHTML='<div style="padding:10px 14px;font-size:13px;color:#9ca3af">Loading…</div>';
+            fetch('/admin/orders/nova-poshta/?method=getWarehouses&city_ref='+encodeURIComponent(ref),{credentials:'same-origin'})
+                .then(function(r){return r.json();})
+                .then(function(data){
+                    allWhs = data.data || [];
+                    if(!allWhs.length){
+                        whInner.innerHTML='<div style="padding:10px 14px;font-size:13px;color:#9ca3af">No branches found</div>';
+                        return;
+                    }
+                    renderWhList('');
+                    /* If a choice was already saved — we put it into the badge */
+                    if(npWh&&npWh.value) showBadge(cityName+', '+npWh.value);
+                });
+        }
+
+        document.addEventListener('click',function(e){
+            if(!cityInp.contains(e.target)&&!cityDrop.contains(e.target)) cityDrop.style.display='none';
+            if(!whInp.contains(e.target)&&!whDrop.contains(e.target)){
+                whDrop.style.display='none';
+                whInp.setAttribute('readonly','');
+            }
+        });
+
+        /* expose for clCancelHook — reinit pickers from current field values */
+        window._deliveryReinit = function(){
+            /* save values BEFORE resetPicker() clears them */
+            var savedCity    = npCityInp ? npCityInp.value : '';
+            var savedCityRef = npCityRef ? npCityRef.value : '';
+            var savedWh      = npWh ? npWh.value : '';
+            resetPicker();
+            /* restore hidden fields */
+            if(npCityInp) npCityInp.value = savedCity;
+            if(npCityRef) npCityRef.value = savedCityRef;
+            if(npWh) npWh.value = savedWh;
+            cityRef = savedCityRef; cityName = savedCity;
+            if(savedCity){
+                cityInp.value = savedCity;
+                if(savedWh) showBadge(savedCity+', '+savedWh);
+                else if(savedCityRef) loadWarehouses(savedCityRef);
+            }
+        };
+    })();
+})();
+</script>
+{% endblock %}

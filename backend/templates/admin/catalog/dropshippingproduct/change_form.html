@@ -1,0 +1,157 @@
+{% extends "admin/catalog/product/change_form.html" %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+.variant-tab-add { display: none !important; }
+
+/* Divider line + spacing after "General display" in the main form
+   (by default product/change_form.html clears border-bottom on field-is_active -
+   here we restore it, because the description block follows and a visual break is needed).
+ */
+.change-form .form-row.field-is_active:not(.inline-related *) {
+    border-bottom: 1px solid #e5e7eb !important;
+    padding-bottom: 14px !important;
+    margin-bottom: 14px !important;
+}
+
+/* Hide the original price/stock/auto fields */
+.field-price, .field-stock, .field-price_auto, .field-stock_auto, .field-supplier_price { display: none !important; }
+
+
+/* BPC for dropshipping variants */
+.ds-bpc { border-bottom: 1px solid #e5e7eb; }
+.ds-bpc .bpc-row { display: flex; align-items: center; gap: 0; padding: 14px 20px; border-bottom: 1px solid #e5e7eb; }
+/* The last BPC row has no border of its own - it duplicates the bottom border of the .ds-bpc
+   container
+   (otherwise a double thick line appears after "Stock").
+ */
+.ds-bpc .bpc-row:last-child { border-bottom: none; }
+.ds-bpc .bpc-lbl { width: 170px; min-width: 170px; flex-shrink: 0; font-size: 13px; color: #6b7280; }
+.ds-bpc .bpc-body { display: flex; align-items: center; gap: 10px; }
+.ds-bpc .bpc-auto-val { font-size: 13px; color: #374151; min-width: 70px; }
+.ds-bpc .bpc-auto-val.dim { color: #9ca3af; }
+.ds-bpc .bpc-toggle { display: flex; border: 1px solid #d1d5db; border-radius: 4px; overflow: hidden; }
+.ds-bpc .bpc-btn { padding: 0 11px; height: 28px; font-size: 12px; font-weight: 500; border: none; cursor: pointer; background: #f9fafb; color: #9ca3af; }
+.ds-bpc .bpc-btn.on { background: #1f2937; color: #fff; }
+.ds-bpc .bpc-inp { width: 100px; height: 28px; padding: 0 8px; font-size: 13px; border: 1px solid #d1d5db; border-radius: 4px; outline: none; box-sizing: border-box; }
+.ds-bpc .bpc-hint { font-size: 12px; color: #9ca3af; }
+</style>
+<script>
+(function() {
+    function buildVariantBPC(row) {
+        if (row.querySelector('.ds-bpc')) return;
+        var pfx = row.id;
+        var supplierInp = row.querySelector('[data-supplier-price]');
+        var priceInp    = document.getElementById('id_' + pfx + '-price');
+        var stockInp    = document.getElementById('id_' + pfx + '-stock');
+        var priceAuto   = document.getElementById('id_' + pfx + '-price_auto');
+        var stockAuto   = document.getElementById('id_' + pfx + '-stock_auto');
+        if (!priceInp || !stockInp) return;
+
+        var supplierPrice = supplierInp ? parseFloat(supplierInp.value) || 0 : 0;
+        var autoPrice = Math.floor(supplierPrice / 10) * 10;
+
+        var bpc = document.createElement('div');
+        bpc.className = 'ds-bpc';
+        bpc.innerHTML =
+            '<div class="bpc-row">' +
+                '<span class="bpc-lbl">Price</span>' +
+                '<div class="bpc-body">' +
+                    '<span class="bpc-auto-val' + (autoPrice ? '' : ' dim') + '" data-auto-price>' +
+                        (autoPrice ? autoPrice.toFixed(2) + ' UAH' : '—') +
+                    '</span>' +
+                    '<div class="bpc-toggle">' +
+                        '<button type="button" class="bpc-btn on" data-p-auto>Auto</button>' +
+                        '<button type="button" class="bpc-btn" data-p-man>Manual</button>' +
+                    '</div>' +
+                    '<input type="number" class="bpc-inp" data-p-inp placeholder="UAH" style="display:none" step="0.01" min="0">' +
+                    '<span class="bpc-hint" style="display:none">UAH</span>' +
+                '</div>' +
+            '</div>' +
+            '<div class="bpc-row">' +
+                '<span class="bpc-lbl">Stock</span>' +
+                '<div class="bpc-body">' +
+                    '<span class="bpc-auto-val" data-auto-stock>' + (stockInp.value || '—') + (stockInp.value ? ' pcs' : '') + '</span>' +
+                    '<div class="bpc-toggle">' +
+                        '<button type="button" class="bpc-btn on" data-s-auto>Auto</button>' +
+                        '<button type="button" class="bpc-btn" data-s-man>Manual</button>' +
+                    '</div>' +
+                    '<input type="number" class="bpc-inp" data-s-inp placeholder="pcs" style="display:none" step="1">' +
+                    '<span class="bpc-hint" style="display:none">pcs</span>' +
+                '</div>' +
+            '</div>';
+
+        var afterEl = row.querySelector('.field-sku') || row.querySelector('.field-name');
+        if (afterEl) afterEl.parentNode.insertBefore(bpc, afterEl.nextElementSibling);
+        else row.appendChild(bpc);
+
+        function setPriceMode(mode, val) {
+            var autoBtn = bpc.querySelector('[data-p-auto]');
+            var manBtn  = bpc.querySelector('[data-p-man]');
+            var inp     = bpc.querySelector('[data-p-inp]');
+            var hint    = inp.nextElementSibling;
+            if (mode === 'auto') {
+                autoBtn.classList.add('on'); manBtn.classList.remove('on');
+                inp.style.display = 'none'; hint.style.display = 'none';
+                if (priceAuto) priceAuto.checked = true;
+            } else {
+                manBtn.classList.add('on'); autoBtn.classList.remove('on');
+                inp.style.display = ''; hint.style.display = '';
+                if (val !== undefined) inp.value = val;
+                priceInp.value = inp.value;
+                if (priceAuto) priceAuto.checked = false;
+                inp.focus();
+            }
+        }
+
+        function setStockMode(mode, val) {
+            var autoBtn = bpc.querySelector('[data-s-auto]');
+            var manBtn  = bpc.querySelector('[data-s-man]');
+            var inp     = bpc.querySelector('[data-s-inp]');
+            var hint    = inp.nextElementSibling;
+            if (mode === 'auto') {
+                autoBtn.classList.add('on'); manBtn.classList.remove('on');
+                inp.style.display = 'none'; hint.style.display = 'none';
+                if (stockAuto) stockAuto.checked = true;
+            } else {
+                manBtn.classList.add('on'); autoBtn.classList.remove('on');
+                inp.style.display = ''; hint.style.display = '';
+                if (val !== undefined) inp.value = val;
+                stockInp.value = inp.value;
+                if (stockAuto) stockAuto.checked = false;
+                inp.focus();
+            }
+        }
+
+        var priceIsManual = priceAuto && !priceAuto.checked && priceInp.value && parseFloat(priceInp.value) !== 0;
+        var stockIsManual = stockAuto && !stockAuto.checked && stockInp.value && parseFloat(stockInp.value) !== 0;
+        if (priceIsManual) setPriceMode('manual', priceInp.value);
+        if (stockIsManual) setStockMode('manual', stockInp.value);
+
+        bpc.querySelector('[data-p-auto]').addEventListener('click', function() { setPriceMode('auto'); });
+        bpc.querySelector('[data-p-man]').addEventListener('click', function() { setPriceMode('manual'); });
+        bpc.querySelector('[data-s-auto]').addEventListener('click', function() { setStockMode('auto'); });
+        bpc.querySelector('[data-s-man]').addEventListener('click', function() { setStockMode('manual'); });
+
+        bpc.querySelector('[data-p-inp]').addEventListener('input', function() { priceInp.value = this.value; if (this.value) { if (window.pgMarkDirty) pgMarkDirty(); } });
+        bpc.querySelector('[data-s-inp]').addEventListener('input', function() { stockInp.value = this.value; if (this.value) { if (window.pgMarkDirty) pgMarkDirty(); } });
+
+        bpc.querySelector('[data-p-auto]').addEventListener('click', function() { if (window.pgMarkDirty) pgMarkDirty(); });
+        bpc.querySelector('[data-s-auto]').addEventListener('click', function() { if (window.pgMarkDirty) pgMarkDirty(); });
+    }
+
+    function initVariantBPCs() {
+        document.querySelectorAll('.inline-related[id^="variants-"]:not([id$="empty"])').forEach(function(row) {
+            buildVariantBPC(row);
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(initVariantBPCs, 500);
+        new MutationObserver(function() { initVariantBPCs(); })
+            .observe(document.body, { childList: true, subtree: true });
+    });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% comment %}
+Bundle instruction sheet — A4, printed duplex.
+
+Margins are set by Chromium via margin= in page.pdf, hence @page margin:0 here — otherwise
+the margins would be applied twice. The header and footer are also drawn by Chromium (header_template /
+footer_template in chromium_pdf.py): this is the only way to get "sheet 1 of 2".
+
+Font: the stack ALWAYS ends with the generic sans-serif. The container has only
+DejaVu (backend/Dockerfile), and without a fallback prod would print squares
+where local Windows looks fine.
+{% endcomment %}
+<meta charset="utf-8">
+<title>{{ title }}</title>
+<style>
+  /* The density is tuned for ONE sheet: there is no dedicated duplex printer, and
+     every two-page instruction means manually flipping the stack. Measured on
+     real instructions: at 10.5pt/1.45, 2 of 5 fit on one sheet.
+   */
+  @page { size: A4; }   /* margins are set by Chromium via margin= */
+  body { font: 9pt/1.28 'DejaVu Sans', Arial, sans-serif; color: #111; margin: 0; }
+  h1 { font-size: 12pt; margin: 0 0 2.2mm; line-height: 1.2; }
+  h2, h3 { font-size: 9.8pt; margin: 3mm 0 1.2mm; }
+  /* break-inside works in Chromium, but break-before:recto doesn't (verified),
+     so the blank back page is added by post-processing, not from CSS.
+   */
+  p, li { margin: 0 0 1.3mm; break-inside: avoid; }
+  ul, ol { margin: 0 0 1.8mm 4mm; padding-left: 3.5mm; }
+  li { padding-left: 0; }
+  strong { font-weight: 700; }
+  u { text-decoration: underline; }
+  img { max-width: 100%; }
+  .ins-mix { background: #f2f5f2; padding: 1.5mm 2.5mm; border-radius: 2mm; }
+  .ins-comp { margin-top: 4mm; break-inside: avoid; }
+  .ins-comp h3 { margin-top: 0; }
+</style>
+
+{{ body|safe }}
+
+{% if composition_html %}<div class="ins-comp">{{ composition_html|safe }}</div>{% endif %}

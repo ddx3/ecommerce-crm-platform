@@ -1,0 +1,228 @@
+{% extends "admin/change_form.html" %}
+
+{% block content_title %}{% endblock %}
+{% block object-tools %}{% endblock %}
+
+{% block submit_buttons_top %}
+{% include "admin/_submit_buttons_top.html" %}
+{% endblock %}
+{% block submit_buttons_bottom %}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  .submit-row:not(.submit-row-top) { display: none !important; }
+  .inline-group { display: none !important; }
+  #content-main fieldset.module { margin-bottom: 0 !important; padding-bottom: 0 !important; }
+  #content-main fieldset.module .form-row:last-of-type { border-bottom: 1px solid #e5e7eb !important; }
+  #content-main .form-row { display: flex !important; align-items: flex-start !important; padding: 14px 20px !important; }
+  .form-row label { font-weight: 400 !important; padding-top: 0 !important; float: none !important; }
+  #content-main .form-row > div { padding-top: 0 !important; }
+  #content-main .flex-container { align-items: flex-start !important; }
+  #content-main .flex-container.checkbox-row { align-items: center !important; }
+  .attr-divider { border: none; border-top: 1px solid #e5e7eb; margin: 0; height: 0; display: block; }
+  .info-section { margin-top: 16px; margin-left: 20px; margin-right: 20px; margin-bottom: 0; padding: 14px 16px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; }
+  .info-section-wrap { padding-bottom: 14px; border-bottom: 1px solid #e5e7eb; }
+  .ch-list { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+  .ch-list:empty { margin-top: 0; }
+  .av-row { display: flex; align-items: center; gap: 10px; }
+  .av-input {
+    height: 28px; padding: 0 8px; border: 1px solid #d1d5db;
+    border-radius: 4px; font-size: 13px; box-sizing: border-box;
+    outline: none; flex: 1; font-family: inherit;
+    margin: 0 !important;
+  }
+  .av-input:focus { border-color: #9ca3af; }
+  .av-color { width: 28px; height: 28px; padding: 0; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; cursor: pointer; flex-shrink: 0; }
+  .av-color::-webkit-color-swatch-wrapper { padding: 2px; }
+  .av-color::-webkit-color-swatch { border: none; border-radius: 3px; }
+  .av-del {
+    width: 28px; height: 28px; flex-shrink: 0;
+    border: 1px solid #d1d5db; border-radius: 4px;
+    background: #fff; cursor: pointer; color: #9ca3af;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0;
+  }
+  .av-del:hover { background: #fee2e2; border-color: #fca5a5; color: #dc2626; }
+  .ch-add-btn {
+    padding: 4px 12px; background: #fff; border: 1px dashed #d1d5db;
+    border-radius: 4px; cursor: pointer; font-size: 12px; color: #6b7280;
+    display: inline-flex; align-items: center; gap: 4px; font-family: inherit;
+  }
+  .ch-add-btn:hover { background: #f3f4f6; border-color: #9ca3af; color: #374151; }
+</style>
+{% include "admin/_form_guard.html" %}
+{% endblock %}
+
+{% block content %}
+{{ block.super }}
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  var section = document.createElement('div');
+  section.className = 'info-section';
+  section.innerHTML = '<button type="button" class="ch-add-btn">+ Add value</button><div class="ch-list"></div>';
+  var fieldset = document.querySelector('fieldset.module');
+  if (fieldset) {
+    var wrap = document.createElement('div');
+    wrap.className = 'info-section-wrap';
+    wrap.appendChild(section);
+    fieldset.insertAdjacentElement('afterend', wrap);
+  }
+
+  var list   = section.querySelector('.ch-list');
+  var addBtn = section.querySelector('.ch-add-btn');
+
+  function alignSection() {
+    var inp = document.getElementById('id_name');
+    if (!inp) return;
+    var r  = inp.getBoundingClientRect();
+    var sr = section.getBoundingClientRect();
+    section.style.maxWidth = (r.right - sr.left) + 'px';
+  }
+
+  function updateLayout() {
+    alignSection();
+  }
+
+  updateLayout();
+  window.addEventListener('resize', updateLayout);
+  var form    = document.querySelector('form[method="post"]');
+  var totalInp = document.querySelector('input[name="values-TOTAL_FORMS"]');
+  var initInp  = document.querySelector('input[name="values-INITIAL_FORMS"]');
+  if (!totalInp) return;
+
+  var initial     = parseInt(initInp ? initInp.value : '0');
+  var initialTotal = parseInt(totalInp.value);
+  var initialValues = [];
+  var newHiddenInputs = [];
+
+  // is_color is a system flag that the user doesn't edit. Take the value from context.
+  var IS_COLOR = {% if original and original.is_color %}true{% else %}false{% endif %};
+  function isColor(){ return IS_COLOR; }
+
+  // Save the initial state
+  for (var i = 0; i < initial; i++) {
+    var hv = document.querySelector('input[name="values-' + i + '-value"]');
+    var hc = document.querySelector('input[name="values-' + i + '-color_hex"]');
+    if (hv) initialValues.push({ idx: i, value: hv.value, color: hc ? hc.value : '' });
+  }
+
+  // Show the existing values
+  for (var i = 0; i < initial; i++) {
+    var hv = document.querySelector('input[name="values-' + i + '-value"]');
+    var hc = document.querySelector('input[name="values-' + i + '-color_hex"]');
+    if (hv) addRow(hv.value, i, true, hc ? hc.value : '');
+  }
+
+  // Hook for the "Cancel" button
+  window.clCancelHook = function() {
+    // Remove the new hidden inputs
+    newHiddenInputs.forEach(function(h){ h.remove(); });
+    newHiddenInputs = [];
+    // Remove the DELETE flags
+    document.querySelectorAll('input[name^="values-"][name$="-DELETE"]').forEach(function(el){ el.remove(); });
+    // Restore TOTAL_FORMS
+    totalInp.value = initialTotal;
+    // Rebuild the list
+    list.innerHTML = '';
+    initialValues.forEach(function(item){
+      var inlineInp = document.querySelector('input[name="values-' + item.idx + '-value"]');
+      if (inlineInp) { inlineInp.disabled = false; inlineInp.value = item.value; }
+      // Also restore the hidden color_hex — otherwise addRow will consider colorHex undefined
+      // and set #000000 (visually all colors turn black until reload).
+      var hiddenColor = document.querySelector('input[name="values-' + item.idx + '-color_hex"]');
+      if (hiddenColor) hiddenColor.value = item.color || '';
+      addRow(item.value, item.idx, true, item.color || '');
+    });
+    updateLayout();
+  };
+
+  addBtn.addEventListener('click', function(){
+    var idx = parseInt(totalInp.value);
+    ['id','attribute','color_hex'].forEach(function(field){
+      var h = document.createElement('input');
+      h.type = 'hidden';
+      h.name = 'values-' + idx + '-' + field;
+      h.value = '';
+      form.appendChild(h);
+      newHiddenInputs.push(h);
+    });
+    totalInp.value = idx + 1;
+    addRow('', idx, false, '');
+    updateLayout();
+    form.dispatchEvent(new Event('change'));
+  });
+
+  function addRow(value, idx, existing, colorHex) {
+    var row = document.createElement('div');
+    row.className = 'av-row';
+
+    var color = document.createElement('input');
+    color.type = 'color';
+    color.className = 'av-color';
+    color.value = (colorHex && /^#[0-9a-fA-F]{6}$/.test(colorHex)) ? colorHex : '#000000';
+    color.style.display = isColor() ? '' : 'none';
+
+    var inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'av-input';
+    inp.placeholder = 'Enter a value...';
+    inp.value = value;
+    inp.name = 'values-' + idx + '-value';
+
+    // For existing ones — disable the hidden inline input so it isn't duplicated
+    if (existing) {
+      var inlineInp = document.querySelector('input[name="values-' + idx + '-value"]');
+      if (inlineInp) inlineInp.disabled = true;
+    }
+
+    // Hidden color_hex (create it if it doesn't exist yet)
+    var hiddenColor = document.querySelector('input[name="values-' + idx + '-color_hex"]');
+    if (!hiddenColor) {
+      hiddenColor = document.createElement('input');
+      hiddenColor.type = 'hidden';
+      hiddenColor.name = 'values-' + idx + '-color_hex';
+      form.appendChild(hiddenColor);
+    } else {
+      // Hide the standard one (in case TabularInline rendered a visible one)
+      hiddenColor.type = 'hidden';
+    }
+    hiddenColor.value = colorHex || '';
+
+    color.addEventListener('input', function(){
+      hiddenColor.value = color.value;
+      if (isColor() && !inp.value) inp.value = color.value;
+    });
+
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'av-del';
+    del.innerHTML = '<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+    del.addEventListener('click', function(){
+      if (existing) {
+        // Restore the original input and set DELETE
+        var inlineInp = document.querySelector('input[name="values-' + idx + '-value"]');
+        if (inlineInp) inlineInp.disabled = false;
+        var d = document.createElement('input');
+        d.type = 'hidden';
+        d.name = 'values-' + idx + '-DELETE';
+        d.value = 'on';
+        form.appendChild(d);
+      } else {
+        inp.disabled = true;
+      }
+      row.remove();
+      updateLayout();
+      form.dispatchEvent(new Event('change'));
+    });
+
+    row.appendChild(color);
+    row.appendChild(inp);
+    row.appendChild(del);
+    if (existing) list.appendChild(row); else list.prepend(row);
+    if (!existing) inp.focus();
+  }
+
+});
+</script>
+{% endblock %}

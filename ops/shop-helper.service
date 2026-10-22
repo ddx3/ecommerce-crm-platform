@@ -1,0 +1,26 @@
+[Unit]
+Description=Shop helper: actions for the Analyst's buttons (disk space, backup, scheduler restart, auto-fixes)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+# install.sh substitutes the path to /opt/shop-helper here (a copy of the code outside the project's
+# git copy).
+ExecStart=/usr/bin/python3 /opt/shop/ops/shop_helper.py
+Restart=always
+RestartSec=5
+Environment=SHOP_OPS_QUEUE=/opt/shop/ops-queue
+Environment=SHOP_PROJECT=/opt/shop
+Environment=SHOP_BACKUP_DIR=/opt/shop/backups
+Environment=SHOP_AUTOFIX_DIR=/opt/shop-autofix
+Environment=SHOP_SITE_URL=https://magiyaroslyn.com
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+# The helper is the last one the OOM killer kills (the test sandbox has oom-score-adj 1000, so it
+# dies first).
+OOMScoreAdjust=-900
+
+[Install]
+WantedBy=multi-user.target

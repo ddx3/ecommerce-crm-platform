@@ -1,0 +1,425 @@
+{% extends "admin/change_list.html" %}
+
+{% block content_title %}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  #content h1, .changelist-footer { display: none !important; }
+  #result_list, .results, #toolbar, .paginator { display: none !important; }
+  #content-main, #content { padding-bottom: 60px !important; }
+
+  #sn-table { width: 100%; border-collapse: collapse; background: #fff; table-layout: fixed; }
+  #sn-table thead th {
+    background: #f9fafb; border-bottom: 1px solid #e5e7eb;
+    border-left: 1px solid #e5e7eb;
+    height: 34px; padding: 0 12px; font-size: 10px; font-weight: 700; box-sizing: border-box;
+    text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280;
+    white-space: nowrap; vertical-align: middle; text-align: left;
+    cursor: pointer; user-select: none; position: relative;
+  }
+  #sn-table thead th:first-child { border-left: none; }
+  #sn-table .col-cb { width: 44px; text-align: center; padding-left: 14px !important; }
+  #sn-table .col-cb input { cursor: pointer; width: 16px; height: 16px; accent-color: #374151; margin: 0; }
+  #sn-table tbody tr.sn-pinned { background: #eff6ff !important; }
+  #sn-table thead th:hover { background: #f3f4f6; }
+  #sn-table thead th.col-open { background: #eef0f3; }
+  #sn-table thead th .th-badge {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: transparent; margin-left: 6px; vertical-align: middle;
+  }
+  #sn-table thead th.col-active .th-badge { background: #1f2937; }
+  #sn-table tbody tr { border-bottom: 1px solid #e5e7eb; height: 56px; }
+  #sn-table tbody tr.row1 { background: #fff; }
+  #sn-table tbody tr.row2 { background: #f9fafb; }
+  #sn-table tbody tr:hover { background: #eef0f3; cursor: pointer; }
+  #sn-table tbody tr.sn-empty-row, #sn-table tbody tr.sn-empty-row:hover { background: #fff !important; cursor: default !important; }
+  #sn-table tbody td {
+    padding: 8px 12px; font-size: 13px; vertical-align: middle;
+    border-left: 1px solid #e5e7eb; color: #374151; height: 56px;
+    box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #sn-table tbody td:first-child { border-left: none; }
+  /* "Notified" badge — global .or-picker-btn (data-tone), CRM standard. */
+
+  #sn-pager {
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    padding: 10px 16px; font-size: 13px; color: #6b7280;
+    border-top: 1px solid #e5e7eb;
+    position: fixed; bottom: 0; right: 0; background: #fff; z-index: 1000;
+  }
+  #sn-pager .pager-info { font-size: 12px; color: #9ca3af; }
+  #sn-pager .pg-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border: 1px solid #d1d5db; border-radius: 4px;
+    background: #fff; color: #374151; font-size: 13px; cursor: pointer; line-height: 1;
+    user-select: none; box-sizing: border-box;
+  }
+  #sn-pager .pg-btn:hover { background: #f3f4f6; }
+  #sn-pager .pg-btn.pg-active { background: #1f2937; color: #fff; border-color: #1f2937; }
+  #sn-pager .pg-btn.pg-disabled { opacity: 0.35; pointer-events: none; }
+  #sn-pager .pager-nav { display: flex; align-items: center; gap: 4px; justify-self: center; }
+  #sn-pager .pager-right { display: flex; align-items: center; gap: 4px; justify-self: end; }
+  #sn-pager .pager-size { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  #sn-pager .pager-size > span:first-child { color: #9ca3af; }
+  #sn-pager .pager-size .pg-btn { width: auto; min-width: 36px; padding: 0 8px; }
+</style>
+{% endblock %}
+
+{% block result_list %}
+<div id="flt-pop"></div>
+<table id="sn-table"></table>
+<div id="sn-pager"></div>
+
+<script>
+(function(){
+    var allData = {{ notifications_json|safe }};
+    var F = {emailQ:'', variantQ:'', isNotified:'all', dateMin:null, dateMax:null};
+    var sortField=null, sortDir='asc';
+    var currentPage=1, pageSize=25, currentFiltered=[];
+    /* Row selection (cross-page, as on products): name=_selected_action — so that the
+       "Delete" button in the base_site cl-bar works with the standard delete.
+       Declared BEFORE _loadState(), otherwise var hoisting below would overwrite the restored
+       selection.
+     */
+    var SEL = new Set();
+    /* ── Persist table state (filters/sorting/page/page size/selection) ── */
+    var STATE_KEY='stocknotification_list_state_v1';
+    function _saveState(){ try{ localStorage.setItem(STATE_KEY, JSON.stringify({F:F, sortField:sortField, sortDir:sortDir, currentPage:currentPage, pageSize:pageSize, SEL:Array.from(SEL)})); }catch(e){} }
+    function _loadState(){ try{ var s=JSON.parse(localStorage.getItem(STATE_KEY)||'null'); if(!s) return; if(s.F) Object.assign(F, s.F); if(typeof s.sortField!=='undefined') sortField=s.sortField; if(typeof s.sortDir!=='undefined') sortDir=s.sortDir; if(typeof s.currentPage!=='undefined') currentPage=s.currentPage; if(typeof s.pageSize!=='undefined') pageSize=s.pageSize; if(Array.isArray(s.SEL)) s.SEL.forEach(function(id){ SEL.add(String(id)); }); }catch(e){} }
+    _loadState();
+    function _findById(id){ for(var k=0;k<allData.length;k++){ if(String(allData[k].id)===String(id)) return allData[k]; } return null; }
+    var pop = document.getElementById('flt-pop'), popOwner=null;
+    var snTable = document.getElementById('sn-table');
+    var snPager = document.getElementById('sn-pager');
+
+    function applyFilters(){
+        var qe = F.emailQ.trim().toLowerCase();
+        var qv = F.variantQ.trim().toLowerCase();
+        currentFiltered = allData.filter(function(n){
+            if (qe && n.email.toLowerCase().indexOf(qe) === -1) return false;
+            if (qv) {
+                var hay = (n.variant_name+' '+n.variant_sku).toLowerCase();
+                if (hay.indexOf(qv) === -1) return false;
+            }
+            if (F.isNotified === 'yes' && !n.is_notified) return false;
+            if (F.isNotified === 'no'  &&  n.is_notified) return false;
+            if (F.dateMin && n.created_at_iso < F.dateMin) return false;
+            if (F.dateMax && n.created_at_iso > F.dateMax) return false;
+            return true;
+        });
+        if (sortField){
+            currentFiltered.sort(function(a,b){
+                var av=a[sortField], bv=b[sortField];
+                if (av==null) av=''; if (bv==null) bv='';
+                if (typeof av==='string') av=av.toLowerCase();
+                if (typeof bv==='string') bv=bv.toLowerCase();
+                return av<bv?(sortDir==='asc'?-1:1):av>bv?(sortDir==='asc'?1:-1):0;
+            });
+        }
+        currentPage=1;
+        renderTable(); renderPager();
+    }
+
+    function isFiltered(col){
+        if (col==='email')   return !!F.emailQ;
+        if (col==='variant') return !!F.variantQ;
+        if (col==='date')    return !!F.dateMin || !!F.dateMax;
+        if (col==='status')  return F.isNotified !== 'all';
+        return false;
+    }
+    function resetCol(col){
+        if (col==='email')   F.emailQ='';
+        if (col==='variant') F.variantQ='';
+        if (col==='date')    { F.dateMin=null; F.dateMax=null; }
+        if (col==='status')  F.isNotified='all';
+        applyFilters();
+    }
+
+    /* ── Global reset of all filters (the single button in the top bar) ── */
+    var SN_COLS = ['email','variant','date','status'];
+    function _anyFilterActive(){
+        return SN_COLS.some(isFiltered) || !!sortField;
+    }
+    function _resetFilters(){
+        F.emailQ=''; F.variantQ=''; F.isNotified='all'; F.dateMin=null; F.dateMax=null;
+        sortField=null; sortDir='asc';
+        currentPage=1; applyFilters();
+    }
+    function _renderResetBtn(){
+        var bar = document.querySelector('.submit-row.cl-bar'); if (!bar) return;
+        var btn = bar.querySelector('#stk-reset-filters');
+        var active = _anyFilterActive();
+        if (active && !btn) {
+            btn = document.createElement('button');
+            btn.type='button'; btn.id='stk-reset-filters';
+            btn.className='cl-top-btn'; btn.textContent='Reset filters';
+            btn.addEventListener('click', _resetFilters);
+            var del = bar.querySelector('.cl-top-btn-danger');
+            if (del) bar.insertBefore(btn, del); else bar.appendChild(btn);
+        } else if (!active && btn) { btn.remove(); }
+    }
+
+    function _snCells(n){
+        var pill = n.is_notified
+            ? '<span class="or-picker-btn is-static" data-field="is_notified" data-val="true" data-tone="ok"><span>Yes</span></span>'
+            : '<span class="or-picker-btn is-static" data-field="is_notified" data-val="false" data-tone="err"><span>No</span></span>';
+        var checked = (SEL.has(String(n.id))) ? ' checked' : '';
+        return '<td class="col-cb"><input type="checkbox" class="sn-row-cb" name="_selected_action" value="'+n.id+'"'+checked+'></td>'+
+            '<td>'+escapeHtml(n.email)+'</td>'+
+            '<td>'+escapeHtml(n.variant_name)+(n.variant_sku?' <span style="color:#9ca3af">('+escapeHtml(n.variant_sku)+')</span>':'')+'</td>'+
+            '<td>'+escapeHtml(n.created_at)+'</td>'+
+            '<td>'+pill+'</td>';
+    }
+    function renderTable(){
+        _renderResetBtn();
+        var pages = Math.ceil(currentFiltered.length / pageSize) || 1;
+        if (currentPage > pages) currentPage = pages;
+        var from = (currentPage-1)*pageSize, to = Math.min(from+pageSize, currentFiltered.length);
+        var slice = currentFiltered.slice(from, to);
+        /* pinned: selected rows from OTHER pages, shown at the top */
+        var visibleIds={}; slice.forEach(function(n){visibleIds[String(n.id)]=1;});
+        var pinned=[];
+        SEL.forEach(function(id){ if(visibleIds[String(id)]) return; var o=_findById(id); if(o) pinned.push(o); });
+        var thead = '<thead><tr>'+
+            '<th class="col-cb"><input type="checkbox" id="sn-cb-all"></th>'+
+            '<th data-col="email"   style="width:30%">Email<span class="th-badge"></span></th>'+
+            '<th data-col="variant" style="width:40%">Variant<span class="th-badge"></span></th>'+
+            '<th data-col="date"    style="width:20%">Created<span class="th-badge"></span></th>'+
+            '<th data-col="status"  style="width:10%">Notified<span class="th-badge"></span></th>'+
+            '</tr></thead>';
+        var tbody = '<tbody>';
+        pinned.forEach(function(n,i){ tbody += '<tr class="'+((i%2===0)?'row1':'row2')+' sn-pinned" data-id="'+n.id+'">'+_snCells(n)+'</tr>'; });
+        slice.forEach(function(n, idx){
+            tbody += '<tr class="'+((idx%2===0)?'row1':'row2')+'" data-id="'+n.id+'">'+_snCells(n)+'</tr>';
+        });
+        if(slice.length===0 && pinned.length===0){ tbody += '<tr class="sn-empty-row"><td colspan="5" style="text-align:center;color:#9ca3af;font-size:13px;height:56px;box-sizing:border-box;">No results</td></tr>'; }
+        tbody += '</tbody>';
+        snTable.innerHTML = thead + tbody;
+        _snPad();
+        updateHeaderBadges();
+        _syncCbAll();
+        if(typeof _updateSnCounter==='function') _updateSnCounter();
+
+        snTable.querySelectorAll('tbody tr:not(.sn-empty-row)').forEach(function(tr){
+            tr.addEventListener('click', function(e){
+                if (e.target.closest('.col-cb')) return;
+                location.href = '/admin/catalog/stocknotification/' + tr.dataset.id + '/change/';
+            });
+        });
+        snTable.querySelectorAll('thead th[data-col]').forEach(function(th){
+            th.addEventListener('click', function(){
+                if (popOwner === th && pop.classList.contains('open')) { closePop(); return; }
+                openPop(th);
+            });
+        });
+    }
+
+    function updateHeaderBadges(){
+        snTable.querySelectorAll('thead th[data-col]').forEach(function(th){
+            th.classList.toggle('col-active', isFiltered(th.dataset.col));
+        });
+    }
+
+    function renderPager(){
+        _saveState();
+        var total = currentFiltered.length;
+        var pages = Math.ceil(total/pageSize) || 1;
+        var from = total===0 ? 0 : (currentPage-1)*pageSize+1;
+        var to = Math.min(currentPage*pageSize, total);
+        var SVG_PREV='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,1 1,5 5,9"/></svg>';
+        var SVG_NEXT='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 1,9"/></svg>';
+        var nav = '';
+        nav += pgBtn(SVG_PREV, currentPage-1, false, currentPage===1);
+        for (var i=1; i<=pages; i++) nav += pgBtn(i, i, i===currentPage, false);
+        nav += pgBtn(SVG_NEXT, currentPage+1, false, currentPage===pages);
+        snPager.innerHTML =
+            '<span class="pager-info">'+from+'–'+to+' of '+total+'</span>'+
+            '<div class="pager-nav">'+nav+'</div>'+
+            '<div class="pager-right"><div class="pager-size"><span>Per page:</span>'+
+              '<span class="pg-btn '+(pageSize===25?'pg-active':'')+'" data-size="25">25</span>'+
+              '<span class="pg-btn '+(pageSize===50?'pg-active':'')+'" data-size="50">50</span>'+
+              '<span class="pg-btn '+(pageSize===0?'pg-active':'')+'" data-size="0">All</span>'+
+            '</div></div>';
+        snPager.querySelectorAll('.pg-btn[data-size]').forEach(function(b){
+            b.addEventListener('click', function(){
+                pageSize = parseInt(b.dataset.size) || 999999;
+                currentPage = 1; renderTable(); renderPager();
+            });
+        });
+        snPager.querySelectorAll('.pg-btn[data-page]').forEach(function(b){
+            b.addEventListener('click', function(){
+                currentPage = parseInt(b.dataset.page);
+                renderTable(); renderPager();
+            });
+        });
+        _snPad();
+    }
+    function _snPad(){
+        snTable.style.marginBottom='0';
+        if(window.padChangelistTable) window.padChangelistTable(snTable);
+        if(snTable.__padFill) snTable.__padFill.style.marginBottom=(snPager.offsetHeight||0)+'px';
+    }
+    function pgBtn(label, page, active, disabled){
+        var cls = 'pg-btn'+(active?' pg-active':'')+(disabled?' pg-disabled':'');
+        return '<span class="'+cls+'" data-page="'+page+'">'+label+'</span>';
+    }
+
+    /* ── Popup ── */
+    function openPop(th){
+        closePop();
+        popOwner = th; th.classList.add('col-open');
+        pop.innerHTML = '';
+        var resetBar = document.createElement('button'); resetBar.type='button';
+        resetBar.style.cssText='display:block;width:100%;padding:10px;border:none;border-bottom:1px solid #e5e7eb;background:none;color:#dc2626;font-size:13px;font-weight:500;cursor:pointer;text-align:left;';
+        resetBar.textContent='Reset filter';
+        resetBar.addEventListener('click', function(){ resetCol(th.dataset.col); closePop(); });
+        pop.appendChild(resetBar);
+
+        if (th.dataset.col === 'email')   buildSearchPop('email', 'emailQ', 'A ⟶ Z', 'Z ⟶ A');
+        if (th.dataset.col === 'variant') buildSearchPop('variant_name', 'variantQ', 'A ⟶ Z', 'Z ⟶ A');
+        if (th.dataset.col === 'date')    buildDatePop();
+        if (th.dataset.col === 'status')  buildStatusPop();
+
+        var rect = th.getBoundingClientRect();
+        pop.style.left = (window.clX ? window.clX(rect.left) : rect.left) + 'px';
+        pop.style.width = Math.max(rect.width, 220) + 'px';
+        pop.classList.add('open');
+        pop.style.top  = (window.clFlipTop ? window.clFlipTop(rect, pop.offsetHeight, 0) : (rect.bottom)) + 'px';
+    }
+    function closePop(){
+        pop.classList.remove('open');
+        if (popOwner) { popOwner.classList.remove('col-open'); popOwner=null; }
+    }
+    document.addEventListener('click', function(e){
+        if (!pop.contains(e.target) && !e.target.closest('th[data-col]')) closePop();
+    });
+
+    function buildSearchPop(sortKey, filterKey, asc, desc){
+        sortRows(sortKey, asc, desc);
+        var b = popBody();
+        var inp = document.createElement('input');
+        inp.type='text'; inp.className='fp-search'; inp.placeholder='Search...';
+        inp.value = F[filterKey];
+        inp.addEventListener('input', function(){ F[filterKey] = inp.value; applyFilters(); });
+        b.appendChild(inp);
+    }
+    function buildStatusPop(){
+        var b = popBody();
+        [['all','All'],['yes','Notified'],['no','Not notified']].forEach(function(o){
+            var row = document.createElement('div'); row.className='fp-item';
+            var lbl = document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+            var rb = document.createElement('input'); rb.type='radio'; rb.name='sn-st'; rb.value=o[0];
+            rb.checked = (F.isNotified === o[0]);
+            rb.addEventListener('change', function(){ F.isNotified=rb.value; applyFilters(); });
+            lbl.appendChild(rb); lbl.appendChild(document.createTextNode(o[1]));
+            row.appendChild(lbl); b.appendChild(row);
+        });
+    }
+    function buildDatePop(){
+        sortRows('created_at_iso', 'Older ⟶ newer', 'Newer ⟶ older');
+        var b = popBody();
+        var range = document.createElement('div'); range.className='fp-range';
+        var inMin = document.createElement('input'); inMin.type='date';
+        if (F.dateMin) inMin.value=F.dateMin;
+        inMin.addEventListener('input', function(){ F.dateMin = inMin.value || null; applyFilters(); });
+        var sep = document.createElement('span'); sep.className='fp-range-sep'; sep.textContent='—';
+        var inMax = document.createElement('input'); inMax.type='date';
+        if (F.dateMax) inMax.value=F.dateMax;
+        inMax.addEventListener('input', function(){ F.dateMax = inMax.value || null; applyFilters(); });
+        range.appendChild(inMin); range.appendChild(sep); range.appendChild(inMax);
+        b.appendChild(range);
+    }
+    function popBody(){ var d=document.createElement('div'); d.className='fp-pop-body'; pop.appendChild(d); return d; }
+    function sortRows(field, asc, desc){
+        [[asc,'asc'],[desc,'desc']].forEach(function(p){
+            var btn = document.createElement('button'); btn.type='button';
+            btn.className='fp-sort-row'+(sortField===field&&sortDir===p[1]?' on':'');
+            btn.innerHTML='<span>'+p[0]+'</span><span class="fp-sort-arr">›</span>';
+            btn.addEventListener('click', function(){
+                if (sortField===field && sortDir===p[1]) { sortField=null; sortDir='asc'; }
+                else { sortField=field; sortDir=p[1]; }
+                applyFilters(); closePop();
+            });
+            pop.appendChild(btn);
+        });
+    }
+    function escapeHtml(s){
+        return String(s).replace(/[&<>"']/g, function(c){
+            return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+        });
+    }
+
+    /* ── Row selection: per-page select-all + cross-page + counter + "Clear selection" ── */
+    function _pageSnIds(){
+        var from=(currentPage-1)*pageSize, to=Math.min(from+pageSize,currentFiltered.length);
+        return currentFiltered.slice(from,to).map(function(n){ return String(n.id); });
+    }
+    function _syncCbAll(){
+        var box=document.getElementById('sn-cb-all'); if(!box) return;
+        var ids=_pageSnIds();
+        var picked=ids.filter(function(id){ return SEL.has(id); }).length;
+        box.indeterminate=(picked>0 && picked<ids.length);
+        box.checked=(ids.length>0 && picked===ids.length);
+    }
+    function _updateSnCounter(){
+        var counter=document.querySelector('.cl-counter'); if(!counter) return;
+        var total=Math.max(currentFiltered.length, SEL.size);
+        counter.textContent='Selected: '+SEL.size+' of '+total;
+        var ids=_pageSnIds();
+        var onPage=ids.filter(function(id){ return SEL.has(id); }).length;
+        var cb=document.getElementById('cl-clear-sel');
+        if(cb){ if(SEL.size-onPage>0) cb.style.removeProperty('display'); else cb.style.setProperty('display','none','important'); }
+    }
+    snTable.addEventListener('change', function(e){
+        var t=e.target;
+        if(t.id==='sn-cb-all'){
+            var ids=_pageSnIds();
+            var allOn=ids.length>0 && ids.every(function(id){ return SEL.has(id); });
+            ids.forEach(function(id){ if(allOn) SEL.delete(id); else SEL.add(id); });
+            _saveState(); renderTable(); _updateSnCounter();
+            return;
+        }
+        if(t.classList && t.classList.contains('sn-row-cb')){
+            if(t.checked) SEL.add(String(t.value)); else SEL.delete(String(t.value));
+            _saveState(); renderTable(); _updateSnCounter();
+        }
+    });
+    function _installSnCounter(){
+        var counter=document.querySelector('.cl-counter'); if(!counter) return;
+        if(!document.getElementById('cl-clear-sel')){
+            var clearBtn=document.createElement('a');
+            clearBtn.href='#'; clearBtn.id='cl-clear-sel'; clearBtn.className='cl-top-btn';
+            clearBtn.textContent='Clear selection'; clearBtn.style.marginLeft='10px';
+            clearBtn.style.setProperty('display','none','important');
+            clearBtn.addEventListener('click',function(e){ e.preventDefault();
+                var ids=new Set(_pageSnIds());
+                Array.from(SEL).forEach(function(id){ if(!ids.has(String(id))) SEL.delete(id); });
+                _saveState(); renderTable(); _updateSnCounter();
+            });
+            counter.insertAdjacentElement('afterend', clearBtn);
+        }
+        window._updateCounter=_updateSnCounter; _updateSnCounter();
+        /* cl-bar is created by base_site on DOMContentLoaded — later than our
+           synchronous initial renderTable(). So the first time we draw the reset button
+           here, when the bar is already in the DOM (otherwise the persisted filter does not show
+           it).
+         */
+        _renderResetBtn();
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _installSnCounter);
+    else _installSnCounter();
+
+    /* The initial applyFilters() call itself resets currentPage=1 — we restore the
+       saved page right after it (without changing the behavior of applyFilters itself).
+     */
+    var _snRestoredPage = currentPage;
+    applyFilters();
+    if (_snRestoredPage > 1) { currentPage = _snRestoredPage; renderTable(); renderPager(); }
+    window.addEventListener('resize', _snPad);
+    if(window.ResizeObserver) new ResizeObserver(_snPad).observe(document.querySelector('#content-main')||document.body);
+    var _snNav=document.getElementById('nav-sidebar');
+    if(_snNav) _snNav.addEventListener('transitionend', _snPad);
+})();
+</script>
+{% endblock %}

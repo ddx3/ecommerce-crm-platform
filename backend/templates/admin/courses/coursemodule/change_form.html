@@ -1,0 +1,232 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label='courses' %}">Courses</a>
+  {% if original and original.course_id %}
+    &rsaquo; <a href="{% url 'admin:courses_course_change' original.course_id %}">{{ original.course.name }}</a>
+  {% endif %}
+  &rsaquo; {% if original %}Module "{{ original.title }}"{% else %}New module{% endif %}
+</div>
+{% endblock %}
+
+{% block content_title %}{% endblock %}
+{% block object-tools %}{% endblock %}
+
+{% block submit_buttons_top %}
+{% include "admin/_submit_buttons_top.html" %}
+{% endblock %}
+{% block submit_buttons_bottom %}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+/* ============================================================
+   Courses · CourseModule change_form
+   The same minimalist CRM standard (as product / course).
+   ============================================================
+ */
+
+/* The fieldset disappears as a container; section headings are hidden */
+fieldset.module { display: contents !important; }
+fieldset.module > h2,
+fieldset.module > h2.fieldset-heading { display: none !important; }
+
+/* ── Back-to-course bar (compact, no bold) ── */
+.cm-back-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+    margin: 0;
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--hairline-color);
+    font-size: var(--fs-md);
+    color: var(--muted-fg);
+    background: #fff;
+}
+.cm-back-link {
+    display: inline-flex; align-items: center; gap: 4px;
+    color: var(--link-fg) !important;
+    text-decoration: none;
+    font-size: var(--fs-md);
+}
+.cm-back-link:hover { color: var(--link-hover-color) !important; text-decoration: underline; }
+.cm-info { color: var(--muted-fg); }
+
+/* ── Form-row ── */
+div.form-row {
+    display: flex !important;
+    align-items: center !important;
+    padding: 14px 20px !important;
+    border-bottom: 1px solid var(--hairline-color) !important;
+    margin: 0 !important;
+    background: #fff !important;
+}
+div.form-row > div {
+    display: flex !important;
+    align-items: center !important;
+    width: 100% !important;
+    padding: 0 !important;
+}
+div.form-row > div > label {
+    width: var(--label-w) !important;
+    min-width: var(--label-w) !important;
+    flex-shrink: 0 !important;
+    float: none !important;
+    color: var(--body-quiet-color) !important;
+    font-size: var(--fs-base) !important;
+    font-weight: 400 !important;
+    padding: 0 14px 0 0 !important;
+    margin: 0 !important;
+}
+
+.flex-container {
+    display: flex !important;
+    align-items: center !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+    gap: 8px;
+}
+
+div.form-row input[type=text],
+div.form-row input[type=number],
+div.form-row input[type=url],
+div.form-row input[type=email],
+div.form-row select {
+    flex: 1 !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+    height: var(--btn-h-default) !important;
+    padding: 0 8px !important;
+    margin: 0 !important;
+    border: 1px solid var(--muted-border);
+    border-radius: var(--radius-input);
+    font-size: var(--fs-base);
+    background: #fff;
+    color: var(--primary);
+}
+div.form-row input:focus,
+div.form-row select:focus,
+div.form-row textarea:focus { outline: none; border-color: var(--accent); }
+
+div.form-row textarea {
+    flex: 1 !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+    min-height: 100px !important;
+    padding: 8px !important;
+    border: 1px solid var(--muted-border);
+    border-radius: var(--radius-input);
+    font-size: var(--fs-base);
+    font-family: inherit;
+    margin: 0 !important;
+}
+
+div.form-row input[type=checkbox] {
+    width: 14px; height: 14px;
+    margin: 0 8px 0 0 !important;
+    accent-color: var(--primary);
+}
+
+div.form-row.field-content { align-items: flex-start !important; }
+div.form-row.field-content > div { align-items: flex-start !important; }
+
+div.form-row .help,
+div.form-row .helptext {
+    color: var(--muted-fg) !important;
+    font-size: var(--fs-sm) !important;
+    margin: 4px 0 0 var(--label-w) !important;
+    padding: 0 !important;
+    line-height: 1.4;
+    font-weight: 400 !important;
+}
+
+div.form-row .file-upload {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-size: var(--fs-md);
+    color: var(--muted-fg);
+}
+div.form-row .file-upload a { color: var(--link-fg); text-decoration: none; }
+div.form-row .file-upload a:hover { color: var(--link-hover-color); text-decoration: underline; }
+
+/* ── Lesson inline (StackedInline, flat) ── */
+.inline-group {
+    margin: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+}
+#content .inline-group fieldset.module {
+    border: none !important; border-radius: 0 !important; margin: 0 !important;
+}
+#content .inline-group fieldset.module > h2.inline-heading { display: none !important; }
+
+/* Each lesson's heading is thin */
+.inline-related h3 {
+    background: var(--darkened-bg) !important;
+    border-top: 1px solid var(--hairline-color) !important;
+    border-bottom: 1px solid var(--hairline-color) !important;
+    color: var(--muted-fg) !important;
+    padding: 8px 20px !important;
+    font-size: var(--fs-md) !important;
+    font-weight: 400 !important;
+    margin: 0 !important;
+    text-transform: none !important;
+    letter-spacing: normal !important;
+}
+.inline-related h3 .inline_label { color: var(--primary); }
+.inline-related h3 .delete {
+    float: right;
+    font-weight: 400;
+    font-size: var(--fs-sm);
+    color: var(--muted-fg);
+}
+.inline-related h3 .delete input { margin-right: 4px; accent-color: var(--primary); }
+.inline-related div.form-row { border-bottom: 1px solid var(--hairline-color) !important; }
+
+/* "+ Add another lesson": neutral */
+.inline-group .add-row {
+    background: #fff !important;
+    border-bottom: 1px solid var(--hairline-color) !important;
+    padding: 12px 20px !important;
+}
+.inline-group .add-row a {
+    display: inline-flex; align-items: center;
+    height: var(--btn-h-default);
+    padding: 0 12px;
+    background: #fff !important;
+    color: var(--primary) !important;
+    border: 1px solid var(--muted-border) !important;
+    border-radius: var(--radius-input) !important;
+    text-decoration: none !important;
+    font-size: var(--fs-md) !important;
+    font-weight: 400 !important;
+}
+.inline-group .add-row a::before { content: '+ '; margin-right: 2px; color: var(--muted-fg); }
+.inline-group .add-row a:hover {
+    background: var(--button-hover-bg) !important;
+    border-color: var(--accent) !important;
+}
+</style>
+{% comment %}
+Without it, "Cancel" from _submit_buttons_top.html breaks: clFormCancel
+is defined only here. Also covers the buttons' dirty state and protection against data loss.
+{% endcomment %}
+{% include "admin/_form_guard.html" %}
+{% endblock %}
+
+{% block content %}
+{% if original and original.course_id %}
+<div class="cm-back-bar">
+  <a href="{% url 'admin:courses_course_change' original.course_id %}" class="cm-back-link">
+    ← Back to course
+  </a>
+  <div class="cm-info">
+    Course: {{ original.course.name }} · Lessons: {{ original.lessons.count }}
+  </div>
+</div>
+{% endif %}
+{{ block.super }}
+{% endblock %}

@@ -1,0 +1,404 @@
+{% extends "admin/change_form.html" %}
+
+{% block content_title %}{% endblock %}
+{% block object-tools %}{% endblock %}
+
+{% block submit_buttons_top %}
+{# Custom toolbar — without "Exit" (nowhere to exit to, this is a singleton). #}
+<div class="submit-row submit-row-top cl-bar">
+  <input type="submit" value="Save" class="default" name="_continue" tabindex="-1">
+  <button type="button" class="cl-top-btn" onclick="clFormCancel()">Cancel</button>
+</div>
+{% endblock %}
+{% block submit_buttons_bottom %}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+{# Include form_guard — it makes Save/Cancel inactive while the form is clean. #}
+{% include "admin/_form_guard.html" %}
+<style>
+  /* Remove the duplicate submit-row at the bottom. */
+  .submit-row:not(.submit-row-top) { display: none !important; }
+
+  /* The Save/Cancel bar is always visible so the content does not jump down on the
+     first change. form_guard hides the buttons with the .cl-btn-idle class (display:none while the
+     form is clean); locally, instead of hiding we make them pale and inactive —
+     as soon as something changes, .cl-btn-idle is removed and the buttons become normal.
+   */
+  #content-main .submit-row-top .cl-btn-idle {
+    display: inline-flex !important;
+    opacity: 0.4 !important;
+    pointer-events: none !important;
+  }
+
+  /* Remove the help texts under the fields — the labels are self-explanatory. */
+  #content-main fieldset.aligned .help { display: none !important; }
+
+  /* Form in the style of the brand/category change_form. Limited to the main fieldset
+     (.aligned): the rows of the payment-details inline table also have the .form-row class, and
+     display:flex on <tr> would break the table.
+   */
+  #content-main .aligned .form-row { display: flex !important; align-items: flex-start !important; padding: 14px 20px !important; }
+  #content-main fieldset.aligned { padding-bottom: 0 !important; margin-bottom: 0 !important; }
+  #content-main fieldset.aligned .form-row:last-of-type { border-bottom: 1px solid #e5e7eb !important; }
+  #content-main .aligned .form-row label { font-weight: 400 !important; padding-top: 0 !important; float: none !important; }
+  #content-main .aligned .form-row > div { padding-top: 0 !important; }
+  #content-main .aligned .flex-container { align-items: flex-start !important; }
+  #content-main .aligned .flex-container.checkbox-row { align-items: center !important; }
+
+  /* Minimum order amount: label on one line (sized to content, not truncated),
+     narrow field (for 3 digits).
+   */
+  #content-main .form-row.field-min_order_amount .flex-container { align-items: center !important; }
+  #content-main .form-row.field-min_order_amount label {
+    white-space: nowrap !important; width: auto !important;
+    flex: 0 0 auto !important; margin-right: 14px !important;
+  }
+  #content-main .form-row.field-min_order_amount input { width: 56px !important; flex: 0 0 auto !important; }
+
+  /* ── Payment-details inline table — in the CRM changelist style (bar + checkboxes) ── */
+  /* Section heading. */
+  #payment_cards-group .inline-heading {
+    font-size: 10px !important; font-weight: 700 !important; color: #6b7280 !important;
+    text-transform: uppercase !important; letter-spacing: 0.4px !important;
+    padding: 18px 20px 0 !important; margin: 0 !important;
+    background: none !important; border: none !important;
+  }
+  #payment_cards-group .module { border: none !important; }
+  #payment_cards-group .wrapper { overflow-x: auto !important; }
+
+  /* Top bar: "Add" on the left, counter + "Delete" on the right. */
+  #payment_cards-group .pc-bar { display: flex; align-items: center; gap: 8px; padding: 10px 20px; }
+  #payment_cards-group .pc-bar .pc-spacer { flex: 1 1 auto; }
+  #payment_cards-group .pc-add,
+  #payment_cards-group .pc-del {
+    display: inline-flex; align-items: center;
+    padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 4px;
+    background: #fff; color: #374151; font-size: 12px; font-weight: 500;
+    cursor: pointer; transition: background .12s, border-color .12s;
+  }
+  #payment_cards-group .pc-add:hover { background: #f3f4f6; border-color: #9ca3af; }
+  #payment_cards-group .pc-del { color: #b91c1c; border-color: #fca5a5; }
+  #payment_cards-group .pc-del:hover { background: #fef2f2; border-color: #f87171; }
+  #payment_cards-group .pc-del.is-hidden { display: none; }
+
+  /* Hide the native add button (at the bottom), the "Delete?" column (on the right)
+     and the duplicate original column — we control it via the bar and the checkboxes on the left.
+   */
+  #payment_cards-group .add-row { display: none !important; }
+  #payment_cards-group thead th:last-child,
+  #payment_cards-group td.delete { display: none !important; }
+  #payment_cards-group th.original,
+  #payment_cards-group td.original { display: none !important; }
+
+  #payment_cards-group table {
+    width: 100% !important; border-collapse: collapse !important;
+    border-top: 1px solid #e5e7eb !important;
+  }
+  /* Column headers. */
+  #payment_cards-group thead th {
+    background: #f9fafb !important; border-top: none !important;
+    border-bottom: 1px solid #e5e7eb !important; border-left: 1px solid #e5e7eb !important;
+    padding: 10px 12px !important; text-align: left !important;
+    font-size: 10px !important; font-weight: 700 !important;
+    text-transform: uppercase !important; letter-spacing: 0.4px !important;
+    color: #6b7280 !important; white-space: nowrap !important; vertical-align: middle !important;
+  }
+  #payment_cards-group thead th.required::after { content: none !important; }
+  /* Rows — 56px height, no zebra, hover #f0f1f3. */
+  #payment_cards-group tbody tr { height: 56px !important; background: #fff !important; }
+  #payment_cards-group tbody tr:hover { background: #f0f1f3 !important; }
+  #payment_cards-group tbody td {
+    padding: 8px 12px !important; font-size: 13px !important; vertical-align: middle !important;
+    border-bottom: 1px solid #e5e7eb !important; border-left: 1px solid #e5e7eb !important;
+  }
+  #payment_cards-group tbody td p.help,
+  #payment_cards-group tbody td .help { display: none !important; }
+  #payment_cards-group tbody td input.vTextField,
+  #payment_cards-group tbody td select {
+    width: 100% !important; box-sizing: border-box !important; min-width: 0 !important;
+  }
+  /* Hide the "Order" column — order is set by dragging rows by ⠿;
+     the value stays in a hidden input and is updated on drop.
+   */
+  #payment_cards-group th.column-sort_order,
+  #payment_cards-group td.field-sort_order { display: none !important; }
+
+  /* Drag-handle column (⠿) — identical to categories (column-drag_handle:
+     width 30px, cell with border-left and padding like a regular one — inherits).
+   */
+  #payment_cards-group th.pc-drag { width: 30px !important; }
+  #payment_cards-group td.pc-drag { cursor: grab; }
+  #payment_cards-group td.pc-drag:active { cursor: grabbing; }
+  #payment_cards-group .drag-handle {
+    cursor: inherit;
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 100%; line-height: 1;
+    font-size: 18px; color: #9ca3af; user-select: none; transition: color .12s;
+  }
+  #payment_cards-group td.pc-drag:hover .drag-handle { color: #1f2937; }
+  #payment_cards-group tr.pc-dragging { opacity: 0.4; }
+  /* During a custom drag of payment details: grabbing cursor everywhere, no text selection. */
+  body.pc-dragging-active, body.pc-dragging-active * { cursor: grabbing !important; user-select: none !important; }
+  /* Indicator line exactly on the boundary between rows (pseudo-element) — no 'two
+     states' and centered.
+   */
+  #payment_cards-group tr.pc-drag-over-before,
+  #payment_cards-group tr.pc-drag-over-after { position: relative; }
+  #payment_cards-group tr.pc-drag-over-before::after,
+  #payment_cards-group tr.pc-drag-over-after::after {
+    content: ''; position: absolute; left: 0; right: 0; height: 2px;
+    background: #6b7280; z-index: 5; pointer-events: none;
+  }
+  #payment_cards-group tr.pc-drag-over-before::after { top: -1px; }
+  #payment_cards-group tr.pc-drag-over-after::after  { bottom: -1px; }
+
+  /* Selection checkbox column (left) — added by the JS below. Size as in CRM lists
+     (.action-checkbox-column / .col-cb: 44px column, 16×16 checkbox).
+   */
+  #payment_cards-group th.pc-cb,
+  #payment_cards-group td.pc-cb {
+    width: 44px !important; min-width: 44px !important; max-width: 44px !important;
+    padding: 0 !important; text-align: center !important;
+    white-space: nowrap !important; border-left: none !important;
+  }
+  #payment_cards-group .pc-cb input[type=checkbox] {
+    width: 16px !important; height: 16px !important;
+    margin: 0 !important; cursor: pointer !important;
+    vertical-align: middle !important; accent-color: #374151 !important;
+  }
+
+  /* Card groups (one threshold = one group) are separated by a line of the same color
+     as the regular ones, but of double thickness.
+   */
+  #payment_cards-group tbody tr.pc-group-top td {
+    border-top: 2px solid #e5e7eb !important;
+  }
+</style>
+
+<script>
+/* Payment-details inline → UX as in the CRM changelist: "Add" on the left above the table,
+   selection checkboxes on the left, "Delete" on the right above the table (appears with
+   a selection).
+   Deletion marks the row's hidden DELETE checkbox and hides the row — Django
+   will apply it on "Save".
+ */
+(function(){
+  /* setTimeout(0) — we start AFTER Django's inline.js (on DOMContentLoaded it
+     adds the dynamic-<prefix> class to the rows and prepares the formset).
+   */
+  document.addEventListener('DOMContentLoaded', function(){ setTimeout(init, 0); });
+  function init(){
+    var group = document.getElementById('payment_cards-group');
+    if (!group) return;
+    var table = group.querySelector('table');
+    var headRow = table && table.querySelector('thead tr');
+    var tbody = table && table.querySelector('tbody');
+    var addLink = group.querySelector('.add-row a');
+    var heading = group.querySelector('.inline-heading');
+    if (!table || !headRow || !tbody || !heading) return;
+
+    /* ── Top bar ── */
+    var bar = document.createElement('div');
+    bar.className = 'pc-bar';
+    bar.innerHTML =
+      '<button type="button" class="pc-add">Add</button>' +
+      '<span class="pc-spacer"></span>' +
+      '<button type="button" class="pc-del is-hidden">Delete</button>';
+    heading.insertAdjacentElement('afterend', bar);
+    var addBtn = bar.querySelector('.pc-add');
+    var delBtn = bar.querySelector('.pc-del');
+
+    /* ── Header "select all" checkbox ── */
+    var thCb = document.createElement('th');
+    thCb.className = 'pc-cb';
+    thCb.innerHTML = '<input type="checkbox" class="pc-all" title="Select all">';
+    headRow.insertBefore(thCb, headRow.firstChild);
+    var allCb = thCb.querySelector('.pc-all');
+
+    /* ── Empty header above the drag-handle column ── */
+    var thDrag = document.createElement('th');
+    thDrag.className = 'pc-drag';
+    thCb.insertAdjacentElement('afterend', thDrag);
+
+    var dragRow = null;     /* the row currently being dragged */
+    var dropTarget = null;  /* { row, after } — where to insert */
+
+    function isReal(tr){
+      /* A real card row: it has fields (field-*), but is not the empty template and not add-row.
+         We do NOT rely on the dynamic-<prefix> class — Django sets it separately.
+       */
+      return !tr.classList.contains('empty-form')
+          && !tr.classList.contains('add-row')
+          && !!tr.querySelector('td[class*="field-"]');
+    }
+    function decorateRow(tr){
+      if (tr.querySelector('td.pc-cb')) return;
+      /* Selection checkbox (left). */
+      var tdCb = document.createElement('td');
+      tdCb.className = 'pc-cb';
+      tdCb.innerHTML = '<input type="checkbox" class="pc-row">';
+      tr.insertBefore(tdCb, tr.firstChild);
+      /* stopPropagation — selecting a row must not make the form 'dirty'
+         (form_guard listens for change on the form). Deletion sets dirty separately.
+       */
+      tdCb.querySelector('.pc-row').addEventListener('change', function(e){ e.stopPropagation(); updateState(); });
+      /* Drag handle (⠿). */
+      var tdDrag = document.createElement('td');
+      tdDrag.className = 'pc-drag';
+      tdDrag.innerHTML = '<span class="drag-handle">⠿</span>';
+      tdCb.insertAdjacentElement('afterend', tdDrag);
+      makeDraggable(tr, tdDrag);
+      /* Threshold change → regroup (a card may move to another group). */
+      var thInp = tr.querySelector('td.field-threshold input');
+      if (thInp) thInp.addEventListener('change', function(){ regroup(); renumber(); });
+    }
+
+    /* ── Drag-reorder: drag a row by ⠿, write the order into the hidden sort_order ── */
+    function clearDragIndicators(){
+      Array.prototype.forEach.call(tbody.querySelectorAll('.pc-drag-over-before, .pc-drag-over-after'), function(r){
+        r.classList.remove('pc-drag-over-before', 'pc-drag-over-after');
+      });
+    }
+    function renumber(){
+      var i = 0;
+      rows().forEach(function(tr){
+        var inp = tr.querySelector('td.field-sort_order input');
+        if (inp) inp.value = i;
+        i++;
+      });
+      if (window.pgMarkDirty) window.pgMarkDirty();
+    }
+    /* Where to insert, based on the cursor's vertical position among all visible rows
+       (compared with the middle of each), so the cursor is caught continuously — without 'gaps'
+       between rows.
+     */
+    function computeDropTarget(clientY){
+      var candidates = rows().filter(function(r){ return r !== dragRow; });
+      if (!candidates.length) return null;
+      for (var i = 0; i < candidates.length; i++){
+        var rect = candidates[i].getBoundingClientRect();
+        if (clientY < rect.top + rect.height / 2) return { row: candidates[i], after: false };
+      }
+      return { row: candidates[candidates.length - 1], after: true };
+    }
+    function makeDraggable(tr, handleCell){
+      var handle = handleCell.querySelector('.drag-handle');
+      /* Custom drag on mouse events (NOT native HTML5 DnD): the browser shows neither a preview
+         block nor a 'forbidden' cursor — only the indicator line is visible.
+       */
+      handle.addEventListener('mousedown', function(e){
+        if (e.button !== 0) return;
+        e.preventDefault();
+        dragRow = tr;
+        dropTarget = null;
+        tr.classList.add('pc-dragging');
+        document.body.classList.add('pc-dragging-active');
+        function onMove(ev){
+          clearDragIndicators();
+          var t = computeDropTarget(ev.clientY);
+          if (!t) { dropTarget = null; return; }
+          var ref = t.after ? t.row.nextSibling : t.row;
+          /* the same place where the row already is — no line and no move */
+          if (ref === dragRow || ref === dragRow.nextSibling) { dropTarget = null; return; }
+          t.row.classList.add(t.after ? 'pc-drag-over-after' : 'pc-drag-over-before');
+          dropTarget = t;
+        }
+        function onUp(){
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          tr.classList.remove('pc-dragging');
+          document.body.classList.remove('pc-dragging-active');
+          clearDragIndicators();
+          if (dragRow && dropTarget) {
+            var ref = dropTarget.after ? dropTarget.row.nextSibling : dropTarget.row;
+            tr.parentNode.insertBefore(dragRow, ref);
+            regroup();
+            renumber();
+          }
+          dragRow = null;
+          dropTarget = null;
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    }
+    function rows(){
+      return Array.prototype.filter.call(tbody.querySelectorAll('tr'), function(tr){
+        return isReal(tr) && tr.style.display !== 'none';
+      });
+    }
+    function updateState(){
+      var rs = rows();
+      var checked = rs.filter(function(tr){ var cb = tr.querySelector('.pc-row'); return cb && cb.checked; });
+      delBtn.classList.toggle('is-hidden', checked.length === 0);
+      allCb.checked = rs.length > 0 && checked.length === rs.length;
+      allCb.indeterminate = checked.length > 0 && checked.length < rs.length;
+    }
+
+    /* ── Grouping by threshold: cards with the same threshold go together, with a header strip
+       above each group. Rebuilt on load, threshold change,
+       dragging and adding. ──
+     */
+    function thresholdOf(tr){
+      var inp = tr.querySelector('td.field-threshold input');
+      return inp ? (parseInt(inp.value, 10) || 0) : 0;
+    }
+    function regroup(){
+      /* remove the previous group-start markers */
+      Array.prototype.forEach.call(tbody.querySelectorAll('tr.pc-group-top'), function(r){ r.classList.remove('pc-group-top'); });
+      var rs = rows();
+      if (!rs.length) return;
+      /* stable sort by threshold — the order within a group is preserved */
+      rs.sort(function(a, b){ return thresholdOf(a) - thresholdOf(b); });
+      /* insert before the service rows (empty-form / add-row) */
+      var anchor = tbody.querySelector('tr.empty-form') || tbody.querySelector('tr.add-row');
+      var prev = null;
+      rs.forEach(function(tr){
+        var th = thresholdOf(tr);
+        /* start of a new group (except the very first) → double separator line on top */
+        if (prev !== null && th !== prev) tr.classList.add('pc-group-top');
+        prev = th;
+        tbody.insertBefore(tr, anchor);
+      });
+    }
+
+    Array.prototype.forEach.call(tbody.querySelectorAll('tr'), function(tr){ if (isReal(tr)) decorateRow(tr); });
+    regroup();
+
+    allCb.addEventListener('change', function(e){
+      e.stopPropagation();
+      var on = allCb.checked;
+      rows().forEach(function(tr){ var cb = tr.querySelector('.pc-row'); if (cb) cb.checked = on; });
+      updateState();
+    });
+
+    delBtn.addEventListener('click', function(){
+      rows().forEach(function(tr){
+        var cb = tr.querySelector('.pc-row');
+        if (!cb || !cb.checked) return;
+        var del = tr.querySelector('input[name$="-DELETE"]');
+        if (del) del.checked = true;     /* saved row — Django will delete it on "Save" */
+        tr.style.display = 'none';
+        cb.checked = false;
+      });
+      if (window.pgMarkDirty) window.pgMarkDirty();
+      updateState();
+    });
+
+    addBtn.addEventListener('click', function(){
+      if (!addLink) return;
+      addLink.click();
+      /* A new row somewhere in tbody — we set up all real rows that are not styled yet. */
+      Array.prototype.forEach.call(tbody.querySelectorAll('tr'), function(tr){ if (isReal(tr)) decorateRow(tr); });
+      regroup();
+      renumber();
+      if (window.pgMarkDirty) window.pgMarkDirty();
+      updateState();
+    });
+
+    updateState();
+  }
+})();
+</script>
+{% endblock %}

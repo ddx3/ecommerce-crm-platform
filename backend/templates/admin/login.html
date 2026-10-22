@@ -1,0 +1,178 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+/* Hide sidebar and header on login */
+#nav-sidebar, #header, .sidebar-toggle-btn, .breadcrumbs { display: none !important; }
+.main { justify-content: center !important; }
+main.content { max-width: 100% !important; flex: none !important; }
+#content { background: var(--selected-bg) !important; }
+
+/* Login container */
+.login-wrap {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.login-box {
+    width: 100%;
+    max-width: 480px;
+    background: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-modal);
+    padding: 32px 28px;
+}
+.login-title {
+    font-size: var(--fs-xl);
+    font-weight: 600;
+    color: var(--secondary);
+    text-align: center;
+    margin: 0 0 24px 0;
+}
+.login-box .form-row {
+    padding: 0 !important;
+    border: none !important;
+    margin-bottom: 16px !important;
+    display: block !important;
+}
+.login-box .form-row:last-of-type { margin-bottom: 0 !important; }
+.login-box label {
+    display: block !important;
+    font-size: var(--fs-base);
+    font-weight: 500;
+    color: var(--primary);
+    margin-bottom: 6px;
+    width: auto !important;
+    min-width: auto !important;
+    padding: 0 !important;
+}
+.login-box input[type="text"],
+.login-box input[type="password"] {
+    width: 100% !important;
+    height: 48px !important;
+    padding: 0 14px !important;
+    font-size: 14px !important;
+    box-sizing: border-box !important;
+}
+.login-box input[type="submit"] {
+    width: 100%;
+    height: 48px;
+    background: var(--default-button-bg) !important;
+    color: var(--default-button-fg) !important;
+    border: none !important;
+    border-radius: var(--radius-card) !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    cursor: pointer !important;
+    margin-top: 8px;
+}
+.login-box input[type="submit"]:hover { background: var(--secondary) !important; }
+.login-box .errornote {
+    margin: 0 0 16px 0 !important;
+    padding: 10px 14px !important;
+    font-size: var(--fs-base) !important;
+}
+.login-box ul.errorlist { margin: 0 0 12px 0 !important; }
+
+/* Hide the top bar */
+.submit-row-top, .cl-bar { display: none !important; }
+
+/* Hide mobile burger on login page */
+.mobile-burger { display: none !important; }
+
+/* Mobile compact */
+@media (max-width: 480px) {
+    .login-wrap { padding: 12px !important; }
+    .login-box { padding: 20px 16px !important; }
+    .login-title { font-size: 18px !important; margin-bottom: 18px !important; }
+    .login-box input[type="text"],
+    .login-box input[type="password"],
+    .login-box input[type="submit"] {
+        height: 44px !important;
+    }
+}
+
+/* Eye button to show the password */
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 46px !important; }
+.pw-toggle {
+    position: absolute; top: 0; right: 0; height: 100%; width: 44px;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: none; cursor: pointer; color: #9ca3af; padding: 0;
+}
+.pw-toggle:hover { color: #374151; }
+.pw-toggle svg { width: 20px; height: 20px; display: block; }
+</style>
+{% endblock %}
+
+{% block content_title %}{% endblock %}
+{% block breadcrumbs %}{% endblock %}
+
+{% block content %}
+<div class="login-wrap">
+    <div class="login-box">
+        <h1 class="login-title">Admin panel login</h1>
+
+        {% if form.errors and not form.non_field_errors %}
+        <p class="errornote">Invalid email or password</p>
+        {% endif %}
+
+        {% if form.non_field_errors %}
+        {% for error in form.non_field_errors %}
+        <p class="errornote">{{ error }}</p>
+        {% endfor %}
+        {% endif %}
+
+        <form action="{{ app_path }}" method="post" id="login-form">
+            {% csrf_token %}
+            <div class="form-row">
+                <label for="id_username">Email:</label>
+                <input type="text" name="username" id="id_username" autocapitalize="none" autocomplete="off" maxlength="254" required
+                       readonly onfocus="this.removeAttribute('readonly')">
+            </div>
+            <div class="form-row">
+                <label for="id_password">Password:</label>
+                <div class="pw-wrap">
+                    <input type="password" name="password" id="id_password" autocomplete="new-password" required
+                           readonly onfocus="this.removeAttribute('readonly')">
+                    <button type="button" class="pw-toggle" id="pw-toggle" aria-label="Show password" title="Show password">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </button>
+                </div>
+            </div>
+            <input type="hidden" name="next" value="{{ next }}">
+            <input type="submit" value="Log in">
+        </form>
+    </div>
+</div>
+<script>
+/* Focus the email only AFTER the autofill moment (the field was readonly on load,
+   so the browser skipped it). This way the password manager doesn't fill in
+   saved credentials and doesn't overwrite what was typed.
+ */
+(function(){
+    setTimeout(function(){
+        var f = document.getElementById('id_username');
+        if (f) { f.removeAttribute('readonly'); f.focus(); }
+    }, 400);
+})();
+(function(){
+    var inp = document.getElementById('id_password');
+    var btn = document.getElementById('pw-toggle');
+    if(!inp || !btn) return;
+    var EYE = "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/><circle cx='12' cy='12' r='3'/></svg>";
+    var EYE_OFF = "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24'/><line x1='1' y1='1' x2='23' y2='23'/></svg>";
+    btn.addEventListener('click', function(){
+        var show = inp.type === 'password';
+        inp.type = show ? 'text' : 'password';
+        btn.innerHTML = show ? EYE_OFF : EYE;
+        var t = show ? 'Hide password' : 'Show password';
+        btn.setAttribute('aria-label', t); btn.title = t;
+    });
+})();
+</script>
+{% endblock %}

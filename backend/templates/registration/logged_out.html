@@ -1,0 +1,13 @@
+{% comment %}
+After logout we go straight to the login page (without the standard
+"Thanks for your time…"). The redirect is done both via meta-refresh and JS — to be reliable.
+{% endcomment %}<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="refresh" content="0; url=/admin/login/">
+    <title>Admin panel login</title>
+    <script>window.location.replace('/admin/login/');</script>
+</head>
+<body></body>
+</html>

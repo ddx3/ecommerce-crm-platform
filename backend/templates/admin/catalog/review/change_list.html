@@ -1,0 +1,536 @@
+{% extends "admin/change_list.html" %}
+{% block content_title %}{% endblock %}
+{% block extrahead %}
+{{ block.super }}
+<style>
+  #content h1, .changelist-footer { display: none !important; }
+  #result_list, .results, #toolbar, .paginator { display: none !important; }
+  #content-main, #content { padding-bottom: 60px !important; }
+
+  #rv-table { width: 100%; border-collapse: collapse; background: #fff; table-layout: fixed; }
+  #rv-table thead th {
+    background: #f9fafb; border-bottom: 1px solid #e5e7eb; border-left: 1px solid #e5e7eb;
+    height: 34px; padding: 0 12px; box-sizing: border-box; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280;
+    white-space: nowrap; vertical-align: middle; text-align: left;
+    cursor: pointer; user-select: none; position: relative;
+  }
+  #rv-table thead th:first-child { border-left: none; }
+  #rv-table .col-cb { width: 44px; text-align: center; padding-left: 14px !important; }
+  #rv-table .col-cb input { cursor: pointer; width: 16px; height: 16px; accent-color: #374151; margin: 0; }
+  #rv-table tbody tr.rv-pinned { background: #eff6ff !important; }
+  #rv-table thead th:hover { background: #f3f4f6; }
+  #rv-table thead th.col-open { background: #eef0f3; }
+  #rv-table thead th .th-badge {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: transparent; margin-left: 6px; vertical-align: middle;
+  }
+  #rv-table thead th.col-active .th-badge { background: #1f2937; }
+  #rv-table tbody tr { border-bottom: 1px solid #e5e7eb; height: 56px; }
+  #rv-table tbody tr.row1 { background: #fff; }
+  #rv-table tbody tr.row2 { background: #f9fafb; }
+  #rv-table tbody tr:hover { background: #eef0f3; cursor: pointer; }
+  #rv-table tbody tr.rv-empty-row, #rv-table tbody tr.rv-empty-row:hover { background: #fff !important; cursor: default !important; }
+  #rv-table tbody td {
+    padding: 8px 12px; font-size: 13px; vertical-align: middle;
+    border-left: 1px solid #e5e7eb; color: #374151; box-sizing: border-box; height: 56px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #rv-table tbody td:first-child { border-left: none; }
+  #rv-table tbody td a { color: #374151; text-decoration: none; font-weight: 500; }
+  .rv-stars { color: #f59e0b; font-size: 13px; letter-spacing: 1px; }
+  .rv-stars.empty { color: #9ca3af; }
+  /* The "Approved" and "Verdict" badges — the global .or-picker-btn (data-tone), the CRM standard. */
+  .rv-empty { color: #9ca3af; }
+
+  #rv-pager { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    padding: 10px 16px; font-size: 13px; color: #6b7280;
+    border-top: 1px solid #e5e7eb; position: fixed; bottom: 0; right: 0; background: #fff; z-index: 1000; }
+  #rv-pager .pager-info { font-size: 12px; color: #9ca3af; }
+  #rv-pager .pg-btn { display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border: 1px solid #d1d5db; border-radius: 4px;
+    background: #fff; color: #374151; font-size: 13px; cursor: pointer; line-height: 1; user-select: none; box-sizing: border-box; }
+  #rv-pager .pg-btn:hover { background: #f3f4f6; }
+  #rv-pager .pg-btn.pg-active { background: #1f2937; color: #fff; border-color: #1f2937; }
+  #rv-pager .pg-btn.pg-disabled { opacity: 0.35; pointer-events: none; }
+  #rv-pager .pager-nav { display: flex; align-items: center; gap: 4px; justify-self: center; }
+  #rv-pager .pager-right { display: flex; align-items: center; gap: 4px; justify-self: end; }
+  #rv-pager .pager-size { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  #rv-pager .pager-size > span:first-child { color: #9ca3af; }
+  #rv-pager .pager-size .pg-btn { width: auto; min-width: 36px; padding: 0 8px; }
+</style>
+{% endblock %}
+
+{% block result_list %}
+<div id="flt-pop"></div>
+<table id="rv-table"></table>
+<div id="rv-pager"></div>
+
+<script>
+(function(){
+    var allData = {{ reviews_json|safe }};
+    var F = {authorQ:'', targetQ:'', ratings:[], approve:'all', verdicts:[], dateMin:null, dateMax:null};
+    var sortField=null, sortDir='asc';
+    var currentPage=1, pageSize=25, currentFiltered=[];
+    /* Row selection (cross-page, as on products): name=_selected_action — so that the
+       "Delete" button in the base_site cl-bar works with the standard delete.
+       The declaration must come BEFORE _loadState() — otherwise the restored value
+       is overwritten by this initializer (var hoisting).
+     */
+    var SEL = new Set();
+    /* ── Persist table state (filters/sorting/page size + page number/selection) ── */
+    var STATE_KEY='review_list_state_v1';
+    function _saveState(){ try{ localStorage.setItem(STATE_KEY, JSON.stringify({F:F, sortField:sortField, sortDir:sortDir, pageSize:pageSize, currentPage:currentPage, sel:Array.from(SEL)})); }catch(e){} }
+    function _loadState(){ try{ var s=JSON.parse(localStorage.getItem(STATE_KEY)||'null'); if(!s) return; if(s.F) Object.assign(F, s.F); if(typeof s.sortField!=='undefined') sortField=s.sortField; if(typeof s.sortDir!=='undefined') sortDir=s.sortDir; if(typeof s.pageSize!=='undefined') pageSize=s.pageSize; if(typeof s.currentPage!=='undefined') currentPage=s.currentPage; if(Array.isArray(s.sel)) s.sel.forEach(function(id){ SEL.add(String(id)); }); }catch(e){} }
+    _loadState();
+    function _findById(id){ for(var k=0;k<allData.length;k++){ if(String(allData[k].id)===String(id)) return allData[k]; } return null; }
+    var pop = document.getElementById('flt-pop'), popOwner=null;
+    var rvTable = document.getElementById('rv-table');
+    var rvPager = document.getElementById('rv-pager');
+
+    function applyFilters(opts){
+        var qa = F.authorQ.trim().toLowerCase();
+        var qt = F.targetQ.trim().toLowerCase();
+        currentFiltered = allData.filter(function(r){
+            if (qa) {
+                var hay = (r.author_name+' '+r.author_email).toLowerCase();
+                if (hay.indexOf(qa) === -1) return false;
+            }
+            if (qt && r.target_name.toLowerCase().indexOf(qt) === -1) return false;
+            if (F.ratings.length && F.ratings.indexOf(r.rating || 0) === -1) return false;
+            if (F.approve === 'yes' && !r.is_approved) return false;
+            if (F.approve === 'no'  && r.is_approved)  return false;
+            if (F.verdicts.length && F.verdicts.indexOf(r.moderation_verdict || '') === -1) return false;
+            if (F.dateMin && r.created_at_iso < F.dateMin) return false;
+            if (F.dateMax && r.created_at_iso > F.dateMax) return false;
+            return true;
+        });
+        if (sortField){
+            currentFiltered.sort(function(a,b){
+                var av=a[sortField], bv=b[sortField];
+                if (av==null) av=''; if (bv==null) bv='';
+                if (typeof av==='string') av=av.toLowerCase();
+                if (typeof bv==='string') bv=bv.toLowerCase();
+                return av<bv?(sortDir==='asc'?-1:1):av>bv?(sortDir==='asc'?1:-1):0;
+            });
+        }
+        if (!(opts && opts.preservePage)) currentPage=1;
+        renderTable(); renderPager();
+    }
+
+    function isFiltered(col){
+        if (col==='author')  return !!F.authorQ;
+        if (col==='target')  return !!F.targetQ;
+        if (col==='rating')  return F.ratings.length > 0;
+        if (col==='approve') return F.approve !== 'all';
+        if (col==='verdict') return F.verdicts.length > 0;
+        if (col==='date')    return !!F.dateMin || !!F.dateMax;
+        return false;
+    }
+    function resetCol(col){
+        if (col==='author')  F.authorQ='';
+        if (col==='target')  F.targetQ='';
+        if (col==='rating')  F.ratings=[];
+        if (col==='approve') F.approve='all';
+        if (col==='verdict') F.verdicts=[];
+        if (col==='date')    { F.dateMin=null; F.dateMax=null; }
+        applyFilters();
+    }
+
+    function _rvCells(r){
+        var stars = r.rating
+            ? '<span class="rv-stars">' + '★'.repeat(r.rating) + '<span class="empty">' + '★'.repeat(5-r.rating) + '</span></span>'
+            : '<span class="rv-empty">—</span>';
+        var rvSt = rvStatusOf(r), rvM = RV_STATUS[rvSt];
+        var approvePill = '<button type="button" class="or-picker-btn rv-status-btn" data-id="'+r.id+'" data-status="'+rvSt+'" data-tone="'+rvM.tone+'"><span>'+rvM.label+'</span></button>';
+        var verdictMap = {pass: 'Passed', flag: 'To moderation', error: 'Error'};
+        var verdictTone = {pass: 'neutral', flag: 'warn', error: 'err'};
+        var verdict = r.moderation_verdict ? '<span class="or-picker-btn is-static" data-field="moderation_verdict" data-val="'+r.moderation_verdict+'" data-tone="'+(verdictTone[r.moderation_verdict]||'neutral')+'"><span>'+verdictMap[r.moderation_verdict]+'</span></span>' : '<span class="rv-empty">—</span>';
+        var targetLink = r.target_id
+            ? '<a href="/admin/catalog/'+r.target_kind+'/'+r.target_id+'/change/">'+escapeHtml(r.target_name)+'</a>'
+            : '<span class="rv-empty">—</span>';
+        var checked = (SEL.has(String(r.id)) || SEL.has(r.id)) ? ' checked' : '';
+        return '<td class="col-cb"><input type="checkbox" class="rv-row-cb" name="_selected_action" value="'+r.id+'"'+checked+'></td>'+
+            '<td>'+escapeHtml(r.author_name)+'</td>'+
+            '<td>'+stars+'</td>'+
+            '<td>'+targetLink+'</td>'+
+            '<td>'+approvePill+'</td>'+
+            '<td>'+verdict+'</td>'+
+            '<td>'+escapeHtml(r.moderation_reason || '—')+'</td>'+
+            '<td>'+escapeHtml(r.created_at)+'</td>';
+    }
+    /* ── Global "Reset filters" button in the top bar ── */
+    var RV_COLS = ['author','target','rating','approve','verdict','date'];
+    function _anyFilterActive(){
+        return RV_COLS.some(isFiltered) || !!sortField;
+    }
+    function _resetFilters(){
+        F.authorQ=''; F.targetQ=''; F.ratings=[]; F.approve='all'; F.verdicts=[];
+        F.dateMin=null; F.dateMax=null;
+        sortField=null; sortDir='asc';
+        currentPage=1; applyFilters();
+    }
+    function _renderResetBtn(){
+        var bar = document.querySelector('.submit-row.cl-bar'); if (!bar) return;
+        var btn = bar.querySelector('#rev-reset-filters');
+        var active = _anyFilterActive();
+        if (active && !btn) {
+            btn = document.createElement('button');
+            btn.type='button'; btn.id='rev-reset-filters';
+            btn.className='cl-top-btn'; btn.textContent='Reset filters';
+            btn.addEventListener('click', _resetFilters);
+            var del = bar.querySelector('.cl-top-btn-danger');
+            if (del) bar.insertBefore(btn, del); else bar.appendChild(btn);
+        } else if (!active && btn) { btn.remove(); }
+    }
+    function renderTable(){
+        _renderResetBtn();
+        var pages = Math.ceil(currentFiltered.length / pageSize) || 1;
+        if (currentPage > pages) currentPage = pages;
+        _saveState();
+        var from = (currentPage-1)*pageSize, to = Math.min(from+pageSize, currentFiltered.length);
+        var slice = currentFiltered.slice(from, to);
+        /* pinned: selected rows from OTHER pages, shown at the top */
+        var visibleIds={}; slice.forEach(function(r){visibleIds[String(r.id)]=1;});
+        var pinned=[];
+        SEL.forEach(function(id){ if(visibleIds[String(id)]) return; var o=_findById(id); if(o) pinned.push(o); });
+        var thead = '<thead><tr>'+
+            '<th class="col-cb"><input type="checkbox" id="rv-cb-all"></th>'+
+            '<th data-col="author"  style="width:15%">Author<span class="th-badge"></span></th>'+
+            '<th data-col="rating"  style="width:8%">Rating<span class="th-badge"></span></th>'+
+            '<th data-col="target"  style="width:25%">Product / Bundle<span class="th-badge"></span></th>'+
+            '<th data-col="approve" style="width:10%">Approved<span class="th-badge"></span></th>'+
+            '<th data-col="verdict" style="width:12%">LLM verdict<span class="th-badge"></span></th>'+
+            '<th data-col="reason"  style="width:18%">Reason</th>'+
+            '<th data-col="date"    style="width:12%">Date<span class="th-badge"></span></th>'+
+            '</tr></thead>';
+        var tbody = '<tbody>';
+        pinned.forEach(function(r,i){ tbody += '<tr class="'+((i%2===0)?'row1':'row2')+' rv-pinned" data-id="'+r.id+'">'+_rvCells(r)+'</tr>'; });
+        slice.forEach(function(r, idx){
+            tbody += '<tr class="'+((idx%2===0)?'row1':'row2')+'" data-id="'+r.id+'">'+_rvCells(r)+'</tr>';
+        });
+        if(slice.length===0 && pinned.length===0){ tbody += '<tr class="rv-empty-row"><td colspan="8" style="text-align:center;color:#9ca3af;font-size:13px;height:56px;box-sizing:border-box;">No results</td></tr>'; }
+        tbody += '</tbody>';
+        rvTable.innerHTML = thead + tbody;
+        _rvPad();
+        updateHeaderBadges();
+        _syncCbAll();
+        if(typeof _updateRvCounter==='function') _updateRvCounter();
+        rvTable.querySelectorAll('tbody tr:not(.rv-empty-row)').forEach(function(tr){
+            tr.addEventListener('click', function(e){
+                if (e.target.tagName === 'A' || e.target.closest('.col-cb') || e.target.closest('.rv-status-btn')) return;
+                location.href = '/admin/catalog/review/' + tr.dataset.id + '/change/';
+            });
+        });
+        rvTable.querySelectorAll('.rv-status-btn').forEach(function(btn){
+            btn.addEventListener('click', function(e){ e.stopPropagation(); openRvPicker(btn); });
+        });
+        rvTable.querySelectorAll('thead th[data-col]').forEach(function(th){
+            if (th.dataset.col === 'reason') return;
+            th.addEventListener('click', function(){
+                if (popOwner === th && pop.classList.contains('open')) { closePop(); return; }
+                openPop(th);
+            });
+        });
+    }
+    function updateHeaderBadges(){
+        rvTable.querySelectorAll('thead th[data-col]').forEach(function(th){
+            th.classList.toggle('col-active', isFiltered(th.dataset.col));
+        });
+    }
+
+    function renderPager(){
+        var total = currentFiltered.length;
+        var pages = Math.ceil(total/pageSize) || 1;
+        var from = total===0 ? 0 : (currentPage-1)*pageSize+1;
+        var to = Math.min(currentPage*pageSize, total);
+        var SVG_PREV='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,1 1,5 5,9"/></svg>';
+        var SVG_NEXT='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 1,9"/></svg>';
+        var nav = '';
+        nav += pgBtn(SVG_PREV, currentPage-1, false, currentPage===1);
+        for (var i=1; i<=pages; i++) nav += pgBtn(i, i, i===currentPage, false);
+        nav += pgBtn(SVG_NEXT, currentPage+1, false, currentPage===pages);
+        rvPager.innerHTML =
+            '<span class="pager-info">'+from+'–'+to+' of '+total+'</span>'+
+            '<div class="pager-nav">'+nav+'</div>'+
+            '<div class="pager-right"><div class="pager-size"><span>Per page:</span>'+
+              '<span class="pg-btn '+(pageSize===25?'pg-active':'')+'" data-size="25">25</span>'+
+              '<span class="pg-btn '+(pageSize===50?'pg-active':'')+'" data-size="50">50</span>'+
+              '<span class="pg-btn '+(pageSize===0?'pg-active':'')+'" data-size="0">All</span>'+
+            '</div></div>';
+        rvPager.querySelectorAll('.pg-btn[data-size]').forEach(function(b){
+            b.addEventListener('click', function(){ pageSize = parseInt(b.dataset.size) || 999999; currentPage=1; renderTable(); renderPager(); });
+        });
+        rvPager.querySelectorAll('.pg-btn[data-page]').forEach(function(b){
+            b.addEventListener('click', function(){ currentPage = parseInt(b.dataset.page); renderTable(); renderPager(); });
+        });
+        _rvPad();
+    }
+    function _rvPad(){
+        rvTable.style.marginBottom='0';
+        if(window.padChangelistTable) window.padChangelistTable(rvTable);
+        if(rvTable.__padFill) rvTable.__padFill.style.marginBottom=(rvPager.offsetHeight||0)+'px';
+    }
+    function pgBtn(label, page, active, disabled){
+        var cls = 'pg-btn'+(active?' pg-active':'')+(disabled?' pg-disabled':'');
+        return '<span class="'+cls+'" data-page="'+page+'">'+label+'</span>';
+    }
+
+    function openPop(th){
+        closePop();
+        popOwner = th; th.classList.add('col-open');
+        pop.innerHTML = '';
+        var resetBar = document.createElement('button'); resetBar.type='button';
+        resetBar.style.cssText='display:block;width:100%;padding:10px;border:none;border-bottom:1px solid #e5e7eb;background:none;color:#dc2626;font-size:13px;font-weight:500;cursor:pointer;text-align:left;';
+        resetBar.textContent='Reset filter';
+        resetBar.addEventListener('click', function(){ resetCol(th.dataset.col); closePop(); });
+        pop.appendChild(resetBar);
+
+        if (th.dataset.col === 'author')  buildSearchPop('author_name', 'authorQ', 'A ⟶ Z', 'Z ⟶ A');
+        if (th.dataset.col === 'target')  buildSearchPop('target_name', 'targetQ', 'A ⟶ Z', 'Z ⟶ A');
+        if (th.dataset.col === 'rating')  buildRatingPop();
+        if (th.dataset.col === 'approve') buildApprovePop();
+        if (th.dataset.col === 'verdict') buildVerdictPop();
+        if (th.dataset.col === 'date')    buildDatePop();
+
+        var rect = th.getBoundingClientRect();
+        pop.style.left = (window.clX ? window.clX(rect.left) : rect.left) + 'px';
+        pop.style.width = Math.max(rect.width, 220) + 'px';
+        pop.classList.add('open');
+        pop.style.top  = (window.clFlipTop ? window.clFlipTop(rect, pop.offsetHeight, 0) : (rect.bottom)) + 'px';
+    }
+    function closePop(){
+        pop.classList.remove('open');
+        if (popOwner) { popOwner.classList.remove('col-open'); popOwner=null; }
+    }
+    document.addEventListener('click', function(e){
+        if (!pop.contains(e.target) && !e.target.closest('th[data-col]')) closePop();
+    });
+
+    function buildSearchPop(sortKey, filterKey, asc, desc){
+        sortRows(sortKey, asc, desc);
+        var b = popBody();
+        var inp = document.createElement('input');
+        inp.type='text'; inp.className='fp-search'; inp.placeholder='Search...';
+        inp.value = F[filterKey];
+        inp.addEventListener('input', function(){ F[filterKey] = inp.value; applyFilters(); });
+        b.appendChild(inp);
+    }
+    function buildRatingPop(){
+        sortRows('rating', 'Lower ⟶ higher', 'Higher ⟶ lower');
+        var b = popBody();
+        [[0,'No rating'],[1,'1★'],[2,'2★'],[3,'3★'],[4,'4★'],[5,'5★']].forEach(function(o){
+            var row = document.createElement('div'); row.className='fp-item';
+            var lbl = document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+            var cb = document.createElement('input'); cb.type='checkbox';
+            cb.checked = F.ratings.indexOf(o[0]) !== -1;
+            cb.addEventListener('change', function(){
+                var i = F.ratings.indexOf(o[0]);
+                if (cb.checked && i===-1) F.ratings.push(o[0]);
+                else if (!cb.checked && i!==-1) F.ratings.splice(i,1);
+                applyFilters();
+            });
+            lbl.appendChild(cb); lbl.appendChild(document.createTextNode(o[1]));
+            row.appendChild(lbl); b.appendChild(row);
+        });
+    }
+    function buildApprovePop(){
+        var b = popBody();
+        [['all','All'],['yes','Approved'],['no','Not approved']].forEach(function(o){
+            var row = document.createElement('div'); row.className='fp-item';
+            var lbl = document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+            var rb = document.createElement('input'); rb.type='radio'; rb.name='rv-app'; rb.value=o[0];
+            rb.checked = (F.approve === o[0]);
+            rb.addEventListener('change', function(){ F.approve=rb.value; applyFilters(); });
+            lbl.appendChild(rb); lbl.appendChild(document.createTextNode(o[1]));
+            row.appendChild(lbl); b.appendChild(row);
+        });
+    }
+    function buildVerdictPop(){
+        var b = popBody();
+        [['','—'],['pass','Passed'],['flag','To moderation'],['error','Error']].forEach(function(o){
+            var row = document.createElement('div'); row.className='fp-item';
+            var lbl = document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+            var cb = document.createElement('input'); cb.type='checkbox';
+            cb.checked = F.verdicts.indexOf(o[0]) !== -1;
+            cb.addEventListener('change', function(){
+                var i = F.verdicts.indexOf(o[0]);
+                if (cb.checked && i===-1) F.verdicts.push(o[0]);
+                else if (!cb.checked && i!==-1) F.verdicts.splice(i,1);
+                applyFilters();
+            });
+            lbl.appendChild(cb); lbl.appendChild(document.createTextNode(o[1]));
+            row.appendChild(lbl); b.appendChild(row);
+        });
+    }
+    function buildDatePop(){
+        sortRows('created_at_iso', 'Older ⟶ newer', 'Newer ⟶ older');
+        var b = popBody();
+        var range = document.createElement('div'); range.className='fp-range';
+        var inMin = document.createElement('input'); inMin.type='date';
+        if (F.dateMin) inMin.value=F.dateMin;
+        inMin.addEventListener('input', function(){ F.dateMin = inMin.value || null; applyFilters(); });
+        var sep = document.createElement('span'); sep.className='fp-range-sep'; sep.textContent='—';
+        var inMax = document.createElement('input'); inMax.type='date';
+        if (F.dateMax) inMax.value=F.dateMax;
+        inMax.addEventListener('input', function(){ F.dateMax = inMax.value || null; applyFilters(); });
+        range.appendChild(inMin); range.appendChild(sep); range.appendChild(inMax);
+        b.appendChild(range);
+    }
+    function popBody(){ var d=document.createElement('div'); d.className='fp-pop-body'; pop.appendChild(d); return d; }
+    function sortRows(field, asc, desc){
+        [[asc,'asc'],[desc,'desc']].forEach(function(p){
+            var btn = document.createElement('button'); btn.type='button';
+            btn.className='fp-sort-row'+(sortField===field&&sortDir===p[1]?' on':'');
+            btn.innerHTML='<span>'+p[0]+'</span><span class="fp-sort-arr">›</span>';
+            btn.addEventListener('click', function(){
+                if (sortField===field && sortDir===p[1]) { sortField=null; sortDir='asc'; }
+                else { sortField=field; sortDir=p[1]; }
+                applyFilters(); closePop();
+            });
+            pop.appendChild(btn);
+        });
+    }
+    function escapeHtml(s){
+        return String(s).replace(/[&<>"']/g, function(c){
+            return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+        });
+    }
+
+    /* ── Inline review status picker (Yes / Rejected / Pending) ──
+       Writes via the existing review-action endpoint (set_status → Review.is_approved/is_rejected):
+       approved → is_approved, rejected → is_rejected, pending → both reset.
+     */
+    var RV_STATUS = { approved:{label:'Yes',tone:'ok'}, rejected:{label:'Rejected',tone:'err'}, pending:{label:'Pending',tone:'warn'} };
+    var RV_STATUS_ORDER = ['approved','rejected','pending'];
+    function rvStatusOf(r){ return r.is_approved ? 'approved' : (r.is_rejected ? 'rejected' : 'pending'); }
+    function rvCsrf(){ var m=document.cookie.match(/csrftoken=([^;]+)/); return m?m[1]:''; }
+    var _rvPickerPopup=null, _rvPickerBtn=null;
+    function closeRvPicker(){ if(_rvPickerPopup){ _rvPickerPopup.remove(); _rvPickerPopup=null; } _rvPickerBtn=null; }
+    document.addEventListener('click', function(e){
+        if(_rvPickerPopup && !_rvPickerPopup.contains(e.target) && !(_rvPickerBtn && _rvPickerBtn.contains(e.target))) closeRvPicker();
+    });
+    function rvApplyBtn(btn, status){
+        var m = RV_STATUS[status] || RV_STATUS.pending;
+        btn.dataset.status = status;
+        btn.setAttribute('data-tone', m.tone);
+        var sp = btn.querySelector('span'); if(sp) sp.textContent = m.label;
+    }
+    function rvSetStatus(btn, status){
+        var id = parseInt(btn.dataset.id, 10);
+        var r = _findById(id);
+        var prev = btn.dataset.status;
+        var prevA = r ? r.is_approved : null, prevR = r ? r.is_rejected : null;
+        rvApplyBtn(btn, status);
+        if(r){ r.is_approved = (status==='approved'); r.is_rejected = (status==='rejected'); }
+        closeRvPicker();
+        fetch('/admin/notifications/review-action/', {
+            method:'POST', credentials:'same-origin',
+            headers:{'Content-Type':'application/json','X-CSRFToken':rvCsrf()},
+            body:JSON.stringify({action:'set_status', id:id, status:status})
+        }).then(function(rsp){
+              if(!rsp.ok) throw new Error('http');
+              /* If the approval-status filter is active, re-filter and re-render
+                 (the row disappears/appears under the filter immediately).
+                 We do not reset the current page.
+               */
+              if(isFiltered('approve')){
+                  var pg = currentPage; applyFilters(); currentPage = pg; renderTable(); renderPager();
+              }
+          })
+          .catch(function(){
+              if(r){ r.is_approved=prevA; r.is_rejected=prevR; }
+              rvApplyBtn(btn, prev);
+              alert('Failed to save the status');
+          });
+    }
+    function openRvPicker(btn){
+        if(_rvPickerBtn===btn){ closeRvPicker(); return; }
+        closeRvPicker();
+        _rvPickerBtn = btn;
+        var popup = document.createElement('div');
+        popup.className = 'or-picker-popup';
+        _rvPickerPopup = popup;
+        RV_STATUS_ORDER.forEach(function(st){
+            var it = document.createElement('div');
+            it.className = 'or-picker-item' + (st===btn.dataset.status ? ' active' : '');
+            it.textContent = RV_STATUS[st].label;
+            it.addEventListener('mousedown', function(ev){ if(ev.button!==0) return; ev.preventDefault(); rvSetStatus(btn, st); });
+            popup.appendChild(it);
+        });
+        document.body.appendChild(popup);
+        var rect = btn.getBoundingClientRect();
+        popup.style.top  = (window.clFlipTop ? window.clFlipTop(rect, popup.offsetHeight, 4) : (rect.bottom + 4)) + 'px';
+        var pw = popup.offsetWidth;
+        popup.style.left = (window.clFlipLeft ? window.clFlipLeft(rect, pw, 8) : Math.max(8, Math.min(rect.left, window.innerWidth - pw - 8))) + 'px';
+    }
+
+    /* ── Row selection: per-page select-all + cross-page + counter + "Clear selection" ── */
+    function _pageReviewIds(){
+        var from=(currentPage-1)*pageSize, to=Math.min(from+pageSize,currentFiltered.length);
+        return currentFiltered.slice(from,to).map(function(r){ return String(r.id); });
+    }
+    function _syncCbAll(){
+        var box=document.getElementById('rv-cb-all'); if(!box) return;
+        var ids=_pageReviewIds();
+        var picked=ids.filter(function(id){ return SEL.has(id); }).length;
+        box.indeterminate=(picked>0 && picked<ids.length);
+        box.checked=(ids.length>0 && picked===ids.length);
+    }
+    function _updateRvCounter(){
+        var counter=document.querySelector('.cl-counter'); if(!counter) return;
+        var total=Math.max(currentFiltered.length, SEL.size);
+        counter.textContent='Selected: '+SEL.size+' of '+total;
+        var ids=_pageReviewIds();
+        var onPage=ids.filter(function(id){ return SEL.has(id); }).length;
+        var cb=document.getElementById('cl-clear-sel');
+        if(cb){ if(SEL.size-onPage>0) cb.style.removeProperty('display'); else cb.style.setProperty('display','none','important'); }
+    }
+    rvTable.addEventListener('change', function(e){
+        var t=e.target;
+        if(t.id==='rv-cb-all'){
+            var ids=_pageReviewIds();
+            var allOn=ids.length>0 && ids.every(function(id){ return SEL.has(id); });
+            ids.forEach(function(id){ if(allOn) SEL.delete(id); else SEL.add(id); });
+            renderTable(); _updateRvCounter();
+            return;
+        }
+        if(t.classList && t.classList.contains('rv-row-cb')){
+            if(t.checked) SEL.add(String(t.value)); else SEL.delete(String(t.value));
+            renderTable(); _updateRvCounter();
+        }
+    });
+    function _installRvCounter(){
+        var counter=document.querySelector('.cl-counter'); if(!counter) return;
+        if(!document.getElementById('cl-clear-sel')){
+            var clearBtn=document.createElement('a');
+            clearBtn.href='#'; clearBtn.id='cl-clear-sel'; clearBtn.className='cl-top-btn';
+            clearBtn.textContent='Clear selection'; clearBtn.style.marginLeft='10px';
+            clearBtn.style.setProperty('display','none','important');
+            clearBtn.addEventListener('click',function(e){ e.preventDefault();
+                var ids=new Set(_pageReviewIds());
+                Array.from(SEL).forEach(function(id){ if(!ids.has(String(id))) SEL.delete(id); });
+                renderTable(); _updateRvCounter();
+            });
+            counter.insertAdjacentElement('afterend', clearBtn);
+        }
+        window._updateCounter=_updateRvCounter; _updateRvCounter();
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _installRvCounter);
+    else _installRvCounter();
+
+    applyFilters({preservePage:true});
+    /* cl-bar is created in base_site on DOMContentLoaded — later than the first
+       synchronous applyFilters()/renderTable(). We draw the "Reset filters"
+       button once more after the DOM is ready (otherwise after F5
+       with a filter from localStorage it is missing). _renderResetBtn is idempotent.
+     */
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _renderResetBtn);
+    else _renderResetBtn();
+    window.addEventListener('resize', _rvPad);
+    if(window.ResizeObserver) new ResizeObserver(_rvPad).observe(document.querySelector('#content-main')||document.body);
+    var _rvNav=document.getElementById('nav-sidebar');
+    if(_rvNav) _rvNav.addEventListener('transitionend', _rvPad);
+})();
+</script>
+{% endblock %}

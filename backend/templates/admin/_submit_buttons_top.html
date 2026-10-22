@@ -1,0 +1,11 @@
+{% load admin_urls %}
+<div class="submit-row submit-row-top cl-bar">
+  <a href="{% if exit_url %}{{ exit_url }}{% else %}{% url opts|admin_urlname:'changelist' %}{% endif %}" class="cl-top-btn exit-link">Exit</a>
+  <input type="submit" value="Save" class="default" name="_continue" tabindex="-1">
+  <button type="button" class="cl-top-btn" onclick="clFormCancel()">Cancel</button>
+  <span class="submit-spacer"></span>
+  {% if original.get_absolute_url %}<a href="{{ original.get_absolute_url }}" target="_blank" rel="noopener" class="cl-top-btn">View on site</a>{% endif %}
+  {# The "History" button is temporarily hidden — the log is disabled #}
+  {% if variant_delete_btn %}<a href="#" role="button" class="cl-top-btn cl-top-btn-danger" onclick="window.clDeleteActiveVariant && clDeleteActiveVariant(); return false;">Delete</a>{% endif %}
+  {% block submit_buttons_top_extra %}{% endblock %}
+</div>

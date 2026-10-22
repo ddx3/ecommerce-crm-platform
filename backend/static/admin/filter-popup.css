@@ -1,0 +1,126 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   filter-popup.css — shared style for all filter popups in the admin.
+   Included via base_site.html. Class selectors (.fp-*, .cal-*) are
+   universal. The `[id$="flt-pop"]` selector catches all popup containers
+   regardless of the unique ID on the page (flt-pop, or-flt-pop, etc.).
+   ──────────────────────────────────────────────────────────────────────────
+ */
+
+/* ── Popover container ── */
+[id$="flt-pop"] {
+    display: none; position: fixed; z-index: 9999; background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0 0 6px 6px;
+    box-shadow: 0 6px 16px rgba(0,0,0,.18);
+    overflow: hidden;
+    width: 200px;
+}
+[id$="flt-pop"].open { display: block; }
+
+/* ── Sort rows ── */
+.fp-sort-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px; border-bottom: 1px solid #ececec;
+    background: #fff; color: #374151; font-size: 13px;
+    cursor: pointer; width: 100%; text-align: left;
+    border-left: none; border-right: none; border-top: none;
+}
+.fp-sort-row:last-of-type { border-bottom: 1px solid #e5e7eb; }
+.fp-sort-row:hover { background: #f5f5f5; }
+.fp-sort-row.on { background: #e5e7eb; color: #374151; }
+.fp-sort-arr { color: #d1d5db; font-size: 18px; line-height: 1; flex-shrink: 0; display: inline-flex; align-items: center; }
+.fp-sort-row.on .fp-sort-arr { color: #374151; }
+
+/* ── Filter body ── */
+.fp-pop-body { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+.fp-filter-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #9ca3af; margin-bottom: 6px; }
+
+/* Pills (quick filter tags) */
+.fp-pills { display: flex; gap: 3px; flex-wrap: wrap; }
+.fp-pill { padding: 3px 8px; border: 1px solid #d1d5db; border-radius: 20px; font-size: 11px; color: #6b7280; cursor: pointer; background: #fff; user-select: none; }
+.fp-pill:hover { background: #f9fafb; color: #374151; }
+.fp-pill.on { background: #1f2937; border-color: #1f2937; color: #fff; }
+
+/* Search field */
+.fp-search { width: 100%; box-sizing: border-box; height: 28px; padding: 0 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; outline: none; margin-bottom: 0; }
+.fp-search:focus { border-color: #9ca3af; }
+
+/* List of checkboxes/radios. max-height can be overridden locally (140/160). */
+.fp-list { display: flex; flex-direction: column; gap: 10px; max-height: 140px; overflow-y: auto; margin: 0 -10px -10px -10px; padding: 10px; border-radius: 0 0 6px 6px; border-top: 1px solid #e5e7eb; }
+.fp-pop-body > .fp-list:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+
+/* List item (checkbox/radio + label) */
+.fp-item { display: flex; align-items: center; gap: 6px; padding: 0; font-size: 13px; line-height: 1; color: #374151; border-radius: 3px; position: relative; }
+
+/* Tree lines for the category hierarchy (only in product/bundle/dropshipping) */
+.fp-item .pick-vline { position: absolute; top: -5px; bottom: -5px; width: 2px; background: #d1d5db; pointer-events: none; z-index: 0; }
+.fp-item .pick-vline.is-first { top: -10px; }
+.fp-item .pick-vline.is-last  { bottom: 50%; }
+.fp-item .pick-hline { position: absolute; top: 50%; height: 2px; background: #d1d5db; pointer-events: none; z-index: 0; transform: translateY(-1px); }
+.fp-item .pick-elbow {
+    position: absolute;
+    border-left: 2px solid #d1d5db;
+    border-bottom: 2px solid #d1d5db;
+    border-bottom-left-radius: 5px;
+    pointer-events: none; z-index: 0;
+}
+.fp-item > label { position: relative; z-index: 1; }
+
+/* Custom checkboxes/radios in filters */
+.fp-item input[type=checkbox],
+.fp-item input[type=radio] {
+    appearance: none; -webkit-appearance: none;
+    width: 14px; height: 14px; flex-shrink: 0;
+    border: 1.5px solid #d1d5db;
+    background: #fff; cursor: pointer; position: relative;
+    margin: 0;
+    transition: background .12s, border-color .12s;
+}
+.fp-item input[type=checkbox] { border-radius: 3px; }
+.fp-item input[type=radio]    { border-radius: 50%; }
+.fp-item input[type=checkbox]:hover,
+.fp-item input[type=radio]:hover { border-color: #9ca3af; }
+.fp-item input[type=checkbox]:checked,
+.fp-item input[type=radio]:checked { background: #1f2937; border-color: #1f2937; }
+.fp-item input[type=checkbox]:checked::after,
+.fp-item input[type=radio]:checked::after {
+    content: ''; position: absolute;
+    left: 3px; top: 0px; width: 4px; height: 8px;
+    border: 1.5px solid #fff; border-top: none; border-left: none;
+    transform: rotate(45deg);
+}
+
+/* Range (from/to for numbers) */
+.fp-range { display: flex; align-items: center; gap: 4px; }
+.fp-pop-body:has(> .fp-range:last-child) { padding-bottom: 8px; }
+.fp-range input { flex: 1; min-width: 0; width: 0; height: 28px; padding: 0 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; outline: none; box-sizing: border-box; }
+.fp-range input:focus { border-color: #9ca3af; }
+.fp-range-sep { font-size: 0; color: transparent; width: 8px; height: 1px; background: #9ca3af; align-self: center; flex-shrink: 0; margin-top: -1px; }
+
+/* Divider */
+.fp-divider { height: 1px; background: #e5e7eb; margin: 8px 0; }
+
+/* Clear button inside the popover */
+.fp-clear { display: block; margin-top: 8px; padding: 0; border: none; background: none; font-size: 11px; color: #9ca3af; cursor: pointer; text-align: left; }
+.fp-clear:hover { color: #dc2626; }
+
+/* ── Calendar (for date-range filters) ── */
+.cal-nav { display:flex; align-items:center; justify-content:space-between; padding:8px 10px 4px; }
+.cal-nav-btn { background:#f9fafb; border:1px solid #d1d5db; border-radius:4px; width:26px; height:26px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; color:#374151; font-size:16px; line-height:1; padding:0; flex-shrink:0; transition:background .1s,border-color .1s; }
+.cal-nav-btn:hover { background:#e5e7eb; border-color:#9ca3af; color:#111; }
+.cal-nav-btn:active { background:#d1d5db; }
+.cal-title { font-size:12px; font-weight:600; color:#374151; text-align:center; flex:1; }
+.cal-grid { display:grid; grid-template-columns:repeat(7,1fr); padding:0 6px 0; }
+.cal-dow { font-size:10px; color:#9ca3af; text-align:center; padding:2px 0 5px; font-weight:600; }
+.cal-day { font-size:12px; text-align:center; padding:5px 0; cursor:pointer; color:#374151; user-select:none; border-radius:4px; transition:background .1s; }
+.cal-day.empty { cursor:default; pointer-events:none; }
+.cal-day:not(.empty):not(.sel-start):not(.sel-end):hover { background:#d1d5db; }
+.cal-day.today { font-weight:700; color:#111; }
+.cal-day.sel-start, .cal-day.sel-end { background:#1f2937; color:#fff; border-radius:4px; }
+.cal-day.sel-start:hover, .cal-day.sel-end:hover { background:#374151; }
+.cal-day.in-range { background:#e5e7eb; border-radius:0; }
+.cal-day.in-range:hover { background:#d1d5db; }
+.cal-day.sel-start.has-range { border-radius:4px 0 0 4px; }
+.cal-day.sel-end.has-range   { border-radius:0 4px 4px 0; }
+.cal-reset { display:block; text-align:center; padding:0 10px 10px; font-size:11px; color:#9ca3af; cursor:pointer; background:none; border:none; width:100%; }
+.cal-reset:hover { color:#dc2626; }

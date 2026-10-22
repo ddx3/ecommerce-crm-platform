@@ -1,0 +1,425 @@
+{% extends "admin/change_form.html" %}
+
+{% block content_title %}{% endblock %}
+{% block object-tools %}{% endblock %}
+
+{% block submit_buttons_top %}
+{% include "admin/_submit_buttons_top.html" %}
+{% endblock %}
+{% block submit_buttons_bottom %}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+{% load static %}
+<link href="{% static 'admin/quill/quill.snow.css' %}" rel="stylesheet">
+<script src="{% static 'admin/quill/quill.js' %}"></script>
+<script>
+(function() {
+  if (typeof Quill === 'undefined') return;
+  var SizeStyle = Quill.import('attributors/style/size');
+  SizeStyle.whitelist = ['10px','12px','14px','16px','18px','20px','24px','28px','32px','36px','48px'];
+  Quill.register({'formats/size': SizeStyle}, true);
+})();
+</script>
+<style>
+  .submit-row:not(.submit-row-top) { display: none !important; }
+  ul.messagelist { display: none !important; }
+
+  /* Uniform spacing — as on the brand/product page */
+  #content-main .form-row { display: flex !important; align-items: flex-start !important; padding: 14px 20px !important; }
+  #content-main fieldset.module { padding-bottom: 0 !important; margin-bottom: 0 !important; }
+  #content-main fieldset.module .form-row:last-of-type { border-bottom: 1px solid #e5e7eb !important; }
+  .form-row label { font-weight: 400 !important; padding-top: 0 !important; float: none !important; }
+  .form-row label.required { font-weight: 400 !important; }
+  #content-main .form-row > div { padding-top: 0 !important; }
+  #content-main .flex-container { align-items: flex-start !important; }
+  #content-main .flex-container.checkbox-row { align-items: center !important; }
+
+  /* Content editor: remove the standard field border under Quill */
+  .field-content > div > .flex-container > label { display: none !important; }
+  .field-content .quill-wrapper { margin-bottom: 0 !important; }
+
+  /* Readonly value styling — as on the order page */
+  .field-created_at .readonly,
+  .field-updated_at .readonly {
+    display: inline-block !important;
+    font-size: 13px;
+    color: #374151;
+    background: #f3f4f6;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    padding: 5px 12px !important;
+    line-height: 1.4;
+    margin-left: 8px;
+  }
+
+  /* Preview section — like the product photo gallery (only one photo) */
+  .field-preview_image .file-upload { display: none !important; }
+  .field-preview_image .flex-container { display: block !important; }
+  .field-preview_image legend { display: none !important; }
+  .field-preview_image fieldset { border: none !important; padding: 0 !important; margin: 0 !important; }
+
+  /* Title — full width */
+  .field-title input[type="text"] { width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; }
+  .field-title > div, .field-title .flex-container { flex: 1 !important; width: 100% !important; }
+
+  .info-section {
+    padding: 14px;
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+    transition: border-color .15s;
+  }
+  .info-section.vg-section { cursor: pointer; }
+  .info-section.vg-section.paste-active { border-color: #9ca3af !important; }
+  .vg-items { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 0; }
+  .vg-items:empty { display: none; }
+  .pg-item {
+    position: relative; border-radius: 6px; overflow: hidden;
+    display: inline-block; cursor: zoom-in; flex-shrink: 0; line-height: 0;
+    border: 1px solid #d1d5db;
+  }
+  .pg-item img { max-height: 80px; max-width: 200px; width: auto; height: auto; display: block; transition: filter .15s; }
+  .pg-item:hover img { filter: brightness(0.82); }
+  .pg-replace-label input { display: none; }
+  /* Django admin hides ANY <label> without a for attribute inside .aligned
+     (.aligned label:not([for]) { display:none }) and stretches all .aligned label
+     to 160px (.aligned legend, .aligned label { width:160px }) - the specificity
+     of both is higher than .pg-act-btn, so without !important a label-button either disappears or
+     spreads to full width instead of 22×22, like the neighboring buttons.
+   */
+  .pg-replace-label {
+      display: flex !important; width: 22px !important; min-width: 0 !important;
+      max-width: none !important; padding: 0 !important; margin: 0 !important; float: none !important;
+  }
+  .pg-actions {
+    position: absolute; top: 4px; right: 4px; display: flex; gap: 3px;
+    opacity: 0; transition: opacity 0.15s;
+  }
+  .pg-item:hover .pg-actions { opacity: 1; }
+  .pg-act-btn {
+    width: 22px; height: 22px; background: rgba(0,0,0,0.6); color: #fff;
+    border: none; border-radius: 3px; cursor: pointer; font-size: 12px;
+    display: flex; align-items: center; justify-content: center; line-height: 1;
+  }
+  .pg-act-btn:hover { background: rgba(0,0,0,0.88); }
+  .pg-del-btn:hover { background: rgba(185,28,28,0.9); }
+  .vg-items:not(:empty) + .pg-add-area { margin-top: 8px; }
+  .field-preview_image .pg-add-btn {
+    display: inline-flex !important; align-items: center !important;
+    font: inherit !important; font-size: 13px !important;
+    padding: 4px 12px !important; margin: 0 !important;
+    color: #6b7280 !important; background: #fff !important;
+    border: 1px dashed #d1d5db !important; border-radius: 4px !important;
+    cursor: pointer !important; box-shadow: none !important;
+    width: auto !important; min-width: 0 !important;
+    line-height: normal !important; text-decoration: none !important;
+  }
+  .field-preview_image .pg-add-btn:hover { background: #f3f4f6 !important; border-color: #9ca3af !important; color: #374151 !important; }
+  .field-preview_image .pg-add-btn input[type="file"] { display: none !important; }
+
+  /* YouTube fill button */
+  .yt-fill-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-left: 8px; padding: 0 12px;
+    height: 28px; box-sizing: border-box;
+    background: #fff; color: #374151;
+    border: 1px solid #d1d5db; border-radius: 4px;
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    transition: background .12s, border-color .12s;
+  }
+  .yt-fill-btn:hover { background: #f3f4f6; border-color: #9ca3af; }
+  .yt-fill-btn:disabled { opacity: 0.5; cursor: wait; }
+  input#id_youtube_url.yt-error { border-color: #dc2626 !important; box-shadow: none !important; }
+
+  /* Dirty-state indicator */
+  .submit-row-top input[type="submit"].bp-dirty,
+  .submit-row-top .cl-top-btn.bp-dirty { border-color: #6b7280 !important; }
+</style>
+{% include "admin/_form_guard.html" %}
+{% endblock %}
+
+{% block content %}
+{{ block.super }}
+<script>
+(function() {
+  'use strict';
+
+  /* Dirty tracking — fully handled by admin/_form_guard.html via window.pgMarkDirty */
+  function markDirty() {
+    if (window.pgMarkDirty) window.pgMarkDirty();
+  }
+
+  /* ── Preview section as a gallery ── */
+  document.addEventListener('DOMContentLoaded', function() {
+    var fieldRow = document.querySelector('.form-row.field-preview_image');
+    var fileInput = document.getElementById('id_preview_image');
+    if (!fieldRow || !fileInput) return;
+
+    /* Look for the link to the current image (Django ClearableFileInput generates an <a>) */
+    var currentLink = fieldRow.querySelector('a[href*="/media/"]');
+    var clearCheckbox = fieldRow.querySelector('input[type="checkbox"][id$="-clear_id"]') ||
+                        fieldRow.querySelector('input[type="checkbox"][name$="-clear"]');
+
+    /* Remove the standard <p class="file-upload"> (with the link, checkbox, label "Change").
+       Move fileInput into our section so it isn't duplicated and takes part in submit.
+     */
+    var oldWrap = fieldRow.querySelector('p.file-upload');
+    if (oldWrap) oldWrap.remove();
+
+    /* Insert the new section after the standard container */
+    var container = fieldRow.querySelector('.flex-container') || fieldRow.querySelector('div');
+    var section = document.createElement('div');
+    section.className = 'info-section vg-section';
+    section.innerHTML =
+      '<div class="vg-items"></div>' +
+      '<div class="pg-add-area">' +
+      '  <label class="pg-add-btn">' +
+      '    <span>+ Add photo</span>' +
+      '  </label>' +
+      '</div>';
+    container.appendChild(section);
+
+    var itemsEl = section.querySelector('.vg-items');
+    var addArea = section.querySelector('.pg-add-area');
+    var addLabel = section.querySelector('.pg-add-btn');
+
+    /* Move the real input into our label — clicking "+ Add photo" will open the file picker. */
+    fileInput.style.display = 'none';
+    addLabel.appendChild(fileInput);
+    var addPicker = fileInput;
+
+    /* Lightbox for viewing */
+    var lightbox = document.querySelector('.app-lightbox.pg-lightbox');
+    if (!lightbox) {
+      lightbox = document.createElement('div');
+      lightbox.className = 'app-lightbox pg-lightbox';
+      lightbox.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;align-items:center;justify-content:center;cursor:zoom-out;';
+      var lbImg = document.createElement('img');
+      lbImg.style.cssText = 'max-width:90vw;max-height:90vh;object-fit:contain;';
+      lightbox.appendChild(lbImg);
+      lightbox.addEventListener('click', function() { lightbox.style.display = 'none'; });
+      document.addEventListener('keydown', function(e) { if (e.key === 'Escape') lightbox.style.display = 'none'; });
+      document.body.appendChild(lightbox);
+    }
+    function openLightbox(url) {
+      lightbox.querySelector('img').src = url;
+      lightbox.style.display = 'flex';
+    }
+
+    function syncAddBtn() {
+      addArea.style.display = itemsEl.querySelector('.pg-item') ? 'none' : '';
+    }
+
+    /* Current owner element of fileInput: addLabel (no photo) or pg-replace-label (has a photo) */
+    function moveInputTo(targetLabel) {
+      if (fileInput.parentNode !== targetLabel) targetLabel.appendChild(fileInput);
+    }
+
+    function renderItem(url, isLocal) {
+      itemsEl.innerHTML = '';
+      var item = document.createElement('div');
+      item.className = 'pg-item';
+      var img = document.createElement('img');
+      img.src = url; img.alt = '';
+      item.appendChild(img);
+      var actions = document.createElement('div');
+      actions.className = 'pg-actions';
+      var replaceLbl = document.createElement('label');
+      replaceLbl.className = 'pg-act-btn pg-replace-label';
+      replaceLbl.title = 'Replace';
+      replaceLbl.textContent = '✎';
+      actions.appendChild(replaceLbl);
+      var delBtn = document.createElement('button');
+      delBtn.className = 'pg-act-btn pg-del-btn';
+      delBtn.type = 'button';
+      delBtn.title = 'Delete';
+      delBtn.textContent = '✕';
+      actions.appendChild(delBtn);
+      item.appendChild(actions);
+
+      img.addEventListener('click', function() { openLightbox(img.src); });
+
+      delBtn.addEventListener('click', function() {
+        if (!confirm('Delete the preview?')) return;
+        if (clearCheckbox && !isLocal) clearCheckbox.checked = true;
+        try { fileInput.value = ''; } catch (e) {}
+        try { fileInput.files = (new DataTransfer()).files; } catch (e) {}
+        moveInputTo(addLabel);
+        itemsEl.innerHTML = '';
+        syncAddBtn();
+        markDirty();
+      });
+
+      itemsEl.appendChild(item);
+      moveInputTo(replaceLbl);
+      syncAddBtn();
+    }
+
+    /* File changed via any input location — update the UI */
+    fileInput.addEventListener('change', function() {
+      if (fileInput.files && fileInput.files[0]) {
+        var f = fileInput.files[0];
+        var reader = new FileReader();
+        reader.onload = function(ev) { renderItem(ev.target.result, true); };
+        reader.readAsDataURL(f);
+        if (clearCheckbox) clearCheckbox.checked = false;
+        markDirty();
+      }
+    });
+
+    /* Click on the empty section → activate pasting from the clipboard */
+    function hasItem() { return !!itemsEl.querySelector('.pg-item'); }
+    section.addEventListener('click', function(e) {
+      if (e.target.closest('button,input,label,img')) return;
+      if (hasItem()) return;
+      section.classList.toggle('paste-active');
+    });
+    document.addEventListener('paste', function(e) {
+      if (!section.classList.contains('paste-active')) return;
+      var items = e.clipboardData ? e.clipboardData.items : [];
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].type && items[i].type.indexOf('image/') === 0) {
+          var file = items[i].getAsFile();
+          if (file) {
+            try {
+              var dt = new DataTransfer();
+              dt.items.add(file);
+              fileInput.files = dt.files;
+              fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (err) { console.error('DataTransfer not supported:', err); }
+            section.classList.remove('paste-active');
+            e.preventDefault();
+            return;
+          }
+        }
+      }
+    });
+    /* Click outside the section — turn off paste-active */
+    document.addEventListener('mousedown', function(e) {
+      if (!section.classList.contains('paste-active')) return;
+      if (section.contains(e.target)) return;
+      section.classList.remove('paste-active');
+    });
+
+    /* Existing photo */
+    if (currentLink) {
+      renderItem(currentLink.href, false);
+    } else {
+      syncAddBtn();
+    }
+  });
+
+  /* ── YouTube fill ── */
+  function getCSRF() {
+    var m = document.cookie.match(/csrftoken=([^;]+)/);
+    return m ? m[1] : '';
+  }
+
+  function dataUrlToFile(dataUrl, filename) {
+    var arr = dataUrl.split(',');
+    var mime = arr[0].match(/:(.*?);/)[1];
+    var bstr = atob(arr[1]);
+    var n = bstr.length;
+    var u8 = new Uint8Array(n);
+    while (n--) u8[n] = bstr.charCodeAt(n);
+    return new File([u8], filename, { type: mime });
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    var ytInput = document.getElementById('id_youtube_url');
+    if (!ytInput) return;
+
+    var btnIconHtml = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46A2.78 2.78 0 0 0 1.46 6.42 29 29 0 0 0 1 12a29 29 0 0 0 .46 5.58 2.78 2.78 0 0 0 1.95 1.96C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 0 0 1.95-1.96A29 29 0 0 0 23 12a29 29 0 0 0-.46-5.58z"/><polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02"/></svg>';
+    var btnIdleHtml = btnIconHtml + 'Fill from YouTube';
+    var btnLoadingHtml = btnIconHtml + 'Generating the article…';
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'yt-fill-btn';
+    btn.innerHTML = btnIdleHtml;
+
+    ytInput.parentNode.insertBefore(btn, ytInput.nextSibling);
+
+    ytInput.addEventListener('input', function() { ytInput.classList.remove('yt-error'); });
+
+    btn.addEventListener('click', function() {
+      var url = (ytInput.value || '').trim();
+      ytInput.classList.remove('yt-error');
+      if (!url) {
+        ytInput.classList.add('yt-error');
+        ytInput.focus();
+        return;
+      }
+
+      /* Check whether any fields are already filled — warn about overwriting. */
+      var titleInput = document.getElementById('id_title');
+      var quill = (window._quillInstances || {})['content'];
+      var hasTitle = titleInput && titleInput.value.trim();
+      var hasPreview = !!document.querySelector('.field-preview_image .pg-item');
+      var hasContent = quill && quill.getText().trim();
+      var filled = [];
+      if (hasTitle) filled.push('title');
+      if (hasPreview) filled.push('preview');
+      if (hasContent) filled.push('content');
+      if (filled.length && !confirm('Overwrite ' + filled.join(', ') + '?')) return;
+
+      btn.disabled = true;
+      btn.innerHTML = btnLoadingHtml;
+
+      fetch('/admin/blog/fetch-youtube-info/?url=' + encodeURIComponent(url), {
+        headers: { 'X-CSRFToken': getCSRF() },
+        credentials: 'same-origin',
+      })
+        .then(function(r) {
+          return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+        })
+        .then(function(res) {
+          if (!res.ok) throw new Error(res.data && res.data.error ? res.data.error : 'error');
+          var d = res.data;
+
+          var titleInput = document.getElementById('id_title');
+          if (titleInput && d.title) {
+            titleInput.value = d.title;
+            titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+
+          var fileInput = document.getElementById('id_preview_image');
+          if (fileInput && d.thumbnail_data_url) {
+            var file = dataUrlToFile(d.thumbnail_data_url, d.thumbnail_filename || 'youtube.jpg');
+            try {
+              var dt = new DataTransfer();
+              dt.items.add(file);
+              fileInput.files = dt.files;
+              fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (e) {
+              ytInput.classList.add('yt-error');
+            }
+          }
+
+          /* If Gemini generated an article — fill Quill (the content field). */
+          if (d.content_html) {
+            var quill = (window._quillInstances || {})['content'];
+            if (quill) {
+              quill.setContents([]);
+              quill.clipboard.dangerouslyPasteHTML(d.content_html);
+              /* Expand the editor: it starts collapsed, the label-toggle in quill-wrapper is the first child. */
+              var wrapper = quill.container.closest('.quill-wrapper');
+              var lbl = wrapper && wrapper.firstChild;
+              if (lbl && quill.container.style.display === 'none') {
+                lbl.click();
+              }
+              if (window.pgMarkDirty) window.pgMarkDirty();
+            }
+          }
+        })
+        .catch(function() {
+          ytInput.classList.add('yt-error');
+        })
+        .finally(function() {
+          btn.disabled = false;
+          btn.innerHTML = btnIdleHtml;
+        });
+    });
+  });
+})();
+</script>
+{% endblock %}

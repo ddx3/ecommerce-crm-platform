@@ -1,0 +1,1228 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+.submit-row:not(.submit-row-top) { display: none !important; }
+/* Confirmation badge — structure/size from .cl-top-btn, green theme, no hover. */
+.confirmed-badge.cl-top-btn { background: #f0fdf4 !important; color: #15803d !important; border-color: #bbf7d0 !important; cursor: default !important; }
+.reverted-badge  { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: 4px; font-size: 13px; font-weight: 500; background: #fef3c7; color: #92400e; border: 1px solid #fde68a; box-sizing: border-box; }
+/* .cl-top-btn-danger — no local override: the "Revert" button looks
+   and behaves like the standard "Delete" button from base_site.html.
+ */
+.inv-revert-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #6b7280; cursor: pointer; }
+.inv-revert-check input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: #374151; vertical-align: middle; margin: 0; }
+
+/* ── Page padding ── */
+#inv-inner { padding: 0 16px; }
+#content-main, #content { padding-bottom: 0 !important; margin-bottom: 0 !important; flex: 0 0 auto !important; flex-direction: initial !important; display: block !important; }
+#footer { display: none !important; }
+#inv-results { margin-left: -16px; margin-right: -16px; }
+
+/* ── Photo section ── */
+.section-divider { height: 1px; background: #e5e7eb; margin: 14px -16px 0; }
+.info-section { margin-top: 14px; padding: 10px 14px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; cursor: pointer; }
+.paste-target-active { border-color: #6b7280 !important; }
+.paste-target-badge { display: inline-block; font-size: 10px; font-weight: 700; color: #6b7280; background: rgba(107,114,128,0.08); border: 1px solid rgba(107,114,128,0.3); border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
+.vg-items { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 0; }
+.vg-items:empty { display: none; }
+.pg-add-area { margin-top: 0; }
+.vg-items:not(:empty) + .pg-add-area { margin-top: 8px; }
+.pg-add-btn { display: inline-flex !important; align-items: center !important; font: inherit !important; font-size: 13px !important; padding: 4px 12px !important; margin: 0 !important; color: #6b7280 !important; background: #fff !important; border: 1px dashed #d1d5db !important; border-radius: 4px !important; cursor: pointer !important; box-shadow: none !important; }
+.pg-add-btn:hover { background: #f3f4f6 !important; border-color: #9ca3af !important; color: #374151 !important; }
+.pg-add-btn input[type="file"] { display: none; }
+.inv-upload-head { display: flex; align-items: center; gap: 6px; }
+.inv-notes-inp { display: block; width: 100%; box-sizing: border-box; margin-top: 10px; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; font-family: inherit; line-height: 1.4; color: #374151; background: #fff; resize: vertical; min-height: 38px; cursor: text; }
+.inv-notes-inp:focus { outline: none; border-color: #9ca3af; }
+.inv-notes-inp::placeholder { color: #9ca3af; }
+/* Photo and button size — as in products (113×113, contain, 22px buttons on hover). */
+.inv-photo-thumb { position: relative; display: inline-block; line-height: 0; border-radius: 6px; overflow: hidden; border: 1px solid #d1d5db; width: 113px; height: 113px; background: #fff; }
+.inv-photo-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; cursor: zoom-in; transition: filter .15s; }
+.inv-photo-thumb:hover img { filter: brightness(0.82); }
+.pg-actions { position: absolute; top: 4px; right: 4px; display: flex; gap: 3px; opacity: 0; transition: opacity .15s; }
+.inv-photo-thumb:hover .pg-actions { opacity: 1; }
+.pg-act-btn { background: rgba(0,0,0,0.6); color: #fff; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+.pg-act-btn:hover { background: rgba(0,0,0,0.88); }
+.pg-del-btn:hover { background: rgba(185,28,28,0.9); }
+.pg-replace-label input[type="file"] { display: none; }
+/* Django admin hides ANY <label> without a for attribute inside .aligned
+   (.aligned label:not([for]) { display:none }) and stretches all .aligned labels
+   to 160px — specificity is higher than .pg-act-btn, so without !important a label-button
+   either disappears or sprawls instead of 22×22, like the neighboring buttons.
+ */
+.pg-replace-label {
+    display: flex !important; width: 22px !important; min-width: 0 !important;
+    max-width: none !important; padding: 0 !important; margin: 0 !important; float: none !important;
+}
+/* A photo marked for deletion — red outline + dimming + badge (as in products).
+   We hide the gray border (make it transparent) so that only the red frame remains — softer.
+ */
+.inv-photo-thumb.pg-pending-del { outline: 2px solid #dc2626; outline-offset: -2px; border-color: transparent; }
+.inv-photo-thumb.pg-pending-del img { opacity: 0.3; filter: grayscale(1); }
+.inv-photo-thumb.pg-pending-del .pg-actions { opacity: 1; }
+.inv-photo-thumb.pg-pending-del .pg-del-btn { background: #dc2626; }
+.inv-photo-thumb.pg-pending-del::after {
+    content: 'will be deleted'; position: absolute; left: 0; right: 0; bottom: 0;
+    background: rgba(220,38,38,0.9); color: #fff; font-size: 9px; line-height: 1.4;
+    text-align: center; padding: 2px 0; pointer-events: none;
+}
+
+/* ── Processing ── */
+#inv-processing { display: none; padding: 24px 0; text-align: center; color: #6b7280; font-size: 14px; }
+.inv-spinner { display: inline-block; width: 28px; height: 28px; border: 3px solid #e5e7eb; border-top-color: #374151; border-radius: 50%; animation: inv-spin 0.7s linear infinite; margin-bottom: 10px; }
+@keyframes inv-spin { to { transform: rotate(360deg); } }
+#inv-processing p { margin: 0; }
+
+/* ── Results ── */
+#inv-results { display: none; }
+#inv-table caption { caption-side: top; text-align: center; padding: 10px 14px; font-size: 15px; font-weight: 600; color: #374151; background: #fff; border-bottom: 1px solid #e5e7eb; }
+#inv-date-label:not(:empty)::before { content: '|'; color: #374151; margin: 0 14px; }
+#inv-table caption strong { font-weight: inherit; color: inherit; }
+
+/* ── Sort popup ── */
+#inv-sort-pop { display: none; position: fixed; z-index: 9999; background: #fff; border: 1px solid #e5e7eb; border-radius: 0 0 6px 6px; box-shadow: 0 6px 16px rgba(0,0,0,.18); clip-path: inset(0 -20px -20px -20px); width: 200px; }
+#inv-sort-pop.open { display: block; }
+#inv-table thead th[data-col] { cursor: pointer !important; user-select: none !important; position: relative !important; padding-right: 26px !important; }
+#inv-table thead th[data-col]:hover, #inv-table thead th[data-col].col-open { color: #1f2937 !important; }
+#inv-table thead th[data-col].col-on { background: #d1d5db !important; color: #1f2937 !important; }
+.th-badge { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; pointer-events: none; }
+#inv-sort-pop .fp-sort-row { display: flex !important; align-items: center !important; justify-content: space-between !important; padding: 9px 14px !important; border-bottom: 1px solid #ececec !important; border-left: none !important; border-right: none !important; border-top: none !important; background: #fff !important; color: #374151 !important; font-size: 13px !important; cursor: pointer !important; width: 100% !important; text-align: left !important; box-shadow: none !important; border-radius: 0 !important; outline: none !important; }
+#inv-sort-pop .fp-sort-row:last-of-type { border-bottom: 1px solid #e5e7eb !important; }
+#inv-sort-pop .fp-sort-row:hover { background: #f5f5f5 !important; }
+#inv-sort-pop .fp-sort-row.on { background: #e5e7eb !important; color: #374151 !important; }
+#inv-sort-pop .fp-sort-arr { color: #d1d5db; font-size: 13px; flex-shrink: 0; }
+#inv-sort-pop .fp-sort-row.on .fp-sort-arr { color: #374151; }
+
+/* ── Table ── */
+#inv-table { table-layout: auto; width: 100%; border-collapse: collapse; border-top: none; }
+#inv-table td, #inv-table th { border-top: none; }
+#inv-table thead th {
+  background: #f9fafb; border-bottom: 1px solid #e5e7eb;
+  border-left: 1px solid #e5e7eb; padding: 10px 12px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.4px; color: #6b7280; white-space: nowrap;
+  vertical-align: middle; text-align: left;
+}
+#inv-table thead th:first-child { border-left: none; }
+#inv-table thead th.inv-th-num { font-size: 13px; text-transform: none; letter-spacing: 0; text-align: center; width: 36px; }
+#inv-table tbody tr { border-bottom: 1px solid #e5e7eb; height: 48px; }
+#inv-table tbody tr:nth-child(odd)  { background: #fff; }
+#inv-table tbody tr:nth-child(even) { background: #f9fafb; }
+#inv-table tbody tr:hover { background: #eef0f3; }
+#inv-table tbody td { padding: 8px 12px; font-size: 13px; vertical-align: middle; border-left: 1px solid #e5e7eb; color: #374151; }
+#inv-table tbody td:first-child { border-left: none; }
+.inv-skip-cell, .inv-num-cell { width: 47px; min-width: 47px; max-width: 47px; padding: 0 !important; text-align: center; }
+.inv-num-cell { color: #9ca3af; font-size: 13px; border-left: 1px solid #e5e7eb; }
+#inv-table thead th.inv-th-num, #inv-table thead th.inv-th-skip { width: 47px; min-width: 47px; max-width: 47px; padding: 0 !important; text-align: center; }
+#inv-table.inv-no-skip th.inv-th-skip, #inv-table.inv-no-skip td.inv-skip-cell { display: none !important; }
+.inv-name-cell { color: #6b7280; max-width: 260px; white-space: normal; word-break: break-word; }
+.inv-match-cell { min-width: 200px; }
+.inv-match-inner { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.inv-match-name { color: #374151; flex: 1; min-width: 0; }
+.inv-edit-btn { flex-shrink: 0; background: none; border: 1px solid #d1d5db; cursor: pointer; color: #9ca3af; font-size: 13px; width: 28px; height: 28px; padding: 0; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; }
+.inv-edit-btn:hover { color: #374151; background: #f3f4f6; border-color: #9ca3af; }
+.inv-edit-btn svg { display: block; width: 13px; height: 13px; transform: translate(1px, -1px); }
+.inv-skip-btn { background: none; border: none; cursor: pointer; color: #9ca3af; font-size: 14px; width: 47px; height: 47px; display: flex; align-items: center; justify-content: center; margin: 0 auto; border-radius: 0; }
+.inv-skip-btn:hover { color: #dc2626; background: #fef2f2; }
+td.inv-skip-cell:has(.inv-skip-btn:hover) { background: #fef2f2; }
+tr.inv-skipped .inv-skip-btn { color: #9ca3af; }
+tr.inv-skipped .inv-skip-btn:hover { color: #15803d; background: #f0fdf4; }
+tr.inv-skipped td.inv-skip-cell:has(.inv-skip-btn:hover) { background: #f0fdf4; }
+tr.inv-skipped td { opacity: 0.35; }
+tr.inv-skipped td.inv-skip-cell { opacity: 1; }
+#inv-table tbody tr.inv-skipped { position: relative; }
+#inv-table tbody tr.inv-skipped::after {
+  content: ''; position: absolute;
+  left: 56px; top: 50%;
+  width: calc(100% - 64px);
+  height: 1px; background: #9ca3af;
+  pointer-events: none; z-index: 1;
+}
+.inv-qty-inp, .inv-price-inp, .inv-newstock-inp { width: 70px; padding: 0 6px; height: 28px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; font-family: inherit; text-align: left; background: #fff; box-shadow: none; color: #374151; }
+.inv-qty-inp:focus, .inv-price-inp:focus, .inv-newstock-inp:focus { outline: none; border-color: #9ca3af; }
+.inv-keepstock-btn { background: none; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; color: #9ca3af; font-size: 13px; width: 28px; height: 28px; padding: 0; margin: 0; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; }
+.inv-newstock-inp { margin: 0 !important; }
+.inv-keepstock-btn:hover { background: #f3f4f6; border-color: #9ca3af; color: #374151; }
+.inv-price-inp { width: 90px; }
+.inv-stock-cell { color: #6b7280; white-space: nowrap; min-width: 100px; }
+/* ── Stock receipt of "own packaging" into a bag: "own" / "bag" tags — inline via _tagBadge ── */
+.inv-bag-edit { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.inv-bagamount-inp { width: 78px; padding: 0 6px; height: 28px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; font-family: inherit; background: #fff; color: #374151; box-shadow: none; }
+.inv-bagamount-inp:focus { outline: none; border-color: #9ca3af; }
+.inv-bag-u { color: #9ca3af; font-size: 12px; }
+.inv-bag-total { color: #6b7280; font-size: 12px; }
+.inv-bag-cur { color: #6b7280; white-space: nowrap; }
+.sim-badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }
+.sim-high { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.sim-med  { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.sim-low  { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.sim-saved  { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+.sim-edited { background: #f5f3ff; color: #7c3aed; border: 1px solid #ddd6fe; }
+.inv-name-wrap { display: flex; align-items: center; gap: 8px; }
+.inv-name-wrap > .inv-name-text { flex: 1; min-width: 0; }
+.sim-remember-btn { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 26px; height: 26px; padding: 0; margin: 0; background: #fff; border: 1px solid #d1d5db; border-radius: 4px; color: #9ca3af; cursor: pointer; transition: background .12s, border-color .12s, color .12s; }
+.sim-remember-btn:hover { background: #f3f4f6; border-color: #9ca3af; color: #374151; }
+.sim-remember-btn[aria-pressed="true"] { background: #eff6ff; border-color: #93c5fd; color: #2563eb; }
+.sim-remember-btn[aria-pressed="true"]:hover { background: #dbeafe; border-color: #60a5fa; }
+.sim-remember-btn svg { width: 14px; height: 14px; display: block; }
+.inv-th-name-wrap { display: flex; align-items: center; gap: 8px; width: 100%; }
+.inv-th-name-wrap > .sim-remember-btn { margin-left: auto; }
+tr.inv-skipped .sim-remember-btn { display: none; }
+
+/* ── Variant search popup ── */
+/* Inline product replacement in the matching cell (dropdown under the field) */
+.inv-match-inner { position: relative; }
+/* fixed (not absolute): the table wrapper has overflow-x:auto → overflow-y becomes
+   auto, and an absolute dropdown would be clipped and cause an extra vertical scroll.
+   We position by the cell's coordinates via clFlipLeft/clFlipTop (as inv-sort-pop).
+ */
+/* min-width = input field width (set in JS positionInlineDrop), so that the window
+   isn't narrower than the search row; beyond that it stretches to fit content (max-content).
+ */
+.inv-inline-drop { position: fixed; z-index: 100000; width: max-content; max-width: calc(100vw - 24px); background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.16); max-height: 300px; overflow-y: auto; scrollbar-gutter: stable; }
+.inv-modal-empty { padding: 10px 14px; color: #9ca3af; font-size: 13px; text-align: center; }
+/* Inline product editor (standard .em-item-editor / .ee-* from export) */
+.em-item-editor { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; position: relative; }
+.em-item-editor .ee-vinput, .em-item-editor .ee-btn {
+    height: 28px; box-sizing: border-box; margin: 0; vertical-align: middle;
+    border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; font-family: inherit;
+    outline: none; background: #fff;
+}
+.em-item-editor .ee-vinput { flex: 1 1 0; width: 0; min-width: 0; padding: 0 10px; color: #374151; }
+.em-item-editor .ee-vinput:focus { border-color: #6b7280; }
+.em-item-editor .ee-btn {
+    width: 28px; flex-shrink: 0; padding: 0; color: #9ca3af; cursor: pointer; line-height: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background .12s, border-color .12s, color .12s;
+}
+.em-item-editor .ee-btn svg { display: block; }
+.em-item-editor .ee-btn.cancel:hover { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
+.inv-modal-item { display: flex; align-items: stretch; gap: 10px; padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f3f4f6; transition: background .1s; }
+.inv-modal-item:hover { background: #f5f6f8; }
+.inv-mi-photo { width: 40px; height: 40px; border-radius: 4px; border: 1px solid #e5e7eb; object-fit: cover; flex-shrink: 0; background: #f3f4f6; }
+.inv-mi-photo-empty { width: 40px; height: 40px; border-radius: 4px; border: 1px solid #e5e7eb; background: #f3f4f6; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #d1d5db; font-size: 16px; }
+/* info spans the full photo height: name — at the top edge, meta (SKU/stock) — at the bottom edge */
+.inv-mi-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; }
+.inv-mi-name { font-size: 13px; font-weight: 500; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inv-mi-meta { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: #6b7280; }
+.inv-mi-sku { color: #9ca3af; }
+.inv-mi-stock { white-space: nowrap; margin-left: auto; }
+.inv-mi-stock.in-stock { color: #16a34a; }
+.inv-mi-stock.out-stock { color: #dc2626; }
+
+/* ── Error ── */
+#inv-error { display: none; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 12px 16px; color: #dc2626; font-size: 13px; margin-top: 12px; }
+
+/* ── Lightbox ── */
+#inv-lightbox { display: none; position: fixed; inset: 0; z-index: 999999; background: rgba(0,0,0,0.82); align-items: center; justify-content: center; cursor: zoom-out; }
+#inv-lightbox.open { display: flex; }
+#inv-lightbox img { max-width: 90vw; max-height: 90vh; object-fit: contain; border-radius: 4px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+</style>
+{% endblock %}
+
+{% block submit_buttons_bottom %}{% endblock %}
+
+{% block content_title %}{% endblock %}
+
+{% block content %}<div id="content-main">
+<div id="inv-lightbox"><img id="inv-lb-img" src="" alt=""></div>
+
+<div class="submit-row submit-row-top cl-bar">
+  <a href="{% url 'admin:orders_invoice_changelist' %}" class="cl-top-btn">Exit</a>
+  {% if invoice_status != 'confirmed' %}
+    <button type="button" class="cl-top-btn cl-btn-idle" id="inv-analyze-btn">Analyze</button>
+  {% endif %}
+  <span class="submit-spacer"></span>
+  {% if invoice_status == 'confirmed' %}
+    <label class="inv-revert-check"><input type="checkbox" id="inv-revert-price-chk"> Price</label>
+    <label class="inv-revert-check"><input type="checkbox" id="inv-revert-mapping-chk"> Name</label>
+    <button type="button" class="cl-top-btn cl-top-btn-danger" id="inv-revert-btn">Revert invoice</button>
+    <button type="button" class="cl-top-btn confirmed-badge">Confirmed{% if confirmed_at_str %} {{ confirmed_at_str }}{% endif %}</button>
+  {% elif invoice_status == 'reverted' %}
+    <span class="reverted-badge">Reverted{% if reverted_at_str %} {{ reverted_at_str }}{% endif %}</span>
+  {% endif %}
+</div>
+
+<div id="inv-inner">
+<!-- ── Photo section ── -->
+<div class="info-section vg-section" id="inv-photo-section">
+  <div class="vg-items pg-items" id="inv-photo-items"></div>
+  <div class="pg-add-area" id="inv-add-area" {% if original and invoice_items_json != '[]' %}style="display:none"{% endif %}>
+    <div class="inv-upload-head">
+      <label class="pg-add-btn">
+        <input type="file" id="inv-photo-input" accept="image/*" multiple>
+        + Add photo
+      </label>
+      <button type="button" id="inv-notes-toggle" title="Hints for recognition (optional): e.g. 'prices in pencil on the side are UAH per kg', 'take my tick next to the bags into account'" style="padding:0;width:27px;height:27px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:#6b7280;background:#fff;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;line-height:1;">
+        <span id="inv-notes-chev" style="display:block;width:7px;height:7px;border-right:2px solid #6b7280;border-bottom:2px solid #6b7280;transform:rotate(-135deg);margin-top:4px;"></span>
+      </button>
+    </div>
+    <textarea id="inv-notes" class="inv-notes-inp" rows="2" placeholder=""></textarea>
+  </div>
+</div>
+<div class="section-divider"></div>
+
+<!-- ── Processing indicator ── -->
+<div id="inv-processing">
+  <div class="inv-spinner"></div>
+  <p id="inv-processing-text">Analyzing the invoice...</p>
+</div>
+
+<!-- ── Results ── -->
+<div id="inv-results" {% if original and invoice_items_json != '[]' %}style="display:block"{% endif %}>
+  <div style="overflow-x:auto;">
+  <table id="inv-table">
+    <caption id="inv-meta-row">
+      <span>Items: <strong id="inv-count">0</strong></span>
+      <span id="inv-date-label">{% if invoice_date_str %}Invoice date: {{ invoice_date_str }}{% endif %}</span>
+    </caption>
+    <thead>
+      <tr>
+        <th class="inv-th-skip"></th>
+        <th class="inv-th-num">#</th>
+        <th><span class="inv-th-name-wrap"><span>Name from the invoice</span><button type="button" id="inv-remember-all" class="sim-remember-btn" aria-pressed="false" title="Remember all / Clear all"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg></button></span></th>
+        <th>Product in the database</th>
+        <th>Quantity on the invoice</th>
+        <th>Old price</th>
+        <th>New price</th>
+        <th data-col="sim">Match<span class="th-badge"></span></th>
+        <th>Stock</th>
+        <th>New stock</th>
+      </tr>
+    </thead>
+    <tbody id="inv-tbody"></tbody>
+  </table>
+  </div>
+</div>
+
+<!-- ── Error ── -->
+<div id="inv-error"></div>
+</div><!-- /inv-inner -->
+
+<!-- ── Sort popup ── -->
+<div id="inv-sort-pop"></div>
+
+
+<script>
+(function(){
+  var CSRF = '{{ csrf_token }}';
+  var invoiceId = {% if original %}{{ original.pk }}{% else %}null{% endif %};
+  var invoiceStatus = '{{ invoice_status }}';
+  var invoiceItems = {{ invoice_items_json|safe }};
+  var originalInvoiceItems = JSON.parse(JSON.stringify(invoiceItems));
+  var existingPhotoUrls = {{ invoice_photo_urls|safe }};
+  var searchTimer = null;
+  var pendingFiles = [];
+
+  function esc(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+  // ── Lightbox ──
+  var lb = document.getElementById('inv-lightbox');
+  var lbImg = document.getElementById('inv-lb-img');
+  lb.addEventListener('click', function(){ lb.classList.remove('open'); });
+
+  // ── Render existing photos (for saved invoices) ──
+  var photoItems = document.getElementById('inv-photo-items');
+  existingPhotoUrls.forEach(function(url){
+    addThumb(url, null);
+  });
+
+  function addThumb(src, file){
+    var thumb = document.createElement('div');
+    thumb.className = 'inv-photo-thumb';
+    var img = document.createElement('img');
+    img.src = src;
+    img.addEventListener('click', function(){ lbImg.src = src; lb.classList.add('open'); });
+    thumb.appendChild(img);
+    thumb._file = file || null;
+    if(file && invoiceStatus !== 'confirmed'){
+      var actions = document.createElement('div');
+      actions.className = 'pg-actions';
+
+      var replaceLabel = document.createElement('label');
+      replaceLabel.className = 'pg-act-btn pg-replace-label';
+      replaceLabel.title = 'Replace photo';
+      var replaceInput = document.createElement('input');
+      replaceInput.type = 'file';
+      replaceInput.accept = 'image/*';
+      replaceInput.addEventListener('change', function(){
+        var newFile = this.files[0];
+        if(!newFile) return;
+        var idx = pendingFiles.indexOf(file);
+        if(idx !== -1) pendingFiles[idx] = newFile;
+        file = newFile;
+        thumb._file = newFile;
+        var reader = new FileReader();
+        reader.onload = function(e){
+          img.src = e.target.result;
+          img.onclick = function(){ lbImg.src = e.target.result; lb.classList.add('open'); };
+        };
+        reader.readAsDataURL(newFile);
+        this.value = '';
+      });
+      replaceLabel.appendChild(replaceInput);
+      replaceLabel.appendChild(document.createTextNode('✎'));
+
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'pg-act-btn pg-del-btn';
+      del.title = 'Delete';
+      del.textContent = '✕';
+      del.addEventListener('click', function(){
+        // As in products: mark for deletion (red outline), don't remove immediately.
+        // Clicking again cancels. Photos marked for deletion are excluded from analysis.
+        thumb.classList.toggle('pg-pending-del');
+        updateAnalyzeBtn();
+      });
+
+      actions.appendChild(replaceLabel);
+      actions.appendChild(del);
+      thumb.appendChild(actions);
+    }
+    photoItems.appendChild(thumb);
+  }
+
+  // Photo files NOT marked for deletion (for analysis and the button counter).
+  function activePhotoFiles(){
+    return Array.prototype.slice.call(photoItems.querySelectorAll('.inv-photo-thumb'))
+      .filter(function(t){ return t._file && !t.classList.contains('pg-pending-del'); })
+      .map(function(t){ return t._file; });
+  }
+  function updateAnalyzeBtn(){
+    var btn = document.getElementById('inv-analyze-btn');
+    if(!btn) return;
+    btn.style.display = '';
+    if(activePhotoFiles().length > 0) btn.classList.remove('cl-btn-idle');
+    else btn.classList.add('cl-btn-idle');
+  }
+
+  // ── File input ──
+  var photoInput = document.getElementById('inv-photo-input');
+  if(photoInput){
+    photoInput.addEventListener('change', function(){
+      var files = Array.from(this.files);
+      if(!files.length) return;
+      files.forEach(function(file){
+        pendingFiles.push(file);
+        var reader = new FileReader();
+        reader.onload = function(e){ addThumb(e.target.result, file); };
+        reader.readAsDataURL(file);
+      });
+      this.value = '';
+      updateAnalyzeBtn();
+    });
+  }
+
+  // ── Analyze button ──
+  // ── Paste from clipboard ──
+  var photoSection = document.getElementById('inv-photo-section');
+  var _pasteActive = false;
+
+  function setActivePaste() {
+    if (_pasteActive) { clearActivePaste(); return; }
+    _pasteActive = true;
+    photoSection.classList.add('paste-target-active');
+    var h3 = photoSection.querySelector('h3');
+    if (h3 && !h3.querySelector('.paste-target-badge')) {
+      var badge = document.createElement('span');
+      badge.className = 'paste-target-badge';
+      badge.textContent = 'Ctrl+V';
+      h3.appendChild(badge);
+    }
+  }
+
+  function clearActivePaste() {
+    _pasteActive = false;
+    photoSection.classList.remove('paste-target-active');
+    var badge = photoSection.querySelector('.paste-target-badge');
+    if (badge) badge.remove();
+  }
+
+  function isPhotoLocked(){
+    var addArea = document.getElementById('inv-add-area');
+    return !addArea || addArea.style.display === 'none';
+  }
+
+  if (photoSection) {
+    photoSection.addEventListener('click', function(e) {
+      if (isPhotoLocked()) return;
+      if (e.target.closest('button,input,label,img,textarea')) return;
+      setActivePaste();
+    });
+  }
+
+  document.addEventListener('click', function(e) {
+    if (_pasteActive && !photoSection.contains(e.target)) clearActivePaste();
+  });
+
+  document.addEventListener('paste', function(e) {
+    if (!_pasteActive || isPhotoLocked()) return;
+    var items = e.clipboardData ? e.clipboardData.items : [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        var file = items[i].getAsFile();
+        if (!file) continue;
+        pendingFiles.push(file);
+        var reader = new FileReader();
+        reader.onload = (function(f){ return function(ev){ addThumb(ev.target.result, f); updateAnalyzeBtn(); }; })(file);
+        reader.readAsDataURL(file);
+        e.preventDefault();
+        break;
+      }
+    }
+  });
+
+  // Hint field toggle: ↑ — collapse, ↓ — expand.
+  (function(){
+    var tgl = document.getElementById('inv-notes-toggle');
+    var notes = document.getElementById('inv-notes');
+    var chev = document.getElementById('inv-notes-chev');
+    if(tgl && notes && chev){
+      tgl.addEventListener('click', function(){
+        var collapsed = notes.style.display === 'none';
+        notes.style.display = collapsed ? '' : 'none';
+        chev.style.transform = collapsed ? 'rotate(-135deg)' : 'rotate(45deg)';
+        chev.style.marginTop = collapsed ? '4px' : '-2px';
+        if(collapsed) notes.focus();
+      });
+    }
+  })();
+
+  var analyzeBtn = document.getElementById('inv-analyze-btn');
+  if(analyzeBtn){
+    analyzeBtn.addEventListener('click', function(){
+      var files = activePhotoFiles();
+      if(!files.length) return;
+      showProcessing('Analyzing the invoice...');
+      hideResults();
+      hideError();
+      analyzeBtn.style.display = 'none';
+
+      var fd = new FormData();
+      fd.append('csrfmiddlewaretoken', CSRF);
+      files.forEach(function(f){ fd.append('photos[]', f); });
+      var notesEl = document.getElementById('inv-notes');
+      if(notesEl && notesEl.value.trim()) fd.append('notes', notesEl.value.trim());
+
+      fetch('/admin/orders/invoice/process/', { method: 'POST', body: fd })
+        .then(function(r){
+          if(!r.ok) return r.text().then(function(t){ throw new Error('HTTP ' + r.status + ': ' + t.slice(0,300)); });
+          return r.json();
+        })
+        .then(function(data){
+          hideProcessing();
+          if(data.error){ showError(data.error); analyzeBtn.style.display = ''; return; }
+          invoiceId = data.invoice_id;
+          invoiceItems = data.items;
+          originalInvoiceItems = JSON.parse(JSON.stringify(invoiceItems));
+          if(data.invoice_date){
+            document.getElementById('inv-date-label').textContent =
+              'Invoice date: ' + data.invoice_date;
+          }
+          renderTable(invoiceItems, invoiceStatus !== 'confirmed');
+    updateRememberAllBtn();
+          showResults();
+          var addArea = document.getElementById('inv-add-area');
+          if(addArea) addArea.style.display = 'none';
+          ensureActionButtons();
+        })
+        .catch(function(e){ hideProcessing(); showError(e.message || 'Server connection error'); analyzeBtn.style.display = ''; });
+    });
+  }
+
+  // ── Render table ──
+  function renderTable(items, editable){
+    var tbody = document.getElementById('inv-tbody');
+    tbody.innerHTML = '';
+    var preSkippedCount = items.filter(function(it){ return it.confirmed === false && (invoiceStatus === 'confirmed' || invoiceStatus === 'reverted'); }).length;
+    document.getElementById('inv-count').textContent = items.length - preSkippedCount;
+
+    items.forEach(function(item, i){
+      var low = item.similarity < 0.8;
+      var skipped = item.confirmed === false && (invoiceStatus === 'confirmed' || invoiceStatus === 'reverted');
+      var tr = document.createElement('tr');
+      if(skipped) tr.classList.add('inv-skipped');
+      tr.dataset.idx = i;
+      tr.dataset.itemId = item.id || '';
+
+      var curStock = (!editable && item.original_stock != null) ? item.original_stock : (item.current_stock || 0);
+      var newStock = curStock + item.quantity;
+      var priceVal = item.website_price || '';
+      var oldPrice = item.current_price || '—';
+      var hasOrig = item._orig_variant_id && item._orig_variant_id !== item.matched_variant_id;
+      var editBtnHtml = editable
+        ? (hasOrig ? '<button type="button" class="inv-edit-btn inv-revert-btn" title="Revert to the calculated value" onclick="window._invRevertVariant(' + i + ', this)">↩</button>' : '')
+            + '<button type="button" class="inv-edit-btn" title="Change product" onclick="window._invOpenSearch(' + i + ', this)"><svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M9.5 2L12 4.5L4.5 12L1.5 12.5L2 9.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg></button>'
+        : '';
+      var _isBagRow = !!item.is_bag;
+      // "bag" tag before the name (gray canonical style, as in the product table / orders)
+      // —
+      // receipt into a bag of "own packaging". There is no separate "own"
+      // tag.
+      var ownPrefix = _isBagRow ? _tagBadge('bag') : '';
+      // For a bag we show the product's GENERAL name (without the packaging grams).
+      var matchDisplayName = (_isBagRow && item.product_name) ? item.product_name : item.matched_variant_name;
+      var qtyHtml = editable
+        ? '<input type="number" min="1" value="' + item.quantity + '" class="inv-qty-inp">'
+        : item.quantity;
+      var priceHtml = editable
+        ? '<input type="text" value="' + esc(priceVal) + '" class="inv-price-inp">'
+        : (priceVal || '—');
+      var newStockHtml = editable
+        ? '<div style="display:inline-flex;align-items:center;vertical-align:middle;gap:4px;"><input type="number" min="0" value="' + newStock + '" class="inv-newstock-inp"><button type="button" class="inv-keepstock-btn" title="Keep the current stock">=</button></div>'
+        : newStock;
+
+      var skipBtnHtml = editable
+        ? '<button type="button" class="inv-skip-btn' + (skipped ? ' inv-skip-btn-skipped' : '') + '" title="' + (skipped ? 'Restore' : 'Skip') + '" onclick="window._invToggleSkip(this)">' + (skipped ? '↩' : '✕') + '</button>'
+        : '';
+
+      tr.innerHTML =
+        '<td class="inv-skip-cell">' + skipBtnHtml + '</td>' +
+        '<td class="inv-num-cell">' + (i+1) + '</td>' +
+        '<td class="inv-name-cell"><div class="inv-name-wrap"><span class="inv-name-text">' + esc(item.invoice_name) + '</span>' + renderRememberBtn(item, skipped, editable) + '</div></td>' +
+        '<td class="inv-match-cell"><div class="inv-match-inner">' +
+          ownPrefix +
+          '<span class="inv-match-name" data-vid="' + item.matched_variant_id + '">' + esc(matchDisplayName) + '</span>' +
+          editBtnHtml +
+        '</div></td>' +
+        '<td>' + qtyHtml + '</td>' +
+        '<td class="inv-stock-cell">' + oldPrice + '</td>' +
+        '<td>' + priceHtml + '</td>' +
+        '<td class="inv-sim-cell">' + renderSim(item, skipped) + '</td>' +
+        '<td class="inv-stock-cell">' + curStock + '</td>' +
+        '<td>' + newStockHtml + '</td>';
+
+      // "Stock" / "New stock" cells + bindings — single source
+      // renderStockCells
+      // (piece receipt OR receipt into a bag of "own packaging").
+      renderStockCells(tr, item, editable);
+      tbody.appendChild(tr);
+    });
+
+    // Show confirm button for editable invoices with items
+  }
+
+  function fmtNum(n){ return (Number(n) || 0).toLocaleString('uk-UA'); }
+
+  // Canonical gray badge prefix in the style of the "own" tag from the product / order table
+  // (here — "bag").
+  function _tagBadge(t){ return '<span style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;font-weight:600;margin-right:6px;flex-shrink:0;">' + t + '</span>'; }
+
+  // Render of the row's last two cells: piece receipt (Stock → New stock)
+  // OR receipt into a bag of "own packaging" (current bag weight → top-up). Patches
+  // only these
+  // cells, so the bag↔pieces toggle doesn't touch other rows or their edits.
+  function renderStockCells(tr, item, editable){
+    var stockCell = tr.children[8], newStockCell = tr.children[9];
+    var curStock = (!editable && item.original_stock != null) ? item.original_stock : (item.current_stock || 0);
+    var isBag = !!item.is_bag;
+    var u = item.bag_unit || 'g';
+    if(isBag){
+      var hasCur = item.bag_current != null;
+      var bagCur = Number(item.bag_current) || 0;
+      var bagAmt = (item.bag_amount != null && item.bag_amount !== '') ? Number(item.bag_amount) : 0;
+      // We show the bag's live stock only when it is known (fresh analysis). For a confirmed
+      // invoice it drifts due to sales and is unrelated to this receipt → "—".
+      stockCell.innerHTML = '<span class="inv-bag-cur">' + (hasCur ? fmtNum(bagCur) + ' ' + u : '—') + '</span>';
+      if(editable){
+        newStockCell.innerHTML = '<div class="inv-bag-edit">' +
+          '<input type="number" min="0" step="any" value="' + bagAmt + '" class="inv-bagamount-inp">' +
+          '<span class="inv-bag-u">' + u + '</span><span class="inv-bag-total"></span></div>';
+      } else {
+        newStockCell.innerHTML = '<span class="inv-bag-cur">+' + fmtNum(bagAmt) + ' ' + u + '</span>';
+      }
+    } else {
+      stockCell.textContent = curStock;
+      if(editable){
+        newStockCell.innerHTML = '<div style="display:inline-flex;align-items:center;vertical-align:middle;gap:4px;"><input type="number" min="0" value="' + (curStock + (item.quantity || 0)) + '" class="inv-newstock-inp"><button type="button" class="inv-keepstock-btn" title="Keep the current stock">=</button></div>';
+      } else {
+        newStockCell.textContent = curStock + (item.quantity || 0);
+      }
+    }
+    if(editable) bindStockCell(tr, item, curStock, isBag);
+  }
+
+  function bindStockCell(tr, item, curStock, isBag){
+    var qtyInp = tr.querySelector('.inv-qty-inp');
+    if(isBag){
+      var baInp = tr.querySelector('.inv-bagamount-inp');
+      var totEl = tr.querySelector('.inv-bag-total');
+      var u = item.bag_unit || 'g';
+      var bagCur = Number(item.bag_current) || 0;
+      function updTot(){ var a = parseFloat(baInp.value) || 0; item.bag_amount = a; if(totEl) totEl.textContent = hasCur ? (' → ' + fmtNum(bagCur + a) + ' ' + u) : ''; }
+      var hasCur = item.bag_current != null;
+      if(baInp){ baInp.oninput = updTot; updTot(); }
+      if(qtyInp) qtyInp.oninput = null;   // in a bag, the number of packs doesn't directly change the top-up
+    } else {
+      var newStockInp = tr.querySelector('.inv-newstock-inp');
+      if(qtyInp && newStockInp){
+        qtyInp.oninput = function(){ newStockInp.value = curStock + (parseInt(this.value) || 0); };
+      }
+      var keepBtn = tr.querySelector('.inv-keepstock-btn');
+      if(keepBtn && newStockInp){
+        var kept = false;
+        keepBtn.onclick = function(){
+          kept = !kept;
+          if(kept){ newStockInp.value = curStock; keepBtn.textContent = '↩'; keepBtn.title = 'Revert to the calculated value'; }
+          else { newStockInp.value = curStock + (parseInt(qtyInp ? qtyInp.value : 0) || 0); keepBtn.textContent = '='; keepBtn.title = 'Keep the current stock'; }
+        };
+      }
+    }
+  }
+
+  // Parser for pack weight from the invoice name (mirror of parse_pack_weight on the backend):
+  // the last weight token → {amount in base units, unit 'g'|'ml', label}.
+  function _parsePackWeight(name){
+    // Word boundary: in JS \b is ASCII-only, so it doesn't work for Cyrillic. We use a
+    // negative lookahead — the unit must not continue with a letter/digit (so that "г" (g) isn't
+    // caught in "грн" (UAH)). The unit words (кг/г/мл/л = kg/g/ml/l) are matched as written on Ukrainian invoices.
+    var re = /(\d+(?:[.,]\d+)?)\s*(кг|г|мл|л)(?![a-zA-Zа-яА-ЯіїєґІЇЄҐ0-9_])/gi, m, last = null;
+    while((m = re.exec(name || '')) !== null) last = m;
+    if(!last) return null;
+    var val = parseFloat(last[1].replace(',', '.')), u = last[2].toLowerCase();
+    if(u === 'кг') return { amount: val * 1000, unit: 'g', label: 'g' };
+    if(u === 'г')  return { amount: val, unit: 'g', label: 'g' };
+    if(u === 'л')  return { amount: val * 1000, unit: 'ml', label: 'ml' };
+    if(u === 'мл') return { amount: val, unit: 'ml', label: 'ml' };
+    return null;
+  }
+
+  // Render on load for existing invoices
+  if(invoiceItems.length > 0){
+    var editable = invoiceStatus !== 'confirmed';
+    renderTable(invoiceItems, editable);
+    updateRememberAllBtn();
+    if(editable) ensureActionButtons();
+  }
+
+  function renderSim(item, isSkipped){
+    // "Saved" — only when the name is REALLY in the reference (from_mapping).
+    // Previously, for any confirmed invoice the badge was set on all lines →
+    // it looked as if all names were saved to memory, although there is no mapping.
+    if(!isSkipped && item.from_mapping) return '<span class="sim-badge sim-saved">Saved</span>';
+    if(!isSkipped && (item._edited || item.manually_edited)) return '<span class="sim-badge sim-edited">Edited</span>';
+    if(item.similarity == null) return '<span class="sim-badge sim-low">?</span>';
+    var pct = Math.round(item.similarity * 100);
+    var cls = item.similarity >= 0.85 ? 'sim-high' : item.similarity >= 0.75 ? 'sim-med' : 'sim-low';
+    return '<span class="sim-badge ' + cls + '">' + pct + '%</span>';
+  }
+  function renderRememberBtn(item, isSkipped, editable){
+    if(!editable || isSkipped) return '';
+    // Default: ON for items already in DB mapping (from_mapping), OFF for new items
+    var defaultOn = !!item.from_mapping;
+    var current = item._remember === undefined ? defaultOn : !!item._remember;
+    var pressed = current ? 'true' : 'false';
+    return '<button type="button" class="sim-remember-btn" aria-pressed="' + pressed +
+      '" title="Remember the supplier name for this product">' +
+        '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+          '<path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/>' +
+        '</svg>' +
+      '</button>';
+  }
+
+  // ── Dirty tracking for the "Cancel" button ──
+  function invMarkDirty(){
+    var rb = document.getElementById('inv-reset-btn');
+    if(rb) rb.classList.remove('cl-btn-idle');
+  }
+  function invMarkClean(){
+    var rb = document.getElementById('inv-reset-btn');
+    if(rb) rb.classList.add('cl-btn-idle');
+  }
+  // Listen on the table for any input/change event
+  document.addEventListener('input', function(e){
+    if(e.target.closest('#inv-tbody')) invMarkDirty();
+  });
+  document.addEventListener('click', function(e){
+    if(e.target.closest('#inv-tbody .inv-skip-btn, #inv-tbody .inv-keepstock-btn, #inv-tbody .inv-edit-btn')) {
+      setTimeout(invMarkDirty, 0);
+    }
+  });
+  // Sync master button state from current row buttons (off if any row is off)
+  function updateRememberAllBtn(){
+    var master = document.getElementById('inv-remember-all');
+    if(!master) return;
+    var btns = document.querySelectorAll('#inv-tbody tr:not(.inv-skipped) .sim-remember-btn');
+    if(btns.length === 0){ master.style.display = 'none'; return; }
+    master.style.display = '';
+    var anyOff = false;
+    btns.forEach(function(b){ if(b.getAttribute('aria-pressed') !== 'true') anyOff = true; });
+    master.setAttribute('aria-pressed', anyOff ? 'false' : 'true');
+  }
+
+  // Per-row toggle: persist into invoiceItems so re-renders keep it
+  document.addEventListener('click', function(e){
+    var btn = e.target.closest('.sim-remember-btn');
+    if(!btn) return;
+    var row = btn.closest('tr[data-idx]');
+    if(!row) return; // master button is in thead — handled below
+    var pressed = btn.getAttribute('aria-pressed') !== 'true';
+    btn.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+    var idx = parseInt(row.dataset.idx);
+    if(invoiceItems[idx]) invoiceItems[idx]._remember = pressed;
+    updateRememberAllBtn();
+    invMarkDirty();
+  });
+
+  // Master toggle: flips ALL non-skipped rows to opposite state
+  (function(){
+    var master = document.getElementById('inv-remember-all');
+    if(!master) return;
+    master.addEventListener('click', function(){
+      var btns = document.querySelectorAll('#inv-tbody tr:not(.inv-skipped) .sim-remember-btn');
+      if(btns.length === 0) return;
+      var anyOff = false;
+      btns.forEach(function(b){ if(b.getAttribute('aria-pressed') !== 'true') anyOff = true; });
+      var newOn = anyOff; // any off → turn all on; else turn all off
+      btns.forEach(function(b){
+        b.setAttribute('aria-pressed', newOn ? 'true' : 'false');
+        var row = b.closest('tr[data-idx]');
+        if(row){
+          var idx = parseInt(row.dataset.idx);
+          if(invoiceItems[idx]) invoiceItems[idx]._remember = newOn;
+        }
+      });
+      master.setAttribute('aria-pressed', newOn ? 'true' : 'false');
+      invMarkDirty();
+    });
+  })();
+
+  // ── Inject action buttons into top bar after analysis ──
+  function ensureActionButtons(){
+    var bar = document.querySelector('.submit-row-top.cl-bar');
+    if(!bar) return;
+    var analyzeBtn = document.getElementById('inv-analyze-btn');
+    var anchor = analyzeBtn;
+    if(analyzeBtn) analyzeBtn.remove();
+    var exitLink = bar.querySelector('a.cl-top-btn');
+    if(!document.getElementById('inv-confirm-btn')){
+      var cb = document.createElement('button');
+      cb.type='button'; cb.id='inv-confirm-btn';
+      cb.className='cl-top-btn default';
+      cb.textContent='Confirm';
+      if(exitLink) exitLink.parentNode.insertBefore(cb, exitLink.nextSibling);
+      else bar.appendChild(cb);
+      invAttachConfirmHandler();
+    }
+    if(!document.getElementById('inv-reset-btn')){
+      var rb = document.createElement('button');
+      rb.type='button'; rb.id='inv-reset-btn';
+      rb.className='cl-top-btn cl-btn-idle';
+      rb.textContent='Cancel';
+      rb.setAttribute('onclick','invResetChanges()');
+      var confirmBtnEl = document.getElementById('inv-confirm-btn');
+      if(confirmBtnEl) confirmBtnEl.parentNode.insertBefore(rb, confirmBtnEl.nextSibling);
+      else bar.appendChild(rb);
+    }
+  }
+
+  // ── Reset all changes after analysis ──
+  window.invResetChanges = function(){
+    if(!originalInvoiceItems || !originalInvoiceItems.length) return;
+    var rb = document.getElementById('inv-reset-btn');
+    if(rb && rb.classList.contains('cl-btn-idle')) return;
+    if(!confirm('Discard all changes and restore the analysis results?')) return;
+    invoiceItems = JSON.parse(JSON.stringify(originalInvoiceItems));
+    renderTable(invoiceItems, invoiceStatus !== 'confirmed');
+    updateRememberAllBtn();
+    invMarkClean();
+  };
+
+  // ── Confirm ──
+  window._invAttachConfirmHandler = invAttachConfirmHandler;
+  function invAttachConfirmHandler(){
+    var confirmBtn = document.getElementById('inv-confirm-btn');
+    if(!confirmBtn || confirmBtn._handlerAttached) return;
+    confirmBtn._handlerAttached = true;
+    confirmBtn.addEventListener('click', function(){
+      if(!invoiceId){ showError('invoiceId is not set'); return; }
+      var rows = document.querySelectorAll('#inv-tbody tr');
+      var items = [];
+      var skippedIds = [];
+      rows.forEach(function(row){
+        var itemId = parseInt(row.dataset.itemId) || null;
+        var nameEl = row.querySelector('.inv-match-name');
+        var qtyEl = row.querySelector('.inv-qty-inp');
+        var priceEl = row.querySelector('.inv-price-inp');
+        var newStockEl = row.querySelector('.inv-newstock-inp');
+        if(row.classList.contains('inv-skipped')){
+          if(itemId) skippedIds.push(itemId);
+          return;
+        }
+        var rowIdx = parseInt(row.dataset.idx);
+        var it = invoiceItems[rowIdx];
+        var edited = it && (it._edited || it.manually_edited) ? true : false;
+        var rememberEl = row.querySelector('.sim-remember-btn');
+        var remember = rememberEl ? rememberEl.getAttribute('aria-pressed') === 'true' : true;
+        var toBag = !!(it && it.is_bag);
+        var bagAmtEl = row.querySelector('.inv-bagamount-inp');
+        items.push({
+          id: itemId,
+          variant_id: nameEl ? parseInt(nameEl.dataset.vid) || null : null,
+          quantity: qtyEl ? parseInt(qtyEl.value) : 1,
+          price: priceEl ? priceEl.value.trim() || null : null,
+          new_stock: newStockEl ? parseInt(newStockEl.value) : null,
+          manually_edited: edited,
+          remember_name: remember,
+          to_bag: !!toBag,
+          bag_amount: bagAmtEl ? (parseFloat(bagAmtEl.value) || 0) : null,
+        });
+      });
+      confirmBtn.style.display = 'none';
+      confirmBtn.textContent = 'Confirm';
+
+      fetch('/admin/orders/invoice/confirm/', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','X-CSRFToken': CSRF},
+        body: JSON.stringify({invoice_id: invoiceId, items: items, skipped_ids: skippedIds})
+      })
+      .then(function(r){
+        if(!r.ok) return r.text().then(function(t){ throw new Error('HTTP ' + r.status + ': ' + t.slice(0,300)); });
+        return r.json();
+      })
+      .then(function(data){
+        if(data.ok){
+          window.location.href = '/admin/orders/invoice/' + invoiceId + '/change/';
+        } else {
+          confirmBtn.style.display = '';
+          showError(data.error || 'Confirmation error');
+        }
+      })
+      .catch(function(e){
+        confirmBtn.style.display = '';
+        showError(e.message || 'Server connection error');
+      });
+    });
+  };
+
+  // ── Revert invoice ──
+  var revertBtn = document.getElementById('inv-revert-btn');
+  if(revertBtn){
+    revertBtn.addEventListener('click', function(){
+      if(!confirm('Revert the invoice? The stock levels will be restored to their state before confirmation.')) return;
+      var revertPrice = document.getElementById('inv-revert-price-chk') && document.getElementById('inv-revert-price-chk').checked;
+      var revertMapping = document.getElementById('inv-revert-mapping-chk') && document.getElementById('inv-revert-mapping-chk').checked;
+      revertBtn.disabled = true;
+      revertBtn.textContent = 'Reverting...';
+      fetch('/admin/orders/invoice/revert/', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','X-CSRFToken': CSRF},
+        body: JSON.stringify({invoice_id: invoiceId, revert_price: revertPrice, revert_mapping: revertMapping})
+      })
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if(data.ok){ window.location.reload(); }
+        else { revertBtn.disabled = false; revertBtn.textContent = 'Revert invoice'; showError(data.error || 'Revert error'); }
+      })
+      .catch(function(){ revertBtn.disabled = false; revertBtn.textContent = 'Revert invoice'; showError('Server connection error'); });
+    });
+  }
+
+  // ── Skip row ──
+  window._invToggleSkip = function(btn){
+    var row = btn.closest('tr');
+    var skipped = row.classList.toggle('inv-skipped');
+    btn.title = skipped ? 'Restore' : 'Skip';
+    btn.textContent = skipped ? '↩' : '✕';
+    var total = document.querySelectorAll('#inv-tbody tr').length;
+    var skippedCount = document.querySelectorAll('#inv-tbody tr.inv-skipped').length;
+    document.getElementById('inv-count').textContent = total - skippedCount;
+    var allRows = document.querySelectorAll('#inv-tbody tr');
+    var rowIdx = Array.prototype.indexOf.call(allRows, row);
+    var simCell = row.querySelector('.inv-sim-cell');
+    if(simCell) simCell.innerHTML = renderSim(invoiceItems[rowIdx] || {}, skipped);
+    updateRememberAllBtn();
+  };
+
+  // ── Sort by similarity ──
+  var sortDir = null;
+  var sortPop = document.getElementById('inv-sort-pop');
+  var sortPopOwner = null;
+
+  function closeSortPop(){
+    sortPop.classList.remove('open');
+    if(sortPopOwner){ sortPopOwner.classList.remove('col-open'); sortPopOwner = null; }
+  }
+
+  function openSortPop(th){
+    if(sortPopOwner === th && sortPop.classList.contains('open')){ closeSortPop(); return; }
+    sortPopOwner = th;
+    sortPop.innerHTML = '';
+
+    [['Ascending', 'asc'], ['Descending', 'desc']].forEach(function(p){
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'fp-sort-row' + (sortDir === p[1] ? ' on' : '');
+      var lbl = document.createElement('span'); lbl.textContent = p[0];
+      var arr = document.createElement('span'); arr.className = 'fp-sort-arr'; arr.textContent = '›';
+      btn.appendChild(lbl); btn.appendChild(arr);
+      btn.addEventListener('click', function(){
+        sortDir = p[1];
+        sortPop.querySelectorAll('.fp-sort-row').forEach(function(b){ b.classList.remove('on'); });
+        btn.classList.add('on');
+        applySortSim();
+        updateSortBadge(th);
+      });
+      sortPop.appendChild(btn);
+    });
+
+    var resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.textContent = 'Reset filter';
+    resetBtn.style.cssText = 'display:block;width:100%;padding:9px 14px;border:none;border-bottom:1px solid #e5e7eb;background:none;color:#dc2626;font-size:13px;font-weight:500;cursor:pointer;text-align:left;';
+    resetBtn.addEventListener('mouseenter', function(){ this.style.background='#fef2f2'; });
+    resetBtn.addEventListener('mouseleave', function(){ this.style.background='none'; });
+    resetBtn.addEventListener('click', function(){
+      sortDir = null;
+      restoreOriginalOrder();
+      updateSortBadge(th);
+      closeSortPop();
+    });
+    sortPop.insertBefore(resetBtn, sortPop.firstChild);
+
+    var r = th.getBoundingClientRect();
+    sortPop.style.left = (window.clFlipLeft ? window.clFlipLeft(r, 200, 8) : Math.max(8, Math.min(r.left, window.innerWidth - 208))) + 'px';
+    sortPop.classList.add('open');
+    sortPop.style.top = (window.clFlipTop ? window.clFlipTop(r, sortPop.offsetHeight, 0) : (r.bottom)) + 'px';
+    th.classList.add('col-open');
+  }
+
+  function applySortSim(){
+    var tbody = document.getElementById('inv-tbody');
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b){
+      var sa = (invoiceItems[parseInt(a.dataset.idx)] || {}).similarity || 0;
+      var sb = (invoiceItems[parseInt(b.dataset.idx)] || {}).similarity || 0;
+      return sortDir === 'asc' ? sa - sb : sb - sa;
+    });
+    rows.forEach(function(r){ tbody.appendChild(r); });
+  }
+
+  function restoreOriginalOrder(){
+    var tbody = document.getElementById('inv-tbody');
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b){ return parseInt(a.dataset.idx) - parseInt(b.dataset.idx); });
+    rows.forEach(function(r){ tbody.appendChild(r); });
+  }
+
+  function updateSortBadge(th){
+    var badge = th.querySelector('.th-badge');
+    if(!badge) return;
+    if(sortDir){
+      badge.innerHTML = '<svg width="9" height="10" viewBox="0 0 10 11" fill="#374151"><path d="M0 0h10L6.5 5v6h-3V5z"></path></svg>';
+    } else {
+      badge.innerHTML = '';
+    }
+  }
+
+  document.getElementById('inv-table').querySelector('thead').addEventListener('click', function(e){
+    var th = e.target.closest('th[data-col]');
+    if(!th) return;
+    e.stopPropagation();
+    openSortPop(th);
+  });
+
+  document.addEventListener('click', function(e){
+    if(!sortPop.contains(e.target) && !e.target.closest('th[data-col]')) closeSortPop();
+  });
+
+  sortPop.addEventListener('mouseleave', function(e){
+    var to = e.relatedTarget;
+    if(!to || (!sortPop.contains(to) && !e.target.closest('th[data-col]'))) closeSortPop();
+  });
+
+  // ── Variant search popup ──
+  window._invRevertVariant = function(idx, btn){
+    var it = invoiceItems[idx]; if(!it || it._orig_variant_id == null) return;
+    it.matched_variant_id = it._orig_variant_id;
+    it.matched_variant_name = it._orig_variant_name;
+    it.from_mapping = !!it._orig_from_mapping;
+    // We restore the stock/bag snapshot — otherwise the "Stock" / "New stock"
+    // cells and confirm
+    // keep the data of the PREVIOUSLY selected variant (someone else's absolute stock → phantom).
+    var s = it._orig_snap || {};
+    it.current_stock = s.current_stock; it.is_bag = s.is_bag; it.bag_amount = s.bag_amount;
+    it.bag_current = s.bag_current; it.bag_unit = s.bag_unit; it.unit_size = s.unit_size;
+    it.bag_eligible = s.bag_eligible; it.product_name = s.product_name;
+    it._orig_variant_id = null; it._orig_variant_name = null; it._orig_from_mapping = null; it._orig_snap = null;
+    it._edited = false;
+    var row = document.querySelector('#inv-tbody tr[data-idx="' + idx + '"]');
+    if(row){
+      var inner = row.querySelector('.inv-match-inner');
+      if(inner){
+        var _isBag = !!it.is_bag;
+        var dispName = (_isBag && it.product_name) ? it.product_name : it.matched_variant_name;
+        inner.innerHTML =
+          (_isBag ? _tagBadge('bag') : '') +
+          '<span class="inv-match-name" data-vid="' + it.matched_variant_id + '">' + esc(dispName) + '</span>' +
+          '<button type="button" class="inv-edit-btn" title="Change product" onclick="window._invOpenSearch(' + idx + ', this)">' + INV_PENCIL + '</button>';
+      }
+      var simCell = row.querySelector('.inv-sim-cell');
+      if(simCell) simCell.innerHTML = renderSim(it, false);
+      renderStockCells(row, it, invoiceStatus !== 'confirmed');
+    }
+  };
+
+  // Pencil SVG for the replace button (export/orders standard)
+  var INV_PENCIL = '<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M9.5 2L12 4.5L4.5 12L1.5 12.5L2 9.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg>';
+
+  // Inline product replacement right in the matching cell (as in orders) — no popup.
+  window._invOpenSearch = function(idx, btn){
+    var tr = document.querySelector('#inv-tbody tr[data-idx="' + idx + '"]');
+    if(!tr) return;
+    var inner = tr.querySelector('.inv-match-inner');
+    if(!inner) return;
+    var oldHTML = inner.innerHTML;
+    inner.innerHTML = '';
+    var ed = document.createElement('div'); ed.className = 'em-item-editor'; ed.style.width = '100%';
+    var inp = document.createElement('input');
+    inp.type = 'text'; inp.className = 'ee-vinput'; inp.placeholder = 'Search by name or SKU...'; inp.autocomplete = 'off';
+    inp.size = 1;  // remove the input's intrinsic width so the column doesn't widen
+    var cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.className = 'ee-btn cancel'; cancel.title = 'Cancel';
+    cancel.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>';
+    var drop = document.createElement('div'); drop.className = 'inv-inline-drop'; drop.style.display = 'none';
+    ed.appendChild(inp); ed.appendChild(cancel);
+    inner.appendChild(ed); inner.appendChild(drop);
+    inp.focus();
+
+    function restore(){ if(inner.innerHTML !== oldHTML) inner.innerHTML = oldHTML; }
+    cancel.addEventListener('mousedown', function(e){ e.preventDefault(); restore(); });
+    inp.addEventListener('keydown', function(e){ if(e.key === 'Escape') restore(); });
+    inp.addEventListener('blur', function(){ setTimeout(function(){ if(document.body.contains(inp)) restore(); }, 200); });
+
+    inp.addEventListener('input', function(){
+      clearTimeout(searchTimer);
+      var q = inp.value.trim();
+      if(q.length < 2){ drop.style.display = 'none'; drop.innerHTML = ''; return; }
+      searchTimer = setTimeout(function(){
+        fetch('/admin/orders/invoice/search-variants/?q=' + encodeURIComponent(q))
+          .then(function(r){ return r.json(); })
+          .then(function(data){ renderInlineList(data.results || [], idx, inner, drop); });
+      }, 250);
+    });
+  };
+
+  // fixed dropdown: positioned by the cell's coordinates, flipped upward if it doesn't
+  // fit below (clFlipTop/clFlipLeft account for zoom on Mac).
+  function positionInlineDrop(drop, anchor){
+    // anchor — the input field itself (.ee-vinput), without the cross button
+    var field = anchor.querySelector('.ee-vinput') || anchor.querySelector('.em-item-editor') || anchor;
+    var r = field.getBoundingClientRect();
+    // r.width — visual px; style.minWidth is interpreted in zoom px → divide by zoom
+    // (otherwise at zoom<1 on Mac the window ends up narrower than the input field).
+    drop.style.minWidth = Math.round(window.clX ? window.clX(r.width) : r.width) + 'px';
+    var dw = drop.offsetWidth || 340;
+    drop.style.left = (window.clFlipLeft ? window.clFlipLeft(r, dw, 8) : Math.max(8, Math.min(r.left, window.innerWidth - dw - 8))) + 'px';
+    drop.style.top  = (window.clFlipTop ? window.clFlipTop(r, drop.offsetHeight, 4) : (r.bottom + 4)) + 'px';
+  }
+
+  function renderInlineList(results, idx, inner, drop){
+    drop.style.display = 'block';
+    if(!results.length){ drop.innerHTML = '<div class="inv-modal-empty">Nothing found</div>'; positionInlineDrop(drop, inner); return; }
+    drop.innerHTML = '';
+    results.forEach(function(v){
+      var item = document.createElement('div');
+      item.className = 'inv-modal-item';
+      var photoEl = v.photo
+        ? '<img class="inv-mi-photo" src="' + esc(v.photo) + '">'
+        : '<div class="inv-mi-photo-empty">□</div>';
+      var skuEl = v.sku ? '<span class="inv-mi-sku">' + esc(v.sku) + '</span>' : '';
+      // "bag" tag — canonical badge prefix for an own product (sold from a bag).
+      var ownEl = v.is_own ? _tagBadge('bag') : '';
+      // For own we show the bag weight (it is the product, not a specific packaging), otherwise —
+      // pieces.
+      var hasBag = v.is_own && v.bag_current != null;
+      var stockText = hasBag ? (fmtNum(v.bag_current) + ' ' + (v.bag_unit || 'g')) : ((v.stock || 0) + ' pcs');
+      var stockPos = hasBag ? (v.bag_current > 0) : (v.stock > 0);
+      item.innerHTML =
+        photoEl +
+        '<div class="inv-mi-info">' +
+          '<div class="inv-mi-name">' + ownEl + esc(v.name) + '</div>' +
+          '<div class="inv-mi-meta">' +
+            skuEl +
+            '<span class="inv-mi-stock ' + (stockPos ? 'in-stock' : 'out-stock') + '">' + stockText + '</span>' +
+          '</div>' +
+        '</div>';
+      // mousedown (not click): fires before the field's blur, otherwise restore would manage to
+      // re-render
+      item.addEventListener('mousedown', function(e){ e.preventDefault(); invApplyPick(idx, v, inner); });
+      drop.appendChild(item);
+    });
+    positionInlineDrop(drop, inner);
+  }
+
+  function invApplyPick(idx, v, inner){
+    var it = invoiceItems[idx];
+    if(it){
+      if(it._orig_variant_id == null){
+        it._orig_variant_id = it.matched_variant_id;
+        it._orig_variant_name = it.matched_variant_name;
+        it._orig_from_mapping = it.from_mapping;
+        // Stock/bag snapshot BEFORE the replacement — so that "Revert
+        // to calculated" restores the row.
+        it._orig_snap = {
+          current_stock: it.current_stock, is_bag: it.is_bag, bag_amount: it.bag_amount,
+          bag_current: it.bag_current, bag_unit: it.bag_unit, unit_size: it.unit_size,
+          bag_eligible: it.bag_eligible, product_name: it.product_name
+        };
+      }
+      it.matched_variant_id = v.id;
+      it.matched_variant_name = v.name;
+      it._edited = true;
+      it.from_mapping = false;
+      // Stock of the new variant (otherwise "Stock" / "New stock" are
+      // computed from the OLD
+      // variant and confirm would write someone else's absolute stock → phantom stock).
+      it.current_stock = (v.stock != null ? v.stock : 0);
+      // Re-detection of the "own packaging" receipt for the new variant (mirror of
+      // bag_refill_plan):
+      // own + (variant has a bag  OR  wholesale weight from the name ≠ packaging size) → receipt
+      // into a bag.
+      it.bag_eligible = !!v.is_own;
+      it.is_bag = false; it.bag_amount = null; it.bag_current = null;
+      it.product_name = v.product_name || v.name;
+      it.unit_size = (v.unit_size != null ? v.unit_size : null);
+      if(v.is_own){
+        var parsed = _parsePackWeight(it.invoice_name);
+        var bagLinked = (v.bag_current != null);
+        var unitOk = parsed && (!bagLinked || !v.bag_unit || parsed.label === v.bag_unit);
+        var amt = (parsed && unitOk) ? parsed.amount * (it.quantity || 0) : 0;
+        if(bagLinked){
+          it.is_bag = true; it.bag_amount = amt || null;
+          it.bag_current = v.bag_current; it.bag_unit = v.bag_unit || (parsed ? parsed.label : 'g');
+        } else if(parsed && (it.unit_size == null || parsed.amount != it.unit_size)){
+          it.is_bag = true; it.bag_amount = amt || null;
+          it.bag_current = null; it.bag_unit = parsed.label;   // the bag doesn't exist yet — it will be created on confirm
+        }
+      }
+    }
+    var tr = document.querySelector('#inv-tbody tr[data-idx="' + idx + '"]');
+    if(tr){
+      var simCell = tr.querySelector('.inv-sim-cell');
+      if(simCell && it) simCell.innerHTML = renderSim(it, false);
+      renderStockCells(tr, it, invoiceStatus !== 'confirmed');
+    }
+    var _isBag = !!(it && it.is_bag);
+    var dispName = (_isBag && it && it.product_name) ? it.product_name : v.name;
+    var hasOrig = it && it._orig_variant_id != null && it._orig_variant_id !== v.id;
+    inner.innerHTML =
+      (_isBag ? _tagBadge('bag') : '') +
+      '<span class="inv-match-name" data-vid="' + v.id + '">' + esc(dispName) + '</span>' +
+      (hasOrig ? '<button type="button" class="inv-edit-btn inv-revert-btn" title="Revert to the calculated value" onclick="window._invRevertVariant(' + idx + ', this)">↩</button>' : '') +
+      '<button type="button" class="inv-edit-btn" title="Change product" onclick="window._invOpenSearch(' + idx + ', this)">' + INV_PENCIL + '</button>';
+  }
+
+  // ── Helpers ──
+  function showProcessing(text){ setStep(text); document.getElementById('inv-processing').style.display = 'block'; }
+  function hideProcessing(){ document.getElementById('inv-processing').style.display = 'none'; }
+  function setStep(t){ document.getElementById('inv-processing-text').textContent = t; }
+  function showResults(){ document.getElementById('inv-results').style.display = 'block'; }
+  function hideResults(){ document.getElementById('inv-results').style.display = 'none'; }
+  function showError(msg){ var el = document.getElementById('inv-error'); el.textContent = msg; el.style.display = 'block'; }
+  function hideError(){ document.getElementById('inv-error').style.display = 'none'; }
+})();
+</script>
+</div>
+{% endblock %}

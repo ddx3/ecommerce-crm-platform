@@ -1,0 +1,27 @@
+{% extends "email/base.html" %}
+{% block content %}
+
+<h1 style="margin:0 0 12px 0;font-size:24px;font-weight:700;color:#111827">Welcome!</h1>
+
+<p style="margin:0;color:#6b7280;line-height:1.6">
+  Your account has been created. You can now track your orders and manage your profile.
+</p>
+
+{% if user.first_name or user.last_name or user.phone %}
+<table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-top:20px">
+  {% if user.first_name or user.last_name %}
+  <tr>
+    <td style="padding:12px 16px;font-size:13px;color:#6b7280;width:140px;{% if user.phone %}border-bottom:1px solid #f3f4f6{% endif %}">Name</td>
+    <td style="padding:12px 16px;font-size:13px;color:#374151;{% if user.phone %}border-bottom:1px solid #f3f4f6{% endif %}">{{ user.first_name }} {{ user.last_name }}</td>
+  </tr>
+  {% endif %}
+  {% if user.phone %}
+  <tr>
+    <td style="padding:12px 16px;font-size:13px;color:#6b7280">Phone</td>
+    <td style="padding:12px 16px;font-size:13px;color:#374151">{{ formatted_phone }}</td>
+  </tr>
+  {% endif %}
+</table>
+{% endif %}
+
+{% endblock %}

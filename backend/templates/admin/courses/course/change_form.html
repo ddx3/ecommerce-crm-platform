@@ -1,0 +1,2806 @@
+{% extends "admin/change_form.html" %}
+
+{% block content_title %}{% endblock %}
+{% block object-tools %}{% endblock %}
+
+{% block submit_buttons_top %}
+{% include "admin/_submit_buttons_top.html" %}
+{% endblock %}
+{% block submit_buttons_bottom %}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+{% load static %}
+<link href="{% static 'admin/quill/quill.snow.css' %}" rel="stylesheet">
+<script src="{% static 'admin/quill/quill.js' %}"></script>
+<script>
+(function() {
+  if (typeof Quill === 'undefined') return;
+  var SizeStyle = Quill.import('attributors/style/size');
+  SizeStyle.whitelist = ['10px','12px','14px','16px','18px','20px','24px','28px','32px','36px','48px'];
+  Quill.register({'formats/size': SizeStyle}, true);
+})();
+</script>
+<style>
+/* ============================================================
+   Courses · Course change_form — CRM chrome 1:1 with the product form.
+   Sources: catalog/product/change_form.html (flat form-row, 160px
+   label column, .quill-wrapper) + base_site.html (buttons, inputs,
+   inline tables). There are NO product business widgets here.
+
+   MAIN RULE OF THE FILE: all .form-row rules are scoped via .aligned.
+   TabularInline rows are <tr class="form-row"> (django/contrib/admin/
+   templates/admin/edit_inline/tabular.html), and the inline fieldset does NOT have the
+   .aligned class. Without .aligned, display:flex would break the inline tables.
+   ============================================================
+ */
+
+/* ── 1. Page chrome ── */
+.submit-row:not(.submit-row-top) { display: none !important; }
+ul.messagelist { display: none !important; }
+input[type="submit"] { text-transform: none !important; }
+#footer { display: none !important; }
+.form-row.hidden { display: none !important; }
+
+/* ── 2. Sections ──
+   display:contents dissolves ONLY the main fieldsets — the form becomes a single flow of rows.
+   The inline fieldset stays in its own box (it has no .aligned),
+   otherwise the table loses width.
+ */
+fieldset.module.aligned { display: contents !important; }
+
+/* There are NO section headings — as in products: base_site globally hides
+   #content h2:not(.help), and the product form does not override that. We do not
+   override it here either (no h2 is visible on the page).
+ */
+
+/* ── 3. Field row ── */
+#content-main .aligned .form-row {
+    display: flex !important;
+    align-items: center !important;
+    padding: 14px 20px !important;
+    border-bottom: 1px solid #e5e7eb !important;
+    margin: 0 !important;
+    background: #fff !important;
+}
+/* flex-wrap — so that .help goes UNDER the field, not to its right. */
+#content-main .aligned .form-row > div {
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+    width: 100% !important;
+    padding: 0 !important;
+}
+/* :not(.pg-add-btn) is mandatory: otherwise this rule eats the top padding
+   of the "+ Add …" button and it becomes 23px instead of 27px, as in products.
+ */
+#content-main .aligned .form-row label:not(.pg-add-btn) { padding-top: 0 !important; float: none !important; }
+#content-main .aligned .form-row label.pg-add-btn { padding: 4px 12px !important; float: none !important; }
+#content-main .aligned .flex-container {
+    display: flex !important;
+    align-items: center !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+}
+/* The REAL label column. Django 6 puts <label> INSIDE .flex-container,
+   so the common selector .form-row > div > label is dead. 160px + 14px gutter.
+ */
+#content-main .aligned .flex-container > label {
+    width: 160px !important;
+    min-width: 160px !important;
+    flex-shrink: 0 !important;
+    font-weight: 400 !important;              /* Django bolds label.required */
+    color: var(--body-quiet-color) !important;
+    font-size: 13px !important;
+    padding: 0 14px 0 0 !important;
+    margin: 0 !important;
+}
+#content-main .aligned .flex-container.checkbox-row { align-items: center !important; }
+#content-main .aligned .flex-container input[type=checkbox] { margin-right: 6px !important; }
+#content-main .aligned .vCheckboxLabel { width: auto !important; min-width: 0 !important; padding: 0 !important; }
+
+/* Fields whose widget has use_fieldset=True (AdminFileWidget, RelatedFieldWidgetWrapper
+   for filter_horizontal): the label is rendered as <legend>, and the row looks like
+   .form-row > fieldset > legend + div.
+ */
+#content-main .aligned .form-row > fieldset {
+    flex: 1 1 auto !important;
+    padding: 0 !important; margin: 0 !important; border: 0 !important; min-width: 0 !important;
+}
+#content-main .aligned .form-row > fieldset > legend {
+    width: 160px !important;
+    min-width: 160px !important;
+    padding: 4px 10px 0 0 !important;
+    margin: 0 !important;
+    font-weight: 400 !important;
+    color: var(--body-quiet-color) !important;
+    font-size: 13px !important;
+}
+
+/* Multi-line fields — label on top of the row */
+#content-main .aligned .form-row.field-short_description,
+#content-main .aligned .form-row.field-short_description > div,
+#content-main .aligned .form-row.field-short_description .flex-container,
+#content-main .aligned .form-row.field-full_video_chapters,
+#content-main .aligned .form-row.field-full_video_chapters > div,
+#content-main .aligned .form-row.field-full_video_chapters .flex-container,
+#content-main .aligned .form-row.field-description,
+#content-main .aligned .form-row.field-description > div,
+#content-main .aligned .form-row.field-related_variants,
+#content-main .aligned .form-row.field-related_categories { align-items: flex-start !important; }
+
+/* ── 4. Hints — CRM standard (#9ca3af / 12px).
+   Offset 174px = 160 column + 14 gutter.
+ */
+#content-main .aligned .form-row .help,
+#content-main .aligned .form-row div.help {
+    color: #9ca3af !important;
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+    font-weight: 400 !important;
+    padding: 0 !important;
+}
+#content-main .aligned .form-row > div > .help { flex: 0 0 100% !important; margin: 4px 0 0 174px !important; }
+#content-main .aligned .form-row > fieldset > div > .help { margin: 4px 0 0 0 !important; }
+
+/* ── 5. Input fields ──
+   Borders/radius/font/focus are GLOBAL (base_site). Here ONLY stretching
+   and semantic widths, as in the product form.
+ */
+#content-main .aligned .flex-container input[type=text],
+#content-main .aligned .flex-container input[type=number],
+#content-main .aligned .flex-container input[type=url],
+#content-main .aligned .flex-container input[type=email],
+#content-main .aligned .flex-container select {
+    flex: 1 1 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+    height: 28px !important;
+    padding: 0 8px !important;
+}
+#content-main .aligned .flex-container textarea {
+    flex: 1 1 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+}
+/* The native file input is not shown at all — as in products: there all 7 input[type=file]
+   are hidden, and the visible part is .pg-add-btn + the .pg-item card.
+ */
+#content-main .aligned .form-row input[type=file] { display: none !important; }
+#content-main .aligned .form-row p.file-upload { display: none !important; }
+#content-main .aligned .form-row input,
+#content-main .aligned .form-row select,
+#content-main .aligned .form-row textarea { margin-top: 0 !important; margin-bottom: 0 !important; }
+
+/* Semantic widths (id overrides flex:1 above) */
+#content-main #id_price { flex: none !important; width: 110px !important; }
+
+/* Full-video chapters: the raw JSON is hidden, edited by rows — the same
+   look as product characteristics (.ch-list / .ch-row / .ch-btn-del).
+ */
+#content-main .aligned .form-row.field-full_video_chapters textarea { display: none !important; }
+.ch-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 0; padding-top: 0; width: 100%; }
+.ch-row { display: flex; align-items: center; gap: 6px; padding: 0; position: relative; }
+/* #content-main + !important — otherwise the general rule for input[type=text]
+   in this same file stretches the time field to full width.
+ */
+#content-main .aligned .flex-container input.ch-time-inp {
+    flex: none !important; width: 72px !important; max-width: 72px !important;
+    padding: 0 7px !important; height: 28px !important; box-sizing: border-box;
+    border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; outline: none;
+    margin: 0 !important; text-align: center; font-variant-numeric: tabular-nums;
+}
+#content-main .aligned .flex-container input.ch-name-inp {
+    flex: 1 1 auto !important; width: auto !important; padding: 0 7px !important;
+    height: 28px !important; box-sizing: border-box; border: 1px solid #d1d5db;
+    border-radius: 4px; font-size: 13px; min-width: 0; outline: none; margin: 0 !important;
+}
+#content-main .aligned .flex-container input.ch-time-inp:focus,
+#content-main .aligned .flex-container input.ch-name-inp:focus { border-color: #9ca3af !important; }
+#content-main .aligned .flex-container input.ch-time-inp.is-bad { border-color: #dc2626 !important; }
+.ch-btn-del {
+    display: flex; align-items: center; justify-content: center; align-self: center;
+    flex-shrink: 0; width: 28px; height: 28px; box-sizing: border-box;
+    padding: 0; margin: 0; border: 1px solid #d1d5db; border-radius: var(--radius-input);
+    background: #fff; color: #374151; font-size: 14px; line-height: 1; cursor: pointer;
+}
+.ch-btn-del:hover { background: var(--err-bg); border-color: var(--err-border); color: var(--err-fg); }
+.ch-jump { flex-shrink: 0; }
+
+.ch-widget-root { width: 100%; }
+/* Panel under the chapter list: "+ Add chapter" on the left, collapse on the right. */
+.ch-tools { display: flex; align-items: center; gap: 8px; }
+.ch-list:not(:empty) + .ch-tools { margin-top: 14px; }
+/* The button sits right next to "+ Add chapter", not pressed against the edge. */
+/* Chapters inside the video block — right under the video, with an indent. */
+.ch-widget-root.ch-in-video { margin-top: 14px; }
+
+/* All three file fields — just the block, without a label: in products the photo module
+   is also without a caption, and the button inside explains itself.
+ */
+#content-main .aligned .form-row.field-full_video_chapters > div > .flex-container > label,
+#content-main .aligned .form-row.field-cover_image > fieldset > legend,
+#content-main .aligned .form-row.field-full_video_file > fieldset > legend,
+#content-main .aligned .form-row.field-full_video_poster > fieldset > legend,
+#content-main .aligned .form-row.field-related_variants > fieldset > legend,
+#content-main .aligned .form-row.field-related_variants label { display: none !important; }
+/* The table takes the whole row, like the photo blocks: without a label, fieldset>div
+   must stretch to 100%, otherwise it is only as wide as its content.
+ */
+#content-main .aligned .form-row.field-related_variants > fieldset > div { width: 100% !important; }
+/* Row without paddings: otherwise the block started at 248px and the table did not reach the edges.
+   The inner indents are given by .oi-toolbar — exactly as in the order.
+ */
+/* Separator line between the course's modules and products — above the product search row. */
+#content-main .aligned .form-row.field-related_variants { padding: 0 !important; border-top: 1px solid #e5e7eb; }
+/* The Django m2m wrapper remained a 440px flex item even though the <select> inside it
+   is hidden — and it squeezed the table. We hide the whole wrapper: the <select> inside
+   with display:none still goes into the POST (only disabled affects submit).
+ */
+#content-main .aligned .form-row.field-related_variants .related-widget-wrapper,
+#content-main .aligned .form-row.field-related_bundles .related-widget-wrapper { display: none !important; }
+
+/* ── "Products and bundles" table — CSS 1:1 with the order items table ── */
+#order-items-wrap { margin: 0; flex: 1 1 auto; min-width: 0; }
+/* Paddings — as in the order: the 20px on the sides sit on the toolbar, not on the row,
+   so the table spans the full content width. The bottom 14px is the gap before the table.
+ */
+.oi-toolbar { display: flex; align-items: center; gap: 8px; padding: 14px 20px; box-sizing: border-box; }
+#oi-table .oi-name-clamp {
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden;
+}
+#oi-table .oi-name-flex { display: flex; align-items: center; gap: 8px; }
+#oi-table .oi-name-flex > :first-child { flex: 1; min-width: 0; }
+#oi-table .oi-name-flex .em-item-edit-btn { margin-left: 0; }
+#oi-table .oi-site-btn { flex-shrink: 0; line-height: 0; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; background: #fff; border: 1px solid #d1d5db; border-radius: 4px; color: #6b7280 !important; text-decoration: none; transition: background .12s, border-color .12s, color .12s; }
+#oi-table .oi-site-btn:hover { background: #f3f4f6; border-color: #9ca3af; color: #1f2937 !important; }
+#oi-table .oi-site-btn svg { display: block; }
+#content-main .aligned .flex-container input.oi-add-inp { width: 100% !important; max-width: none !important; flex: none !important; }
+.oi-add-inp { padding: 0 10px; border: 1px dashed #d1d5db; border-radius: 4px; font-size: 13px; color: #6b7280; background: #fff; width: 100%; height: 28px; outline: none; margin: 0; box-sizing: border-box; }
+.oi-add-inp::placeholder { color: #9ca3af; }
+.oi-drop { position: fixed; z-index: 99999; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,.10); width: 560px; display: none; }
+.oi-drop-inner { overflow-y: auto; max-height: 300px; }
+.inv-skip-btn { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; padding: 0; border: none; background: transparent; color: #9ca3af; font-size: 20px; cursor: pointer; }
+.inv-skip-btn:hover { color: #dc2626 !important; background: #fef2f2 !important; }
+#oi-table .inv-skip-cell { position: relative; width: 59px !important; min-width: 59px !important; padding: 0 !important; }
+#oi-table tbody tr { height: 59px; }
+#oi-table { table-layout: auto; width: 100%; border-collapse: collapse !important; }
+#oi-table thead tr th { background: #f9fafb; border-left: 1px solid #e5e7eb; padding: 14px 12px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; white-space: nowrap; vertical-align: middle; text-align: left; }
+#oi-table thead tr th:first-child { border-left: none; }
+#oi-table tbody tr { border-bottom: 1px solid #e5e7eb; }
+#oi-table tbody tr.row1 { background: #fff; }
+#oi-table tbody tr.row2 { background: #f9fafb; }
+#oi-table tbody tr:hover { background: #eef0f3; }
+#oi-table tbody td, #oi-table tbody th { padding: 8px 12px; font-size: 13px; vertical-align: middle; border-left: 1px solid #e5e7eb; border-bottom: none; font-weight: 400; color: #374151; text-align: left; white-space: nowrap; }
+#oi-table tbody td:first-child, #oi-table tbody th:first-child { border-left: none; }
+#oi-table .col-oi-photo { width: 59px !important; min-width: 59px !important; max-width: 59px !important; padding: 0 !important; text-align: center; vertical-align: middle; }
+#oi-table .col-oi-name { white-space: normal; word-break: break-word; min-width: 160px; width: 100%; }
+.oi-pv-wrap { position: relative; display: inline-block; vertical-align: middle; flex-shrink: 0; }
+.oi-pv-wrap img.oi-pv-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 4px; border: 1px solid #d1d5db; background: #f3f4f6; display: block; transition: filter .15s; }
+.oi-pv-wrap:hover img.oi-pv-thumb { filter: brightness(0.82); }
+.oi-pv-preview { display: none; position: absolute; top: calc(100% + 6px); left: 0; z-index: 99999; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,.14); pointer-events: none; }
+.oi-pv-wrap:hover .oi-pv-preview { display: block; }
+.oi-pv-preview img { width: 180px; height: 180px; object-fit: cover; border-radius: 4px; display: block; }
+.oi-name-link { color: #1f2937; text-decoration: none; }
+.oi-name-link:hover { text-decoration: underline; }
+
+/* ── Course modules: ONE table, module = gray strip header of the group ──
+   The same pattern as the "Parcel N" groups in the order form (.oi-group-header):
+   the group header and its rows live in one table, so the block reads as a continuous
+   list, not a set of separate islands. The lesson editor is a separate window: nested
+   expansions turned the block into a mess.
+ */
+#cs-mods {
+    /* No borders of its own: the bottom line is drawn by the last table row border, and the
+       separator between modules and products is on the products section itself.
+     */
+    padding: 0; border: none; border-radius: 0;
+    background: #fff; display: block;
+}
+.cs-toolbar { display: flex; align-items: center; gap: 8px; padding: 14px 20px; box-sizing: border-box; }
+/* Stock level — a narrow column to the right of the SKU. */
+#oi-table th.col-oi-stock, #oi-table td.col-oi-stock { width: 88px !important; white-space: nowrap; }
+/* -1px: below the table comes the products section with its own top line — we cover
+   it with the table's bottom line so there is neither doubling nor a white gap.
+ */
+#cs-mtable { table-layout: auto; width: 100%; border-collapse: collapse !important; margin-bottom: -1px; }
+#cs-mtable thead tr th { background: #f9fafb; border-left: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; padding: 14px 12px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; white-space: nowrap; vertical-align: middle; text-align: left; }
+#cs-mtable thead tr th:first-child { border-left: none; }
+#cs-mtable thead th.cs-c-tog { padding: 0 !important; text-align: center; }
+/* "#" — as in the supplier invoice header (.inv-th-num): regular font size, no caps and no tracking. */
+#cs-mtable thead th.cs-c-num { font-size: 13px; text-transform: none; letter-spacing: 0; }
+.cs-master-toggle {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 100%; min-height: 34px;
+    background: none; border: none; cursor: pointer; padding: 0;
+    color: #9ca3af; user-select: none; transition: color 0.12s;
+}
+.cs-master-toggle:hover { color: #1f2937; }
+.cs-master-toggle svg { display: block; width: 18px; height: 18px; transition: transform 0.15s ease; transform-origin: center center; }
+.cs-master-toggle.open svg { transform: rotate(90deg); }
+#cs-mtable tbody tr { height: 58px; border-bottom: 1px solid #e5e7eb; }
+/* Last row without a bottom border: right below the table comes the products section with
+   its own top line — together that produced two stripes in a row.
+ */
+/* Not only the row but also its cells: with border-collapse the bottom border is drawn by
+   the td (they inherit it from the base admin styles), and the stripe remained.
+ */
+#cs-mtable tbody tr.row1 { background: #fff; }
+#cs-mtable tbody tr.row2 { background: #f9fafb; }
+#cs-mtable tbody tr.cs-lrow:hover { background: #eef0f3; }
+#cs-mtable tbody td { padding: 6px 12px; font-size: 13px; vertical-align: middle; border-left: 1px solid #e5e7eb; color: #374151; text-align: left; }
+/* Vertical guides: handle 34px | number 56px | name | meta | actions.
+   The lesson number and the module number start at 56px, the lesson name and the module
+   name — at 102px, the lesson ✕ and the module ✕ — in one column on the right.
+ */
+#cs-mtable tbody td:first-child { border-left: none; }
+/* min/max-width are mandatory: in table-layout:auto, width alone is only a hint, and
+   the browser shrank the column to its content (as already done in the order items table).
+ */
+/* Vertical guides — identical columns in the module row and the lesson row:
+   handle 34 | arrow 36 | number 56 | name | meta | action | ✕ 59
+ */
+#cs-mtable td.cs-c-drag { width: 34px !important; min-width: 34px !important; max-width: 34px !important; padding: 0 !important; text-align: center; cursor: grab; }
+#cs-mtable td.cs-c-drag:active { cursor: grabbing; }
+#cs-mtable td.cs-c-tog { width: 36px !important; min-width: 36px !important; max-width: 36px !important; padding: 0 !important; text-align: center; }
+#cs-mtable .cs-c-num { width: 56px !important; min-width: 56px !important; max-width: 56px !important; padding: 6px 0 6px 8px !important; color: #9ca3af; white-space: nowrap; }
+#cs-mtable .cs-c-name { width: 100%; padding-left: 12px !important; }
+/* "Display" — left-aligned, 16×16 checkbox with accent-color, as in the category list. */
+#cs-mtable td.cs-c-show, #cs-mtable th.cs-c-show { width: 74px !important; min-width: 74px !important; text-align: left; }
+#cs-mtable td.cs-c-show input[type=checkbox] {
+    width: 16px !important; height: 16px !important; margin: 0 !important;
+    vertical-align: middle !important; cursor: pointer !important; accent-color: #374151 !important;
+}
+/* Name + buttons in one cell: separate columns for ✎ and + were redundant. */
+#cs-mtable .cs-c-name > .cs-name-flex { display: flex; align-items: center; gap: 6px; }
+/* The name does not stretch across the whole cell — otherwise the counter (N) drifted away to
+   the buttons; it must sit right after the text. The buttons on the right are pushed by
+   margin-left:auto.
+ */
+.cs-name-flex > .cs-lname, .cs-name-flex > .cs-mname { flex: 0 1 auto; min-width: 0; }
+/* The buttons have no columns of their own — they live in the name cell, on the right. */
+.cs-row-acts { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+/* Nesting is shown by indenting the name: 22px per level (1 → 1.1 → 1.1.1). */
+#cs-mtable .cs-c-name { transition: padding-left .12s; }
+/* The ✕ cell is square: 58×58 with a 58px row height. */
+#cs-mtable td.inv-skip-cell { position: relative; width: 58px !important; min-width: 58px !important; max-width: 58px !important; padding: 0 !important; }
+/* Module row */
+#cs-mtable tbody tr.cs-grp, #cs-mtable tbody tr.cs-grp:hover { height: 58px !important; background: #f3f4f6 !important; }
+/* Vertical lines run all the way through: the module band is the same part of the table
+   as a lesson row, so we do not cancel the columns' border-left.
+ */
+#cs-mtable tbody tr.cs-grp > td { height: 58px !important; border-top: 1px solid #e5e7eb; }
+/* The top border of the first row is needed: the table has no thead, and without it the block
+   started without a line — the outline was open at the top.
+ */
+/* The arrow is the same as in the category tree (.cat-toggle): without rotate — "›",
+   .open → rotate(90deg) → "⌄".
+ */
+.cs-toggle {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 100%;
+    background: none; border: none; cursor: pointer; padding: 0;
+    color: #9ca3af; user-select: none; transition: color 0.12s;
+}
+.cs-toggle:hover { color: #1f2937; }
+.cs-toggle svg { display: block; width: 18px; height: 18px; transition: transform 0.15s ease; transform-origin: center center; }
+.cs-toggle.open svg { transform: rotate(90deg); }
+/* A module row is heavier than a lesson row: number and name are 700/600 versus 400.
+   The style is on the CELL, not on the span: renumber() writes via textContent and wipes the span
+   itself.
+ */
+#cs-mtable tr.cs-grp .cs-c-num { font-weight: 600; color: #1f2937; line-height: 16px; }
+#cs-mtable tr.cs-lrow .cs-c-num { font-weight: 400; color: #9ca3af; }
+.cs-idx { font-size: 13px; }
+/* Renaming happens only in the modal (pencil); in the row the name is just text; next to it is the
+   lesson counter for the subtree — the same object as .cat-children-count
+   in categories.
+ */
+.cs-mname { font-size: 13px; font-weight: 600; color: #1f2937; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-mname.is-empty { color: #b6bcc4; font-weight: 400; }
+.cs-count { color: #9ca3af; font-size: 12px; font-weight: 400; user-select: none; white-space: nowrap; }
+.cs-name-flex > .cs-row-acts { margin-left: auto; }
+/* Lesson name */
+.cs-lname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #374151; }
+.cs-lname.is-empty { color: #b6bcc4; }
+.cs-icon-btn { width: 26px; height: 26px; padding: 0; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; color: #6b7280; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.cs-icon-btn:hover { background: #f3f4f6; border-color: #9ca3af; color: #1f2937; }
+.cs-icon-btn.is-flat { border: none; background: transparent; }
+.cs-icon-btn.is-flat:hover { background: rgba(17,24,39,.06); }
+/* The handle is the same as in the category list: the ⠿ character, hover catches the whole cell. */
+.cs-drag {
+    cursor: grab; font-size: 18px; color: #9ca3af; user-select: none;
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 100%; line-height: 1; transition: color 0.12s;
+}
+#cs-mtable td.cs-c-drag:hover .cs-drag { color: #1f2937; }
+.cs-dragging { opacity: 0.4; }
+#cs-drop-line { position: fixed; height: 2px; background: #2563eb; z-index: 99999; pointer-events: none; display: none; }
+
+/* ── Lesson edit modal ── */
+/* The modal shell is the shared CRM standard (_export_modal.css.html is included
+   below): .em-modal / .em-box / .em-head / .em-body / .em-foot / .em-btn.
+   Only the content is here: the modal body with 18px padding and fields.
+ */
+.em-box .cs-form { padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+/* Lesson fields are a separate block: for a node with children (a section) it is hidden entirely. */
+.em-box .cs-lesson-part { display: flex; flex-direction: column; gap: 16px; }
+.cs-fld { display: flex; align-items: center; gap: 10px; }
+/* Divider caption in the new-module modal ("First lesson"). */
+.cs-sep { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+          color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 14px; margin-top: 2px; }
+.em-box input[type=text].cs-inp {
+    flex: 1; min-width: 0;
+    height: 32px; padding: 0 10px; margin: 0 !important; border: 1px solid #d1d5db !important;
+    border-radius: 4px; background: #fff !important; font-size: 13px; color: #374151;
+    box-sizing: border-box; width: auto !important; max-width: none !important;
+}
+.em-box input[type=text].cs-inp:focus { border-color: #9ca3af !important; outline: none; }
+.cs-lset { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.cs-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #374151; cursor: pointer; }
+/* Type and duration are computed from the content — we show them rather than ask. */
+.cs-check input { margin: 0; }
+.cs-media { display: flex; gap: 14px; flex-wrap: wrap; }
+.cs-fc { display: flex; flex-direction: column; }
+.cs-fc-box { position: relative; width: 220px; height: 124px; border: 1px dashed #d1d5db; border-radius: 6px; background: #f9fafb; display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; box-sizing: border-box; }
+.cs-fc-box:hover { border-color: #9ca3af; }
+.cs-fc-box.has-file { border-style: solid; cursor: default; background: #fff; }
+.cs-fc-box.is-cleared { opacity: .45; }
+.cs-fc-box input[type=file] { display: none; }
+.cs-fc-ph { font-size: 12px; color: #9ca3af; }
+.cs-fc-box img, .cs-fc-box video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cs-fc-acts { position: absolute; top: 6px; right: 6px; display: none; gap: 4px; }
+.cs-fc-box:hover .cs-fc-acts { display: flex; }
+.cs-fc-btn { width: 22px; height: 22px; padding: 0; border: none; border-radius: 4px; background: rgba(17,24,39,.7); color: #fff; font-size: 12px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.cs-fc-btn:hover { background: rgba(17,24,39,.95); }
+.cs-fc-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 36px; height: 36px; border-radius: 50%; background: rgba(17,24,39,.55); pointer-events: none; }
+.cs-fc-play::after { content: ''; position: absolute; left: 14px; top: 11px; border-style: solid; border-width: 7px 0 7px 11px; border-color: transparent transparent transparent #fff; }
+.em-box .quill-wrapper { min-height: 0; margin: 0; }
+.em-box .ql-editor { min-height: 140px; }
+/* ── Bundle composition (expandable) — 1:1 with the order items table ── */
+#oi-table tbody tr.oi-child td, #oi-table tbody tr.oi-child th { border-bottom: none !important; }
+/* Gray vertical stripe along the components. */
+#oi-table tbody tr.oi-child > td:first-child,
+#oi-table tbody tr.oi-child > th:first-child { box-shadow: inset 3px 0 0 #9ca3af; }
+/* Nesting is indicated only by the gray stripe on the left: an indent on the photo pushed the 44px
+   thumbnail past the column edge (59px, padding:0), and on the name it ate the alignment
+   with the parent row.
+ */
+.oi-bundle-toggle { width: 27px; height: 27px; padding: 0; font-size: 10px; color: #6b7280; background: #fff; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; box-sizing: border-box; }
+.oi-bundle-toggle:hover { color: #374151; background: #f3f4f6; border-color: #9ca3af; }
+.oi-bundle-toggle:hover span { border-color: #374151 !important; }
+.col-oi-name-inner { display: flex; align-items: center; gap: 6px; }
+.col-oi-name-inner .oi-name-text { flex: 1; min-width: 0; }
+#oi-table .oi-name-text {
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden;
+}
+/* Dropdown row — classes and values from the order form (.vpick-*) */
+.vpick-item { display: flex; align-items: center; gap: 10px; padding: 8px 14px; cursor: pointer; border-bottom: 1px solid #f3f4f6; }
+.vpick-item:hover, .vpick-item.is-active { background: #f9fafb; }
+.vpick-item.is-disabled { opacity: .45; cursor: default; }
+.vpick-item-col { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.vpick-item-name { font-size: 13px; font-weight: 600; line-height: 1; color: #1f2937; }
+.vpick-item-row { font-size: 11px; line-height: 1; color: #6b7280; }
+.vpick-empty { padding: 10px 14px; text-align: center; color: #9ca3af; font-size: 13px; }
+
+/* ── Photo block — the same object as in products/brands ── */
+.info-section {
+    padding: 14px; width: 100%; box-sizing: border-box;
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+}
+.info-section.vg-section { cursor: pointer; }
+/* Active target for pasting from the clipboard — as in products, ONLY the border color differs.
+   There is no badge: in products it hangs on the section's <h3>, and #photos-module has no
+   heading, so it would not be visible on screen.
+ */
+.paste-target-active { border-color: #9ca3af !important; }
+.pg-items { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 0; }
+.pg-items:not(:empty) + .pg-add-area,
+.vg-items:not(:empty) + .pg-add-area { margin-top: 6px; }
+.vg-items { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 0; }
+.vg-items:empty { display: none; }
+.pg-add-area { margin-top: 0; }
+.vg-items:not(:empty) + .pg-add-area { margin-top: 8px; }
+.pg-item {
+    position: relative; border-radius: 6px; overflow: hidden;
+    /* min-width for the two action buttons (4+22+3+22+4): a vertical video came out
+       narrower than them, and ✎/✕ did not fit. We center the frame in the card.
+     */
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 60px; background: #000;
+    flex-shrink: 0; line-height: 0;
+    border: 1px solid #d1d5db;
+}
+.pg-item img,
+.pg-item video { max-height: 80px; max-width: 200px; width: auto; height: auto; display: block; cursor: zoom-in; transition: filter .15s; background: #000; }
+/* A video can be vertical — at 80px height the frame is narrower than the pair of ✎/✕ buttons.
+   We give it more height so the buttons do not cover the whole frame.
+ */
+.pg-item video { max-height: 120px; }
+.pg-item:hover img,
+.pg-item:hover video { filter: brightness(0.82); }
+/* A "play" triangle over the frame — so the card reads as a video, not a photo */
+.pg-item .pg-play {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    width: 30px; height: 30px; border-radius: 50%;
+    background: rgba(0,0,0,0.55); pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+}
+.pg-item .pg-play::after {
+    content: ''; border-left: 9px solid #fff;
+    border-top: 6px solid transparent; border-bottom: 6px solid transparent;
+    margin-left: 3px;
+}
+.pg-lightbox video { max-width: 90vw; max-height: 90vh; border-radius: 6px; background: #000; display: block; }
+.pg-actions {
+    position: absolute; top: 4px; right: 4px;
+    display: flex; gap: 3px;
+    opacity: 0; transition: opacity 0.15s;
+}
+.pg-item:hover .pg-actions { opacity: 1; }
+.pg-act-btn {
+    width: 22px; height: 22px;
+    background: rgba(0,0,0,0.6); color: #fff;
+    border: none; border-radius: 3px; cursor: pointer; font-size: 12px;
+    display: flex; align-items: center; justify-content: center; line-height: 1;
+    padding: 0;
+}
+.pg-act-btn:hover { background: rgba(0,0,0,0.88); }
+.pg-del-btn:hover { background: rgba(185,28,28,0.9); }
+.pg-replace-label input { display: none; }
+/* Marked for deletion: it really disappears only on "Save" (as in products). */
+.pg-item.pg-pending-del img { opacity: 0.3; filter: grayscale(1); }
+.pg-item.pg-pending-del { outline: 2px solid #dc2626; outline-offset: -2px; }
+.pg-item.pg-pending-del .pg-del-btn { background: #dc2626; }
+.pg-item.pg-pending-del .pg-actions { opacity: 1; }
+.pg-item.pg-pending-del::after {
+    content: 'will be deleted'; position: absolute; left: 0; right: 0; bottom: 0;
+    background: rgba(220,38,38,0.9); color: #fff; font-size: 9px; line-height: 1.4;
+    text-align: center; padding: 2px 0; pointer-events: none;
+}
+.pg-add-btn {
+    display: inline-flex !important; align-items: center !important;
+    font: inherit !important; font-size: 13px !important;
+    padding: 4px 12px !important; margin: 0 !important;
+    color: #6b7280 !important; background: #fff !important;
+    border: 1px dashed #d1d5db !important; border-radius: 4px !important;
+    cursor: pointer !important; box-shadow: none !important;
+    text-decoration: none !important; line-height: normal !important;
+    width: auto !important; min-width: 0 !important;
+}
+.pg-add-btn:hover { background: #f3f4f6 !important; border-color: #9ca3af !important; color: #374151 !important; }
+.pg-add-btn input[type="file"] { display: none !important; }
+.pg-hint { font-size: 11px; color: #9ca3af; margin-left: 10px; }
+
+/* "Add another Module" in the inline — the same dashed control */
+#content-main .inline-group .add-row a {
+    display: inline-flex !important; align-items: center !important;
+    font: inherit !important; font-size: 13px !important; line-height: normal !important;
+    padding: 4px 12px !important; margin: 0 !important;
+    color: #6b7280 !important; background: #fff !important;
+    border: 1px dashed #d1d5db !important; border-radius: 4px !important;
+    text-decoration: none !important;
+}
+#content-main .inline-group .add-row a:hover { background: #f3f4f6 !important; border-color: #9ca3af !important; color: #374151 !important; }
+
+/* Errors — as in products: only a red border, no banners or text */
+p.errornote { display: none !important; }
+#content-main .aligned .form-row.errors > ul.errorlist { display: none !important; }
+
+/* ── 6. Quill ("Description" field) ──
+   The widget hides the label itself and adds a collapsed header. One editor → NO
+   _quill_tabs (PGQuillTabs is designed for ≥2 editors).
+ */
+#content-main .aligned .form-row.field-description .flex-container { display: block !important; }
+#content-main .aligned .form-row.field-description .quill-wrapper { margin-bottom: 0 !important; }
+
+/* ── 7. File fields ── */
+#content-main .aligned .form-row p.file-upload {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: 0 !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;             /* Django widgets.css sets bold */
+    color: #6b7280 !important;
+}
+#content-main .aligned .form-row p.file-upload a { color: #374151 !important; }
+#content-main .aligned .form-row .clearable-file-input { display: inline-flex; align-items: center; gap: 4px; }
+#content-main .aligned .form-row .clearable-file-input label {
+    width: auto !important; min-width: 0 !important; padding: 0 !important; font-size: 12px !important;
+}
+
+/* ── 8. m2m picker — the same control as in products (.picker-trigger) ── */
+.picker-trigger {
+    display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px;
+    height: 32px; min-width: 180px; max-width: 480px;
+    padding: 4px 10px; background: #fff;
+    border: 1px solid #d1d5db; border-radius: 4px;
+    cursor: pointer; font-size: 13px; color: #374151;
+    text-align: left; font: inherit; overflow: hidden;
+}
+.picker-trigger:hover { border-color: #9ca3af; }
+.related-widget-wrapper { margin-bottom: 0 !important; }
+.picker-ph { color: #9ca3af; }
+.picker-tag {
+    display: inline-block; padding: 1px 7px;
+    background: #f3f4f6; border: 1px solid #e5e7eb;
+    border-radius: 3px; font-size: 12px; color: #374151;
+    white-space: nowrap;
+}
+.picker-popup {
+    position: fixed; z-index: 99999;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.10);
+    overflow: hidden;
+}
+.picker-search {
+    width: 100%; box-sizing: border-box; height: 30px; padding: 0 10px;
+    border: none; border-bottom: 1px solid #e5e7eb; font-size: 13px; outline: none;
+}
+.picker-popup-inner {
+    max-height: 300px; overflow-y: auto;
+    padding: 0;
+    white-space: nowrap;
+}
+.picker-item {
+    padding: 5px 14px; font-size: 13px; color: #374151;
+    display: flex; align-items: center;
+}
+.picker-item label { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: color .12s; }
+.picker-item label:hover { color: #111827; }
+.picker-item input[type=checkbox] {
+    appearance: none; -webkit-appearance: none;
+    width: 14px; height: 14px; flex-shrink: 0;
+    border: 1.5px solid #d1d5db; background: #fff; cursor: pointer; position: relative;
+    border-radius: 3px;
+    transition: background .12s, border-color .12s;
+}
+.picker-item input[type=checkbox]:hover { border-color: #9ca3af; }
+.picker-item input[type=checkbox]:checked { background: #1f2937; border-color: #1f2937; }
+.picker-item input[type=checkbox]:checked::after {
+    content: ''; position: absolute;
+    left: 3px; top: 0px; width: 4px; height: 8px;
+    border: 1.5px solid #fff; border-top: none; border-left: none;
+    transform: rotate(45deg);
+}
+
+/* ── 9. Inline tables ──
+   Header/cells/"Add another" — NO local overrides: the global base_site
+   standard applies. Here only what the standard does not cover.
+ */
+#content-main .inline-group {
+    /* 14px at the bottom — the measured value in products (#variants-group) */
+    margin: 0 0 14px !important; background: transparent !important;
+    border: none !important; border-radius: 0 !important; overflow: visible !important;
+}
+/* One hairline color on the page: Django sets #f3f4f6 on inline rows */
+#content-main .inline-group .tabular tbody tr { border-bottom-color: #e5e7eb !important; }
+#content-main .inline-group .tabular table {
+    width: 100% !important;
+    table-layout: auto !important;   /* fixed + an auto column did not fill the row */
+    border-collapse: collapse !important;
+    background: #fff !important;
+    margin: 0 !important;
+}
+/* Django draws 16px by default in td — the table had two different fonts */
+#content-main .inline-group .tabular tbody td,
+#content-main .inline-group .tabular tbody td p {
+    font-size: 13px !important;
+    font-family: inherit !important;
+    margin: 0 !important;
+}
+/* Align the table edges with the form's 20px fields (the first column .original is hidden) */
+#content-main .inline-group .tabular thead th:nth-child(2),
+#content-main .inline-group .tabular tbody td:nth-child(2) { padding-left: 20px !important; }
+#content-main .inline-group .tabular thead th:last-child,
+#content-main .inline-group .tabular tbody td:last-child { padding-right: 20px !important; }
+#content-main .inline-group .tabular tbody td input[type=text],
+#content-main .inline-group .tabular tbody td input[type=number] {
+    height: 28px !important; padding: 0 8px !important; box-sizing: border-box !important;
+}
+/* Duplicate row heading */
+#content-main .tabular tbody tr.has_original td.original p { display: none !important; }
+#content-main .tabular tbody td.original,
+#content-main .tabular thead th.original { display: none !important; }
+#content-main .tabular td.delete { text-align: center !important; }
+#content-main .tabular .delete input[type=checkbox] { margin: 0 !important; }
+#content-main .inline-group .add-row { border-bottom: 1px solid #e5e7eb !important; }
+
+/* Columns: #modules-group = original|sort_order|title|edit_link|DELETE,
+   #purchases-group = original|user|date|order (can_delete=False).
+ */
+#modules-group .tabular table tr > th:nth-child(2),
+#modules-group .tabular table tr > td:nth-child(2) { width: 90px !important; text-align: center !important; }
+#modules-group .tabular table tr > td:nth-child(2) input { width: 60px !important; text-align: center !important; }
+#modules-group .tabular table tr > td:nth-child(3) input { width: 100% !important; box-sizing: border-box !important; }
+#modules-group .tabular table tr > th:nth-child(4),
+#modules-group .tabular table tr > td:nth-child(4) { width: 160px !important; text-align: center !important; white-space: nowrap !important; }
+#modules-group .tabular table tr > th:nth-child(5),
+#modules-group .tabular table tr > td:nth-child(5) { width: 80px !important; text-align: center !important; }
+#purchases-group .tabular table tr > th:nth-child(3),
+#purchases-group .tabular table tr > td:nth-child(3) { width: 180px !important; white-space: nowrap !important; }
+#purchases-group .tabular table tr > th:nth-child(4),
+#purchases-group .tabular table tr > td:nth-child(4) { width: 220px !important; }
+
+/* ── 10. Responsive ──
+   The global base_site block targets .aligned .form-row > label:first-child —
+   Django 6 does not emit such markup, so we do the stacking ourselves.
+ */
+@media (max-width: 768px) {
+    #content-main .aligned .form-row { flex-direction: column !important; align-items: stretch !important; padding: 10px 12px !important; }
+    #content-main .aligned .form-row > div,
+    #content-main .aligned .flex-container { flex-direction: column !important; align-items: stretch !important; }
+    #content-main .aligned .flex-container > label,
+    #content-main .aligned .form-row > fieldset > legend {
+        width: 100% !important; min-width: 0 !important; float: none !important;
+        padding: 0 0 4px 0 !important; font-size: 12px !important; color: #6b7280 !important;
+    }
+    #content-main .aligned .form-row > div > .help { margin-left: 0 !important; }
+    #content-main .aligned .flex-container.checkbox-row { flex-direction: row !important; align-items: center !important; }
+    #content-main .aligned .flex-container > label.vCheckboxLabel { width: auto !important; padding: 0 !important; }
+    #content-main #id_price { width: 100% !important; }
+    #content-main .inline-group .tabular .wrapper { overflow-x: auto !important; }
+}
+/* The modal shell is the shared CRM standard (the same file as in the
+   order export), so the course modals are 1:1 identical to the rest of the admin.
+ */
+{% include "admin/_export_modal.css.html" %}
+</style>
+{% include "admin/_form_guard.html" %}
+{% endblock %}
+
+{% block content %}
+{{ block.super }}
+<script>
+(function() {
+    'use strict';
+    /* Course id — needed by the video preview (staff endpoint /admin/courses/video/). */
+    window._csCourseId = {% if original %}{{ original.pk }}{% else %}null{% endif %};
+    /* Dirty state, "Cancel", beforeunload and highlighting of empty required
+       fields — all in admin/_form_guard.html (included in extrahead). We do NOT duplicate it
+       here: overriding window.pgMarkDirty leaves .cl-btn-idle on "Save".
+     */
+
+    document.addEventListener('DOMContentLoaded', function() {
+        /* Related-widget buttons ("+", pencil, eye) next to m2m — removed, as in the product
+           form: adding a product/category from the course form is not needed, and the popup
+           breaks the form state.
+         */
+        document.querySelectorAll('.related-widget-wrapper-link').forEach(function(a) { a.remove(); });
+
+
+        /* ── Photo block for file fields ──
+           The same object as in products/brands: a .pg-item card with ✎/✕ on hover
+           + a dashed "+ Add photo". No backend endpoints needed: we move the
+           real Django input inside the button, and ✕ turns on the standard "-clear" checkbox.
+           Everything goes as a normal POST together with the form.
+         */
+        function openLightbox(src, isImage) {
+            var lb = document.querySelector('.pg-lightbox');
+            if (!lb) {
+                lb = document.createElement('div'); lb.className = 'pg-lightbox'; lb.style.display = 'none';
+                lb.addEventListener('click', function () {
+                    var v = lb.querySelector('video'); if (v) v.pause();
+                    lb.style.display = 'none'; lb.innerHTML = ''; lockScroll(false);
+                });
+                document.body.appendChild(lb);
+            }
+            lb.innerHTML = '';
+            var el;
+            if (isImage) { el = document.createElement('img'); el.src = src; }
+            else {
+                el = document.createElement('video');
+                el.src = src; el.controls = true; el.autoplay = true; el.playsInline = true;
+                el.addEventListener('click', function (e) { e.stopPropagation(); });  /* a click on the player does not close it */
+            }
+            lb.appendChild(el);
+            lb.style.display = 'flex';
+            lockScroll(true);
+        }
+        /* Background scroll lock — the same pattern as in the product color editor: we remember
+           the position and the previous overflow, and restore them on close.
+           padding-right compensates for the vanished scrollbar so the content does not jump.
+         */
+        function lockScroll(on) {
+            var d = document.body.dataset;
+            if (on) {
+                if (d.csScrollY !== undefined) return;
+                d.csScrollY = String(window.scrollY || window.pageYOffset || 0);
+                d.csPrevOverflow = document.body.style.overflow || '';
+                d.csPrevPadRight = document.body.style.paddingRight || '';
+                var sb = window.innerWidth - document.documentElement.clientWidth;
+                if (sb > 0) document.body.style.paddingRight = sb + 'px';
+                document.body.style.overflow = 'hidden';
+            } else {
+                if (d.csScrollY === undefined) return;
+                var y = parseInt(d.csScrollY) || 0;
+                document.body.style.overflow = d.csPrevOverflow || '';
+                document.body.style.paddingRight = d.csPrevPadRight || '';
+                delete d.csScrollY; delete d.csPrevOverflow; delete d.csPrevPadRight;
+                window.scrollTo(0, y);
+            }
+        }
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Escape') return;
+            var lb = document.querySelector('.pg-lightbox');
+            if (!lb || lb.style.display === 'none') return;
+            var v = lb.querySelector('video'); if (v) v.pause();
+            lb.style.display = 'none'; lb.innerHTML = ''; lockScroll(false);
+        });
+
+        function buildFileBlock(fieldName, addText, isImage) {
+            var input = document.getElementById('id_' + fieldName);
+            if (!input) return;
+            var row = input.closest('.form-row');
+            var host = input.closest('.flex-container') || (row && row.querySelector('fieldset > div')) || (input.parentNode);
+            if (!row || !host) return;
+
+            var link = row.querySelector('p.file-upload a');
+            var currentUrl = link ? link.getAttribute('href') : '';
+            /* nginx serves 404 for videos from /media/courses/lessons/ (paywall) —
+               for the preview we use the staff-only endpoint.
+             */
+            if (currentUrl && !isImage && window._csCourseId) {
+                currentUrl = '/admin/courses/video/?kind=full&id=' + window._csCourseId;
+            }
+            var currentName = link ? (link.textContent || '').split('/').pop() : '';
+            var origName = currentName;   /* immutable copy — for "Cancel" */
+            var clearCb = row.querySelector('input[type=checkbox][name$="-clear"]');
+
+            /* Markup 1:1 with the product form's #photos-module:
+               .info-section.vg-section > .gallery > .vg-items.pg-items + .pg-add-area
+               > label.pg-add-btn > input[type=file] + span.
+               The differences are forced: ids carry the field suffix (up to three
+               such blocks on a page), and NO multiple — the model field holds exactly one photo,
+               whereas in products it is a gallery.
+             */
+            var block = document.createElement('div');
+            block.className = isImage ? 'info-section vg-section' : 'info-section';
+            block.id = 'photos-module-' + fieldName;
+            var gallery = document.createElement('div');
+            gallery.id = 'gallery-' + fieldName;
+            var items = document.createElement('div');
+            items.className = 'vg-items pg-items'; items.id = 'pg-items-' + fieldName;
+            var addArea = document.createElement('div'); addArea.className = 'pg-add-area';
+            var addLabel = document.createElement('label'); addLabel.className = 'pg-add-btn';
+            if (isImage) input.setAttribute('accept', 'image/*');
+            addLabel.appendChild(input);                       /* the real input — inside the button */
+            var addSpan = document.createElement('span');
+            addSpan.id = 'pg-add-label-' + fieldName;
+            addSpan.textContent = addText;
+            addLabel.appendChild(addSpan);
+            addArea.appendChild(addLabel);
+            /* .pg-hint is needed only for the video file (it shows the name) — the product photo
+               block
+               has no such node, so we do not add it here.
+             */
+            var hint = document.createElement('span'); hint.className = 'pg-hint';
+            if (!isImage) addArea.appendChild(hint);
+            gallery.appendChild(items); gallery.appendChild(addArea);
+            block.appendChild(gallery);
+            host.appendChild(block);
+
+            /* .vg-section in products is also a target for pasting from the clipboard (the pointer
+               cursor is for exactly that reason). Clicking an empty card 'arms' it, Ctrl+V
+               puts the image into the same input.
+             */
+            if (isImage) {
+                block.addEventListener('click', function (e) {
+                    /* As in products: no 'already has a photo' check — pasting
+                       simply replaces the current one (the same as ✎). Clicking the image
+                       itself still opens the lightbox.
+                     */
+                    if (e.target.closest('label,input,button,img,video')) return;
+                    var on = !block.classList.contains('paste-target-active');
+                    /* Only one active target per page — remove it from the rest */
+                    document.querySelectorAll('.paste-target-active').forEach(function (el) {
+                        el.classList.remove('paste-target-active');
+                    });
+                    if (!on) return;
+                    block.classList.add('paste-target-active');
+                });
+                document.addEventListener('paste', function (e) {
+                    if (!block.classList.contains('paste-target-active')) return;
+                    var list = (e.clipboardData || {}).items || [];
+                    for (var i = 0; i < list.length; i++) {
+                        if (list[i].type.indexOf('image/') !== 0) continue;
+                        var f = list[i].getAsFile(); if (!f) continue;
+                        var dt = new DataTransfer(); dt.items.add(f);
+                        input.files = dt.files;
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                        block.classList.remove('paste-target-active');
+                        e.preventDefault();
+                        return;
+                    }
+                });
+            }
+
+            function syncAdd() { addArea.style.display = items.querySelector('.pg-item') ? 'none' : ''; }
+
+            function renderItem(url, pending) {
+                items.innerHTML = '';
+                if (!url) { syncAdd(); return; }
+                var item = document.createElement('div');
+                item.className = 'pg-item' + (pending ? ' pg-pending-del' : '');
+                var img;
+                if (isImage) {
+                    img = document.createElement('img'); img.src = url; img.alt = '';
+                } else {
+                    /* A video frame as the thumbnail. #t=0.1 — otherwise Safari/Chrome
+                       leave a black rectangle until playback starts.
+                     */
+                    img = document.createElement('video');
+                    img.src = url + (url.indexOf('blob:') === 0 ? '' : '#t=0.1');
+                    img.preload = 'metadata'; img.muted = true; img.playsInline = true;
+                    hint.textContent = currentName || '';
+                }
+                var actions = document.createElement('div'); actions.className = 'pg-actions';
+                var rep = document.createElement('button');
+                rep.type = 'button'; rep.className = 'pg-act-btn'; rep.title = 'Replace'; rep.textContent = '✎';
+                rep.addEventListener('click', function (e) { e.preventDefault(); input.click(); });
+                var del = document.createElement('button');
+                del.type = 'button'; del.className = 'pg-act-btn pg-del-btn'; del.title = 'Delete'; del.textContent = '✕';
+                del.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    if (input.value) {                          /* a just-selected file — simply reset */
+                        input.value = ''; renderItem(currentUrl, false); window.pgMarkDirty && window.pgMarkDirty(); return;
+                    }
+                    if (!clearCb) return;
+                    clearCb.checked = !clearCb.checked;         /* a repeated click cancels the mark */
+                    item.classList.toggle('pg-pending-del', clearCb.checked);
+                    window.pgMarkDirty && window.pgMarkDirty();
+                });
+                actions.appendChild(rep); actions.appendChild(del);
+                item.appendChild(img);
+                if (!isImage) { var play = document.createElement('div'); play.className = 'pg-play'; item.appendChild(play); }
+                item.appendChild(actions);
+                img.addEventListener('click', function () { openLightbox(img.src, isImage); });
+                items.appendChild(item);
+                syncAdd();
+            }
+
+            input.addEventListener('change', function () {
+                var f = input.files && input.files[0];
+                if (!f) { renderItem(currentUrl, clearCb && clearCb.checked); return; }
+                if (clearCb) clearCb.checked = false;
+                currentName = f.name;
+                renderItem(URL.createObjectURL(f), false);
+                window.pgMarkDirty && window.pgMarkDirty();
+            });
+
+            renderItem(currentUrl, clearCb && clearCb.checked);
+            if (!isImage && currentName) hint.textContent = currentName;
+
+            /* "Cancel" does form.reset(): it clears the input itself and the "-clear"
+               checkbox, but the drawn card stays with the new file. So we restore
+               the block to the saved state by hand.
+             */
+            _csFileResets.push(function () {
+                input.value = '';
+                if (clearCb) clearCb.checked = false;
+                currentName = origName;
+                hint.textContent = isImage ? '' : (origName || '');
+                renderItem(currentUrl, false);
+            });
+        }
+        var _csFileResets = [];
+        /* Expand chevron — one per form: bundle composition, modules, lessons. */
+        function chevron(up) {
+            return '<span style="display:block;width:7px;height:7px;border-right:2px solid #6b7280;border-bottom:2px solid #6b7280;transform:rotate(' +
+                (up ? '-135deg' : '45deg') + ');margin-top:' + (up ? '4px' : '-4px') + ';"></span>';
+        }
+        /* ── Full-video chapters ──
+           The field holds JSON [{time, title}] — you can't read it by hand. We show
+           rows "min:sec + title" and write JSON back into the textarea. The data format itself
+           is unchanged: time stays in seconds.
+         */
+        (function buildChapters() {
+            var ta = document.getElementById('id_full_video_chapters');
+            if (!ta) return;
+            var host = ta.closest('.flex-container') || ta.parentNode;
+            /* Structure as in the product attributes widget:
+               .info-section > .ch-widget-root > .ch-list + button.pg-add-btn
+             */
+            var wrap = document.createElement('div');
+            wrap.className = 'info-section';
+            var root = document.createElement('div'); root.className = 'ch-widget-root';
+            var list = document.createElement('div'); list.className = 'ch-list';
+            var addBtn = document.createElement('button');
+            addBtn.type = 'button'; addBtn.className = 'pg-add-btn'; addBtn.textContent = '+ Add chapter';
+            /* The chapter list is long, so next to the button there is a collapse toggle (the same
+               look as the bundle composition expand: .oi-bundle-toggle).
+             */
+            var tools = document.createElement('div'); tools.className = 'ch-tools';
+            var toggle = document.createElement('button');
+            toggle.type = 'button'; toggle.className = 'oi-bundle-toggle ch-toggle';
+            /* The chapter list is long, so it is collapsed by default; there is no button at all
+               until a chapter is added.
+             */
+            var chOpen = false;
+            list.style.display = 'none';
+            toggle.innerHTML = chevron(false); toggle.title = 'Expand chapters';
+            toggle.addEventListener('click', function () {
+                chOpen = !chOpen;
+                list.style.display = chOpen ? '' : 'none';
+                toggle.innerHTML = chevron(chOpen);
+                toggle.title = chOpen ? 'Collapse chapters' : 'Expand chapters';
+            });
+            function syncToggle() {
+                toggle.style.display = list.querySelector('.ch-row') ? '' : 'none';
+            }
+            tools.appendChild(addBtn); tools.appendChild(toggle);
+            root.appendChild(list); root.appendChild(tools);
+            wrap.appendChild(root);
+            host.appendChild(wrap);
+
+            function fmt(sec) {
+                sec = Math.max(0, parseInt(sec, 10) || 0);
+                var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s2 = sec % 60;
+                var mm = (h ? String(m).padStart(2, '0') : String(m));
+                return (h ? h + ':' : '') + mm + ':' + String(s2).padStart(2, '0');
+            }
+            /* Separator — any non-digit character: 12-30, 12.30, "12 30", 12/30
+               all read the same as 12:30. Digits alone without a separator are seconds.
+             */
+            function parseTime(v) {
+                v = String(v || '').trim();
+                if (!v) return null;
+                if (/^\d+$/.test(v)) return parseInt(v, 10);
+                var parts = v.replace(/[^\d]+/g, ':').replace(/^:+|:+$/g, '').split(':');
+                if (!parts.length || parts.length > 3 || parts.some(function (x) { return x === ''; })) return null;
+                var nums = parts.map(function (x) { return parseInt(x, 10); });
+                if (nums.some(isNaN)) return null;
+                while (nums.length < 3) nums.unshift(0);          /* mm:ss → 0:mm:ss */
+                if (nums[1] > 59 || nums[2] > 59) return null;
+                return nums[0] * 3600 + nums[1] * 60 + nums[2];
+            }
+            function sync() {
+                var out = [];
+                list.querySelectorAll('.ch-row').forEach(function (row) {
+                    var t = parseTime(row.querySelector('.ch-time-inp').value);
+                    var title = row.querySelector('.ch-name-inp').value.trim();
+                    row.querySelector('.ch-time-inp').classList.toggle('is-bad', t === null);
+                    if (t === null || !title) return;
+                    out.push({ time: t, title: title });
+                });
+                ta.value = JSON.stringify(out);
+                window.pgMarkDirty && window.pgMarkDirty();
+            }
+            /* Chapters are kept sorted by time ascending; incomplete ones (without a valid
+               time) stay at the end in their own order.
+             */
+            function sortRows() {
+                var active = document.activeElement;
+                var rows = Array.prototype.slice.call(list.querySelectorAll('.ch-row'));
+                rows.map(function (r, i) {
+                    var t = parseTime(r.querySelector('.ch-time-inp').value);
+                    return { r: r, t: (t === null ? Infinity : t), i: i };
+                }).sort(function (a, b) {
+                    return (a.t - b.t) || (a.i - b.i);
+                }).forEach(function (k) { list.appendChild(k.r); });
+                /* Moving a node in the DOM drops focus — we restore it if it was here. */
+                if (active && list.contains(active) && document.activeElement !== active) active.focus();
+            }
+            function addRow(time, title, focus) {
+                var row = document.createElement('div'); row.className = 'ch-row';
+                var t = document.createElement('input');
+                t.type = 'text'; t.className = 'ch-time-inp'; t.placeholder = '0:00';
+                t.value = (time === '' || time == null) ? '' : fmt(time);
+                var n = document.createElement('input');
+                n.type = 'text'; n.className = 'ch-name-inp'; n.placeholder = 'Chapter name';
+                n.value = title || '';
+                var del = document.createElement('button');
+                del.type = 'button'; del.className = 'ch-btn-del'; del.title = 'Delete chapter'; del.textContent = '✕';
+                del.addEventListener('click', function () { row.remove(); sync(); syncToggle(); });
+                [t, n].forEach(function (el) {
+                    el.addEventListener('input', sync);
+                    el.addEventListener('keydown', function (e) {
+                        e.stopPropagation();
+                        /* Enter in a chapter field must NOT submit the course form (that would
+                           reload
+                           the page and eat unsaved edits) — we just leave the field.
+                         */
+                        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+                    });
+                });
+                /* Left the field — canonical look 12:30 and the row moves into its place
+                   chronologically. We reorder on blur, not while typing:
+                   otherwise the row would jump out from under the cursor.
+                 */
+                t.addEventListener('blur', function () {
+                    var sec = parseTime(t.value);
+                    if (sec === null) return;
+                    t.value = fmt(sec);
+                    sortRows();
+                    sync();
+                });
+                row.appendChild(t); row.appendChild(n); row.appendChild(del);
+                list.appendChild(row);
+                syncToggle();
+                if (focus) t.focus();
+            }
+            var data = [];
+            try { data = JSON.parse(ta.value || '[]') || []; } catch (e) { data = []; }
+            if (!Array.isArray(data)) data = [];
+            data.forEach(function (ch) { addRow(ch && ch.time, ch && ch.title, false); });
+            sortRows();
+            syncToggle();
+            addBtn.addEventListener('click', function () {
+                if (!chOpen) toggle.click(); addRow('', '', true); });
+            /* "Cancel" — redraw from the saved JSON */
+            _csFileResets.push(function () {
+                var saved = [];
+                try { saved = JSON.parse(ta.defaultValue || '[]') || []; } catch (e) { saved = []; }
+                list.innerHTML = '';
+                (Array.isArray(saved) ? saved : []).forEach(function (ch) { addRow(ch && ch.time, ch && ch.title, false); });
+                ta.value = ta.defaultValue;
+                syncToggle();
+            });
+        })();
+
+        buildFileBlock('cover_image', '+ Add photo', true);
+        buildFileBlock('full_video_file', '+ Add video', false);
+
+        /* ── Chapters live inside the video block ──
+           An empty course sees only "+ Add video"; as soon as a video appears,
+           "+ Add chapter" pops up under it. There is no separate section for
+           chapters.
+         */
+        (function mergeChaptersIntoVideo() {
+            var block = document.getElementById('photos-module-full_video_file');
+            var items = document.getElementById('pg-items-full_video_file');
+            var root = document.querySelector('.ch-widget-root');
+            if (!block || !items || !root) return;
+            var oldSection = root.closest('.info-section');
+            var chRow = root.closest('.form-row');
+            root.classList.add('ch-in-video');
+            block.appendChild(root);
+            if (oldSection && oldSection !== block) oldSection.remove();
+            /* We remove the field row from the DOM, but first move into the block the JSON
+               textarea itself and its initial twin — they are the POST channel.
+             */
+            if (chRow) {
+                var ta = document.getElementById('id_full_video_chapters');
+                var initial = document.getElementById('initial-id_full_video_chapters');
+                [ta, initial].forEach(function (n) {
+                    if (!n) return;
+                    n.style.display = 'none';
+                    root.appendChild(n);
+                });
+                chRow.remove();
+            }
+
+            function sync() { root.style.display = items.querySelector('.pg-item') ? '' : 'none'; }
+            new MutationObserver(sync).observe(items, { childList: true });
+            sync();
+        })();
+
+        /* ── m2m picker — a control as in products (.picker-trigger + .picker-popup).
+           Difference from products: the popup has search, because "Related
+           products" is
+           467 items (in products the picker is on brands/categories, where there are
+           dozens and search is not needed). The original <select multiple>
+           stays in the DOM, hidden — it is what goes into POST.
+         */
+        function buildPicker(fieldId, opts) {
+            var sel = document.getElementById(fieldId);
+            if (!sel || sel.tagName !== 'SELECT') return;
+            opts = opts || {};
+            sel.style.display = 'none';
+
+            var btn = document.createElement('button');
+            btn.type = 'button'; btn.className = 'picker-trigger';
+            var popup = document.createElement('div');
+            popup.className = 'picker-popup'; popup.style.display = 'none';
+            document.body.appendChild(popup);
+
+            var search = null;
+            if (opts.search) {
+                search = document.createElement('input');
+                search.type = 'text'; search.className = 'picker-search'; search.placeholder = 'Search...';
+                popup.appendChild(search);
+            }
+            var inner = document.createElement('div');
+            inner.className = 'picker-popup-inner';
+            popup.appendChild(inner);
+
+            var options = Array.from(sel.options).filter(function (o) { return o.value !== ''; });
+
+            function updateBtn() {
+                var chosen = options.filter(function (o) { return o.selected; });
+                if (!chosen.length) {
+                    btn.innerHTML = '<span class="picker-ph">' + (opts.placeholder || 'Not selected') + '</span>';
+                    return;
+                }
+                btn.innerHTML = '';
+                chosen.slice(0, 3).forEach(function (o) {
+                    var t = document.createElement('span'); t.className = 'picker-tag'; t.textContent = o.text;
+                    btn.appendChild(t);
+                });
+                if (chosen.length > 3) {
+                    var more = document.createElement('span'); more.className = 'picker-tag';
+                    more.textContent = '+' + (chosen.length - 3);
+                    btn.appendChild(more);
+                }
+            }
+
+            options.forEach(function (o) {
+                var row = document.createElement('div'); row.className = 'picker-item';
+                var lab = document.createElement('label');
+                var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = o.selected;
+                cb.addEventListener('change', function () {
+                    o.selected = cb.checked;
+                    updateBtn();
+                    sel.dispatchEvent(new Event('change', { bubbles: true }));  /* dirty state */
+                });
+                lab.appendChild(cb); lab.appendChild(document.createTextNode(o.text));
+                row.appendChild(lab); inner.appendChild(row);
+                row._text = (o.text || '').toLowerCase();
+            });
+
+            if (search) {
+                search.addEventListener('input', function () {
+                    var q = search.value.trim().toLowerCase();
+                    Array.from(inner.children).forEach(function (r) {
+                        r.style.display = (!q || r._text.indexOf(q) !== -1) ? '' : 'none';
+                    });
+                });
+            }
+
+            function openPop() {
+                var r = btn.getBoundingClientRect();
+                popup.style.width = (opts.popupWidth || Math.max(r.width, 260)) + 'px';
+                popup.style.display = 'block';
+                popup.style.left = (window.clX ? window.clX(r.left) : r.left) + 'px';
+                popup.style.top = (window.clFlipTop ? window.clFlipTop(r, popup.offsetHeight, 4) : (r.bottom + 4)) + 'px';
+                if (search) { search.value = ''; search.dispatchEvent(new Event('input')); search.focus(); }
+            }
+            function closePop() { popup.style.display = 'none'; }
+            btn.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                popup.style.display === 'none' ? openPop() : closePop();
+            });
+            document.addEventListener('mousedown', function (e) {
+                if (popup.contains(e.target) || btn.contains(e.target)) return;
+                closePop();
+            }, true);
+            document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePop(); });
+
+            sel.parentNode.insertBefore(btn, sel.nextSibling);
+            updateBtn();
+        }
+        /* ── "Products and bundles" table — markup and behavior as in order
+           items
+           (#oi-table + .oi-add-inp + .oi-drop).
+           SAFETY: rows do NOT create their own inputs. The source of truth is Django's
+           real <select multiple> (related_variants / related_bundles):
+           the table only toggles option.selected. If this JS crashes, the form
+           will submit the selects as is and the relations will NOT be wiped (cf. the memory note
+           project_attr_widget_fragility, where a hand-written widget silently cleared M2M).
+         */
+        (function buildRelatedTable() {
+            var selP = document.getElementById('id_related_variants');
+            var selB = document.getElementById('id_related_bundles');
+            if (!selP || !selB) return;
+            var rowB = selB.closest('.form-row');
+            var host = selP.closest('.flex-container') || selP.parentNode;
+            selP.style.display = 'none';
+            selB.style.display = 'none';
+
+            var wrap = document.createElement('div');
+            wrap.id = 'order-items-wrap';
+            var toolbar = document.createElement('div');
+            toolbar.className = 'oi-toolbar';
+            var inp = document.createElement('input');
+            inp.type = 'text';
+            inp.className = 'oi-add-inp';
+            inp.placeholder = 'Add course products…';
+            inp.autocomplete = 'off';
+            toolbar.appendChild(inp);
+            wrap.appendChild(toolbar);
+            host.appendChild(wrap);
+            /* We move the bundles <select> here and remove its empty row:
+               it is not needed in the DOM, but the select itself must stay in the form — it is
+               what sends the bundles in POST.
+             */
+            wrap.appendChild(selB);
+            if (rowB) rowB.remove();
+
+            var drop = document.createElement('div');
+            drop.className = 'oi-drop';
+            var dropInner = document.createElement('div');
+            dropInner.className = 'oi-drop-inner';
+            drop.appendChild(dropInner);
+            document.body.appendChild(drop);
+
+            var items = [];   /* [{type,id,name,sku,photo,is_active,admin_url,site_url}] */
+
+            function syncSelects() {
+                [selP, selB].forEach(function (sel) {
+                    var type = (sel === selB) ? 'bundle' : 'variant';
+                    var want = {};
+                    items.forEach(function (it) { if (it.type === type) want[String(it.id)] = 1; });
+                    /* The select returns only the selected options (SelectedOnlySelectMultiple),
+                       so for a new item we create the option ourselves — dynamically added
+                       and selected, it goes in POST the same way.
+                     */
+                    Object.keys(want).forEach(function (id) {
+                        var exists = Array.prototype.some.call(sel.options, function (o) { return o.value === id; });
+                        if (exists) return;
+                        var o = document.createElement('option');
+                        o.value = id;
+                        var it = items.filter(function (x) { return x.type === type && String(x.id) === id; })[0];
+                        o.textContent = it ? it.name : id;
+                        sel.appendChild(o);
+                    });
+                    Array.prototype.forEach.call(sel.options, function (o) { o.selected = !!want[o.value]; });
+                });
+                window.pgMarkDirty && window.pgMarkDirty();
+            }
+            function has(type, id) {
+                return items.some(function (it) { return it.type === type && String(it.id) === String(id); });
+            }
+            function render() {
+                /* As in the order (oiRender): with an empty list the table does NOT exist —
+                   only the panel with the search field remains.
+                 */
+                var old = wrap.querySelector('#oi-table');
+                if (old) old.remove();
+                if (!items.length) return;
+                var table = document.createElement('table');
+                table.id = 'oi-table';
+                var thead = document.createElement('thead');
+                var htr = document.createElement('tr');
+                [['', 'inv-skip-cell'], ['Photo', 'col-oi-photo'], ['Name', 'col-oi-name'],
+                 ['SKU', 'col-oi-sku'], ['Stock', 'col-oi-stock'],
+                 ['Price', 'col-oi-price']].forEach(function (h) {
+                    var th = document.createElement('th');
+                    if (h[1]) th.className = h[1];
+                    th.textContent = h[0];
+                    htr.appendChild(th);
+                });
+                thead.appendChild(htr);
+                table.appendChild(thead);
+
+                var tb = document.createElement('tbody');
+                items.forEach(function (it, i) {
+                    var tr = document.createElement('tr');
+                    tr.className = (i % 2 === 0) ? 'row1' : 'row2';
+
+                    var del = document.createElement('td');
+                    del.className = 'inv-skip-cell';
+                    var delBtn = document.createElement('button');
+                    delBtn.type = 'button';
+                    delBtn.className = 'inv-skip-btn';
+                    delBtn.title = 'Remove';
+                    delBtn.textContent = '✕';
+                    delBtn.addEventListener('click', function () {
+                        var idx = items.indexOf(it);
+                        if (idx !== -1) items.splice(idx, 1);
+                        syncSelects();
+                        render();
+                    });
+                    del.appendChild(delBtn);
+
+                    var ph = document.createElement('td');
+                    ph.className = 'col-oi-photo';
+                    if (it.photo) {
+                        var pw = document.createElement('span');
+                        pw.className = 'oi-pv-wrap';
+                        var im = document.createElement('img');
+                        im.className = 'oi-pv-thumb';
+                        im.src = it.photo;
+                        im.alt = '';
+                        var pv = document.createElement('span');
+                        pv.className = 'oi-pv-preview';
+                        var pvi = document.createElement('img');
+                        pvi.src = it.photo;
+                        pvi.alt = '';
+                        pv.appendChild(pvi);
+                        pw.appendChild(im);
+                        pw.appendChild(pv);
+                        ph.appendChild(pw);
+                    } else {
+                        ph.textContent = '—';
+                        ph.style.color = '#9ca3af';
+                    }
+
+                    /* Name — <th>, as in the order: .oi-name-flex > .oi-name-clamp + buttons */
+                    var nm = document.createElement('th');
+                    nm.className = 'col-oi-name';
+                    var flex = document.createElement('div');
+                    flex.className = 'oi-name-flex';
+                    var clamp = document.createElement('span');
+                    clamp.className = 'oi-name-clamp';
+                    /* "Own packaging" — the same label as in order items */
+                    if (it.packaging_kind === 'own') clamp.appendChild(ownBadge());
+                    var a = document.createElement('a');
+                    a.href = it.admin_url;
+                    a.target = '_blank';
+                    a.rel = 'noopener';
+                    a.style.cssText = 'color:#374151;text-decoration:none';
+                    a.textContent = it.name;
+                    clamp.appendChild(a);
+                    /* A bundle with composition — the name in a flex row with the expand button
+                       (as in the order: .col-oi-name-inner > .oi-name-text + .oi-bundle-toggle).
+                     */
+                    var comps = (it.type === 'bundle' && it.items && it.items.length) ? it.items : null;
+                    var toggleBtn = null;
+                    if (comps) {
+                        var nameInner = document.createElement('div');
+                        nameInner.className = 'col-oi-name-inner';
+                        var nameText = document.createElement('span');
+                        nameText.className = 'oi-name-text';
+                        nameText.appendChild(a);
+                        nameInner.appendChild(nameText);
+                        toggleBtn = document.createElement('button');
+                        toggleBtn.type = 'button';
+                        toggleBtn.className = 'oi-bundle-toggle';
+                        var exp0 = !!it._expanded;   /* composition collapsed by default */
+                        toggleBtn.dataset.expanded = exp0 ? '1' : '0';
+                        toggleBtn.innerHTML = chevron(exp0);
+                        toggleBtn.title = exp0 ? 'Collapse composition' : 'Expand composition';
+                        nameInner.appendChild(toggleBtn);
+                        flex.appendChild(nameInner);
+                    } else {
+                        flex.appendChild(clamp);
+                    }
+                    if (it.site_url) {
+                        var site = document.createElement('a');
+                        site.className = 'oi-site-btn';
+                        site.href = it.site_url;
+                        site.target = '_blank';
+                        site.rel = 'noopener';
+                        site.title = 'Open on site';
+                        site.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>';
+                        flex.appendChild(site);
+                    }
+                    /* Pencil 'replace': we remove the row and put the cursor into search
+                       (there is no separate editor here — replace = remove + add).
+                     */
+                    var rep = document.createElement('button');
+                    rep.type = 'button';
+                    rep.className = 'em-item-edit-btn';
+                    rep.title = 'Replace';
+                    rep.innerHTML = '<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M9.5 2L12 4.5L4.5 12L1.5 12.5L2 9.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg>';
+                    rep.addEventListener('click', function () {
+                        var idx = items.indexOf(it);
+                        if (idx !== -1) items.splice(idx, 1);
+                        syncSelects();
+                        render();
+                        inp.focus();
+                    });
+                    flex.appendChild(rep);
+                    nm.appendChild(flex);
+
+                    var sku = document.createElement('td');
+                    sku.className = 'col-oi-sku';
+                    var skuSpan = document.createElement('span');
+                    skuSpan.style.cssText = 'color:#9ca3af;font-size:12px';
+                    skuSpan.textContent = it.sku || '—';
+                    sku.appendChild(skuSpan);
+
+                    var st = document.createElement('td');
+                    st.className = 'col-oi-stock';
+                    st.appendChild(stockCell(it));
+
+                    var pr = document.createElement('td');
+                    pr.className = 'col-oi-price';
+                    var prSpan = document.createElement('span');
+                    prSpan.style.cssText = 'font-size:13px;color:#374151;';
+                    prSpan.textContent = (it.price != null) ? String(Math.round(it.price * 100) / 100) : '—';
+                    if (it.price == null) prSpan.style.color = '#9ca3af';
+                    pr.appendChild(prSpan);
+
+                    [del, ph, nm, sku, st, pr].forEach(function (c) { tr.appendChild(c); });
+                    tb.appendChild(tr);
+
+                    /* ── Bundle composition rows (read-only) ── */
+                    if (!comps) return;
+                    var childRows = [];
+                    comps.forEach(function (ci) {
+                        var ctr = document.createElement('tr');
+                        ctr.className = 'oi-child';
+                        ctr.style.display = it._expanded ? '' : 'none';
+
+                        var cCb = document.createElement('td');
+                        cCb.className = 'inv-skip-cell';
+                        ctr.appendChild(cCb);
+
+                        var cPh = document.createElement('td');
+                        cPh.className = 'col-oi-photo';
+                        if (ci.photo) {
+                            var cpw = document.createElement('span');
+                            cpw.className = 'oi-pv-wrap';
+                            var cim = document.createElement('img');
+                            cim.className = 'oi-pv-thumb';
+                            cim.src = ci.photo; cim.alt = '';
+                            var cpv = document.createElement('span');
+                            cpv.className = 'oi-pv-preview';
+                            var cpvi = document.createElement('img');
+                            cpvi.src = ci.photo; cpvi.alt = '';
+                            cpv.appendChild(cpvi);
+                            cpw.appendChild(cim); cpw.appendChild(cpv);
+                            cPh.appendChild(cpw);
+                        } else {
+                            cPh.textContent = '—';
+                            cPh.style.color = '#9ca3af';
+                        }
+                        ctr.appendChild(cPh);
+
+                        var cNm = document.createElement('td');
+                        cNm.className = 'col-oi-name';
+                        var cFlex = document.createElement('div');
+                        cFlex.className = 'oi-name-flex';
+                        var cName = document.createElement('span');
+                        cName.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#374151;';
+                        if (ci.product_id) {
+                            var cA = document.createElement('a');
+                            cA.href = '/admin/catalog/product/' + ci.product_id + '/change/';
+                            cA.target = '_blank'; cA.rel = 'noopener';
+                            cA.style.cssText = 'color:#374151;text-decoration:none';
+                            cA.textContent = ci.name || '';
+                            cName.appendChild(cA);
+                        } else {
+                            cName.textContent = ci.name || '';
+                        }
+                        cFlex.appendChild(cName);
+                        if (ci.site_url) {
+                            var cSite = document.createElement('a');
+                            cSite.className = 'oi-site-btn';
+                            cSite.href = ci.site_url; cSite.target = '_blank'; cSite.rel = 'noopener';
+                            cSite.title = 'Open on site';
+                            cSite.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>';
+                            cFlex.appendChild(cSite);
+                        }
+                        cNm.appendChild(cFlex);
+                        ctr.appendChild(cNm);
+
+                        var cSku = document.createElement('td');
+                        cSku.className = 'col-oi-sku';
+                        var cSkuSpan = document.createElement('span');
+                        cSkuSpan.style.cssText = 'color:#9ca3af;font-size:12px';
+                        cSkuSpan.textContent = ci.sku || '—';
+                        cSku.appendChild(cSkuSpan);
+                        ctr.appendChild(cSku);
+
+                        var cSt = document.createElement('td');
+                        cSt.className = 'col-oi-stock';
+                        cSt.appendChild(stockCell({ stock: ci.stock, in_stock: (ci.stock || 0) > 0 }));
+                        ctr.appendChild(cSt);
+
+                        var cPr = document.createElement('td');
+                        cPr.className = 'col-oi-price';
+                        cPr.innerHTML = compPriceCell(ci);
+                        ctr.appendChild(cPr);
+
+                        childRows.push(ctr);
+                        tb.appendChild(ctr);
+                    });
+                    toggleBtn.addEventListener('click', function () {
+                        it._expanded = !it._expanded;
+                        var show = !!it._expanded;
+                        childRows.forEach(function (r) { r.style.display = show ? '' : 'none'; });
+                        this.dataset.expanded = show ? '1' : '0';
+                        this.innerHTML = chevron(show);
+                        this.title = show ? 'Collapse composition' : 'Expand composition';
+                        restripe(tb);
+                    });
+                });
+                table.appendChild(tb);
+                wrap.appendChild(table);
+                restripe(tb);
+            }
+            /* Stock level: a number, and when there is nothing to buy — a red "None".
+               Availability is computed like the storefront does (utils/stock.ts variantInStock):
+               a hybrid is always available, the rest by stock level.
+             */
+            function stockCell(it) {
+                var v = parseInt(it.stock, 10);
+                var e = document.createElement('span');
+                if (!it.in_stock) {
+                    e.style.cssText = 'font-size:12px;color:#dc2626';
+                    e.textContent = 'None';
+                    return e;
+                }
+                e.style.cssText = 'font-size:13px;color:#374151;';
+                e.textContent = isFinite(v) ? String(v) : '—';
+                return e;
+            }
+            /* The "own" label for a weighed pack — style 1:1 with the order table. */
+            function ownBadge() {
+                var b = document.createElement('span');
+                b.style.cssText = 'font-size:10px;color:#9ca3af;text-transform:uppercase;' +
+                    'letter-spacing:0.4px;font-weight:600;margin-right:6px;';
+                b.textContent = 'own';
+                return b;
+            }
+            /* The component's "Price" cell — 1:1 with the order (oiPriceCell): the total in
+               large type,
+               below it 'price × qty'. This table has no "Qty" column, so the
+               component quantity lives right here.
+             */
+            function fmtNum(n) { return isFinite(n) ? n.toFixed(2).replace(/\.?0+$/, '') : ''; }
+            function compPriceCell(ci) {
+                var price = parseFloat(ci.price);
+                if (!isFinite(price)) return '<span style="color:#9ca3af;">—</span>';
+                var qty = ci.qty || 1;
+                if (qty <= 1) {
+                    return '<span style="font-size:13px;color:#374151;">' + fmtNum(price) + '</span>';
+                }
+                return '<div style="display:flex;flex-direction:column;gap:1px;line-height:1.2;">' +
+                    '<span style="font-size:13px;font-weight:600;color:#111827;">' + fmtNum(price * qty) + '</span>' +
+                    '<span style="font-size:11px;color:#9ca3af;white-space:nowrap;">' + fmtNum(price) + ' × ' + qty + '</span>' +
+                    '</div>';
+            }
+            /* Zebra striping is counted over VISIBLE rows — otherwise a collapsed composition leaves gaps */
+            function restripe(tb) {
+                var rows = Array.prototype.filter.call(tb.querySelectorAll('tr'), function (r) {
+                    return r.style.display !== 'none';
+                });
+                rows.forEach(function (r, idx) {
+                    r.classList.remove('row1', 'row2');
+                    r.classList.add(idx % 2 === 0 ? 'row1' : 'row2');
+                });
+            }
+
+            /* ── search ── */
+            var timer = null, active = -1, results = [];
+            /* Positioning — verbatim from the order form (posDrop is there too). */
+            function posDrop() {
+                var r = inp.getBoundingClientRect();
+                var vw = window.innerWidth, vh = window.innerHeight, m = 8;
+                // Width: desired 770, but not wider than the screen (otherwise on a small screen it
+                // runs off to the side).
+                var w = Math.min(Math.max(r.width, 770), vw - m * 2);
+                drop.style.width = w + 'px';
+                // Left: under the field, but kept within the screen.
+                var left = r.left;
+                if (left + w > vw - m) left = vw - m - w;
+                if (left < m) left = m;
+                drop.style.left = (window.clFlipLeft ? window.clFlipLeft(r, w, m) : left) + 'px';
+                // Top: under the field; if there is little room below — limit the list height,
+                // so that the popup doesn't go past the bottom edge (otherwise it isn't visible on
+                // a small screen).
+                var top = r.bottom + 2;
+                // If there is very little room under the field — show it ABOVE the field.
+                var availBelow = vh - top - m;
+                if (availBelow < 160 && r.top > vh - r.bottom) {
+                    drop.style.top = 'auto';
+                    drop.style.bottom = (vh - r.top + 2) + 'px';
+                    dropInner.style.maxHeight = Math.max(140, r.top - m - 2) + 'px';
+                } else {
+                    drop.style.bottom = 'auto';
+                    drop.style.top = top + 'px';
+                    dropInner.style.maxHeight = Math.max(140, availBelow) + 'px';
+                }
+            }
+            function closeDrop() { drop.style.display = 'none'; dropInner.innerHTML = ''; active = -1; }
+            function renderDrop() {
+                dropInner.innerHTML = '';
+                if (!results.length) {
+                    var e = document.createElement('div');
+                    e.className = 'vpick-empty';
+                    e.textContent = 'Nothing found';
+                    dropInner.appendChild(e);
+                    drop.style.display = 'block';
+                    posDrop();
+                    return;
+                }
+                results.forEach(function (r, i) {
+                    var added = has(r.type, r.id);
+                    /* Row structure — as in the order: 44px avatar + a column
+                       (name/price in one row, a small details row below it).
+                     */
+                    var d = document.createElement('div');
+                    d.className = 'vpick-item' + (added ? ' is-disabled' : '') + (i === active ? ' is-active' : '');
+                    d.style.cssText = 'flex-direction:column;align-items:stretch;gap:4px;';
+
+                    var top = document.createElement('div');
+                    top.style.cssText = 'display:flex;align-items:stretch;gap:10px;';
+                    if (r.photo) {
+                        var im = document.createElement('img');
+                        im.src = r.photo; im.alt = '';
+                        im.style.cssText = 'width:44px;height:44px;object-fit:cover;border-radius:3px;border:1px solid #e5e7eb;flex-shrink:0;';
+                        top.appendChild(im);
+                    } else {
+                        var ph = document.createElement('div');
+                        ph.style.cssText = 'width:44px;height:44px;border-radius:3px;border:1px solid #e5e7eb;background:#f3f4f6;flex-shrink:0;';
+                        top.appendChild(ph);
+                    }
+                    var col = document.createElement('div');
+                    col.className = 'vpick-item-col';
+                    col.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;justify-content:space-between;';
+                    var line1 = document.createElement('div');
+                    line1.style.cssText = 'display:flex;align-items:flex-start;justify-content:space-between;gap:8px;';
+                    var nm = document.createElement('div');
+                    nm.className = 'vpick-item-name';
+                    if (r.packaging_kind === 'own') nm.appendChild(ownBadge());
+                    nm.appendChild(document.createTextNode(r.name));
+                    line1.appendChild(nm);
+                    if (r.price != null) {
+                        var pr = document.createElement('span');
+                        pr.style.cssText = 'font-weight:600;font-size:13px;line-height:1;color:#374151;white-space:nowrap;flex-shrink:0;';
+                        pr.textContent = (Math.round(r.price * 100) / 100) + ' UAH';
+                        line1.appendChild(pr);
+                    }
+                    var line2 = document.createElement('div');
+                    line2.className = 'vpick-item-row';
+                    line2.textContent = (r.sku || '') + (added ? (r.sku ? ' · ' : '') + 'already added' : '');
+                    col.appendChild(line1);
+                    col.appendChild(line2);
+                    top.appendChild(col);
+                    d.appendChild(top);
+
+                    if (!added) {
+                        d.addEventListener('mousedown', function (ev) { ev.preventDefault(); pick(r); });
+                    }
+                    dropInner.appendChild(d);
+                });
+                drop.style.display = 'block';
+                posDrop();
+            }
+            function pick(r) {
+                if (has(r.type, r.id)) return;
+                items.push(r);
+                syncSelects();
+                render();
+                inp.value = '';
+                results = [];
+                closeDrop();
+                inp.focus();
+            }
+            function search(q) {
+                fetch('/admin/courses/related-search/?q=' + encodeURIComponent(q))
+                    .then(function (x) { return x.json(); })
+                    .then(function (d) { results = (d && d.results) || []; active = -1; renderDrop(); })
+                    .catch(function () { results = []; closeDrop(); });
+            }
+            inp.addEventListener('input', function () {
+                var q = inp.value.trim();
+                clearTimeout(timer);
+                if (q.length < 2) { results = []; closeDrop(); return; }
+                timer = setTimeout(function () { search(q); }, 250);
+            });
+            inp.addEventListener('keydown', function (e) {
+                e.stopPropagation();
+                if (drop.style.display === 'none') return;
+                if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, results.length - 1); renderDrop(); }
+                else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); renderDrop(); }
+                else if (e.key === 'Enter') { e.preventDefault(); if (results[active]) pick(results[active]); }
+                else if (e.key === 'Escape') { closeDrop(); }
+            });
+            inp.addEventListener('blur', function () { setTimeout(closeDrop, 200); });
+            window.addEventListener('resize', function () { if (drop.style.display !== 'none') posDrop(); });
+
+            /* ── initial fill: from the already selected options ── */
+            function selectedIds(sel) {
+                return Array.prototype.filter.call(sel.options, function (o) { return o.selected; })
+                    .map(function (o) { return o.value; });
+            }
+            function loadFromSelects() {
+                var vIds = selectedIds(selP), bIds = selectedIds(selB);
+                if (!vIds.length && !bIds.length) { items = []; render(); return; }
+                fetch('/admin/courses/related-details/?variants=' + vIds.join(',') + '&bundles=' + bIds.join(','))
+                    .then(function (x) { return x.json(); })
+                    .then(function (d) { items = (d && d.results) || []; render(); })
+                    .catch(function () { render(); });
+            }
+            loadFromSelects();
+            /* "Cancel": form.reset() returns the selects to the saved state — we re-read from them */
+            _csFileResets.push(loadFromSelects);
+        })();
+
+        buildPicker('id_related_categories', { placeholder: 'Not selected', popupWidth: 340, search: true });
+
+        /* ══════════════════════════════════════════
+              COURSE MODULES — a table with drag-and-drop and collapsed rows
+              There is no Django inline here: the tree arrives in modules_json and goes back as
+              one hidden field course_modules_json + the lesson file inputs
+              (lesson_video__<key> / lesson_poster__<key>). Order = order of rows
+              in the DOM, so dragging stores nothing separately — everything happens on "Save".
+           ══════════════════════════════════════════
+         */
+        (function buildModulesTable() {
+            var RAW = {{ modules_json|safe }};
+            var host = document.querySelector('#content-main form');
+            if (!host) return;
+            /* Modules are the last block of the form: after all fieldsets and after the inlines.
+               The anchor is precisely the LAST content block, not .submit-row: the first
+               .submit-row in the form is the TOP button bar, and anchoring to it threw the table
+               to the top of the page.
+             */
+            var groups = host.querySelectorAll('.inline-group');
+            var fsets = host.querySelectorAll('fieldset.module');
+            var after = groups.length ? groups[groups.length - 1]
+                      : (fsets.length ? fsets[fsets.length - 1] : null);
+            /* The course's products must stay LAST, so we place the modules before
+               their section (the fieldset with related_variants).
+             */
+            var shopSel = document.getElementById('id_related_variants');
+            var shopFs = shopSel ? shopSel.closest('fieldset.module') : null;
+
+            var uid = 0;
+            function nextKey() { return 'k' + (++uid) + '_' + Math.floor(Math.random() * 1e6); }
+            function dirty() { if (window.pgMarkDirty) window.pgMarkDirty(); }
+            function el(tag, cls, txt) {
+                var e = document.createElement(tag);
+                if (cls) e.className = cls;
+                if (txt != null) e.textContent = txt;
+                return e;
+            }
+            var DRAG_CHAR = '⠿';   /* ⠿ — the same handle as in the category list */
+            var CHEV_SVG = '<svg viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            var PEN_SVG = '<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M9.5 2L12 4.5L4.5 12L1.5 12.5L2 9.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+            var X_SVG = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+            var PLUS_SVG = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1.5v9M1.5 6h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+
+            var section = el('div', 'info-section');
+            section.id = 'cs-mods';
+            var toolbar = el('div', 'cs-toolbar');
+            var addBtn = el('button', 'pg-add-btn', '+ Add module');
+            addBtn.type = 'button';
+            toolbar.appendChild(addBtn);
+            var table = document.createElement('table');
+            table.id = 'cs-mtable';
+            /* Header with column names — as in the order items table and in CRM lists. */
+            var thead = document.createElement('thead');
+            var htr = document.createElement('tr');
+            [['inv-skip-cell', ''], ['cs-c-drag', ''], ['cs-c-tog', ''],
+             ['cs-c-num', '#'], ['cs-c-name', 'Name'], ['cs-c-show', 'Visible']].forEach(function (h) {
+                var th = document.createElement('th');
+                th.className = h[0];
+                th.textContent = h[1];
+                htr.appendChild(th);
+            });
+            /* Master arrow: collapses/expands ALL modules at once (as in categories). */
+            var master = el('button', 'cs-master-toggle open');
+            master.type = 'button'; master.title = 'Collapse all';
+            master.innerHTML = CHEV_SVG;
+            htr.querySelector('th.cs-c-tog').appendChild(master);
+            master.addEventListener('click', function () {
+                var open = !master.classList.contains('open');
+                tbody.querySelectorAll('tr.cs-grp').forEach(function (r) { r._toggle(open); });
+                syncMaster();
+            });
+            thead.appendChild(htr);
+            table.appendChild(thead);
+            var tbody = document.createElement('tbody');
+            table.appendChild(tbody);
+            section.appendChild(toolbar); section.appendChild(table);
+            if (shopFs && shopFs.parentNode) shopFs.parentNode.insertBefore(section, shopFs);
+            else if (after && after.parentNode) after.parentNode.insertBefore(section, after.nextSibling);
+            else host.appendChild(section);
+
+            var hidden = document.createElement('input');
+            hidden.type = 'hidden'; hidden.name = 'course_modules_json'; hidden.id = 'cs-mods-json';
+            host.appendChild(hidden);
+
+            /* The lesson modal and a stash for its panels. Both INSIDE <form>:
+               otherwise the lesson's file inputs will not go into POST.
+             */
+            var modal = el('div', 'em-modal');
+            var stash = el('div', 'cs-stash');
+            stash.style.display = 'none';
+            host.appendChild(modal); host.appendChild(stash);
+            modal.addEventListener('mousedown', function (e) { if (e.target === modal) closeModal(); });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && modal.classList.contains('open')) closeModal();
+            });
+            /* Quill dropdowns (size, heading, color) sit inside the toolbar, and the modal
+               body scrolls (overflow:auto) — so they were clipped. We move them
+               to screen coordinates (position:fixed).
+               We catch exactly the appearance of the ql-expanded class via MutationObserver: its
+               callback is a
+               microtask, i.e. still BEFORE paint, and the dropdown appears in place right away.
+               The setTimeout that was here before could miss a frame in the default position and
+               width — hence the 'first one window, then it changes size and offset from the button'
+               effect.
+             */
+            var PICKER_PROPS = ['position', 'top', 'left', 'z-index', 'margin-top', 'width', 'min-width'];
+            function placePicker(pk) {
+                var opts = pk.querySelector('.ql-picker-options');
+                if (!opts) return;
+                if (!pk.classList.contains('ql-expanded')) {
+                    PICKER_PROPS.forEach(function (p) { opts.style.removeProperty(p); });
+                    return;
+                }
+                var r = (pk.querySelector('.ql-picker-label') || pk).getBoundingClientRect();
+                opts.style.setProperty('position', 'fixed', 'important');
+                /* base_site keeps a 6px offset via margin-top !important — with fixed
+                   it would be added to top, so we cancel it and bake it into the coordinate.
+                 */
+                opts.style.setProperty('margin-top', '0', 'important');
+                opts.style.setProperty('top', (r.bottom + 4) + 'px', 'important');
+                opts.style.setProperty('left', r.left + 'px', 'important');
+                opts.style.setProperty('z-index', '10003', 'important');
+                /* base_site sets width:100% !important, and with fixed that is 100% of the SCREEN.
+                   The color picker has its own swatch grid 152px wide.
+                 */
+                opts.style.setProperty(
+                    'width', pk.classList.contains('ql-color-picker') ? '152px' : 'max-content', 'important');
+                opts.style.setProperty('min-width', 'auto', 'important');
+            }
+            new MutationObserver(function (recs) {
+                recs.forEach(function (rec) {
+                    var t = rec.target;
+                    if (t.classList && t.classList.contains('ql-picker')) placePicker(t);
+                });
+            }).observe(modal, { attributes: true, subtree: true, attributeFilter: ['class'] });
+
+            var openPanel = null;
+            /* We show the modal ONLY when it is fully assembled: Quill is created already
+               attached (otherwise it can't measure sizes), so we first hang the panel
+               invisible, finish building the content and only then show it — without a jump.
+             */
+            /* The photo and the first video frame load asynchronously: the modal managed to
+               appear with empty cards and 'finish assembling' right in front of the user.
+               We wait for the media, but no longer than CAP — a broken or heavy file must not
+               keep the modal closed. Panels are cached, so the pause happens
+               only on the first opening of a lesson.
+             */
+            function mediaReady(root, done) {
+                var pend = [];
+                root.querySelectorAll('img').forEach(function (n) { if (!n.complete) pend.push(n); });
+                root.querySelectorAll('video').forEach(function (n) { if (n.readyState < 2) pend.push(n); });
+                if (!pend.length) { done(); return; }
+                var left = pend.length, fired = false;
+                var cap = setTimeout(fin, 300);
+                function fin() { if (fired) return; fired = true; clearTimeout(cap); done(); }
+                function tick() { if (--left <= 0) fin(); }
+                pend.forEach(function (n) {
+                    n.addEventListener(n.tagName === 'IMG' ? 'load' : 'loadeddata', tick, { once: true });
+                    n.addEventListener('error', tick, { once: true });
+                });
+            }
+            function showModal(panel, build) {
+                modal.appendChild(panel);
+                openPanel = panel;
+                modal.style.visibility = 'hidden';
+                modal.classList.add('open');
+                if (build) build();
+                lockScroll(true);
+                mediaReady(panel, function () {
+                    requestAnimationFrame(function () { modal.style.visibility = ''; });
+                });
+            }
+            function closeModal() {
+                if (openPanel) {
+                    /* The 'new module' panel is one-shot — we do not keep it in the stash. */
+                    if (openPanel._temp) openPanel.remove(); else stash.appendChild(openPanel);
+                    openPanel = null;
+                }
+                modal.classList.remove('open');
+                lockScroll(false);
+            }
+
+            /* ── Lesson media card ── */
+            function fileCard(les, kind) {
+                var isImage = (kind === 'poster');
+                var wrap = el('div', 'cs-fc');
+                var box = el('label', 'cs-fc-box');
+                var input = document.createElement('input');
+                input.type = 'file';
+                input.name = (isImage ? 'lesson_poster__' : 'lesson_video__') + les.key;
+                input.accept = isImage ? 'image/*' : 'video/*';
+                box.appendChild(input);
+                wrap.appendChild(box);
+
+                var savedUrl = isImage ? (les.poster_url || '') : (les.video_url || '');
+                var flag = isImage ? 'poster_clear' : 'video_clear';
+                function render(url) {
+                    Array.prototype.slice.call(box.children).forEach(function (n) {
+                        if (n !== input) n.remove();
+                    });
+                    box.classList.toggle('has-file', !!url);
+                    box.classList.toggle('is-cleared', !!les[flag]);
+                    if (!isImage) {
+                        les._hasVideo = !!url && !les.video_clear;
+                        if (!les._hasVideo) les._videoMin = null;
+                        if (les.syncMeta) les.syncMeta();
+                    }
+                    if (!url) { box.appendChild(el('span', 'cs-fc-ph', isImage ? '+ Photo' : '+ Video')); return; }
+                    var media;
+                    if (isImage) { media = document.createElement('img'); media.src = url; media.alt = ''; }
+                    else {
+                        media = document.createElement('video');
+                        media.src = url + (url.indexOf('blob:') === 0 ? '' : '#t=0.1');
+                        media.preload = 'metadata'; media.muted = true; media.playsInline = true;
+                        /* Lesson duration — the timing of the file itself. */
+                        media.addEventListener('loadedmetadata', function () {
+                            if (!isFinite(media.duration) || media.duration <= 0) return;
+                            var mins = Math.max(1, Math.round(media.duration / 60));
+                            if (les._videoMin === mins) return;
+                            les._videoMin = mins;
+                            if (les.syncMeta) les.syncMeta();
+                        });
+                    }
+                    box.appendChild(media);
+                    if (!isImage) box.appendChild(el('div', 'cs-fc-play'));
+                    var acts = el('div', 'cs-fc-acts');
+                    var rep = el('button', 'cs-fc-btn', '✎'); rep.type = 'button'; rep.title = 'Replace';
+                    rep.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); input.click(); });
+                    var del = el('button', 'cs-fc-btn', '✕'); del.type = 'button'; del.title = 'Delete';
+                    del.addEventListener('click', function (e) {
+                        e.preventDefault(); e.stopPropagation();
+                        if (input.value) { input.value = ''; render(savedUrl); dirty(); return; }
+                        if (!savedUrl) return;
+                        les[flag] = !les[flag];   /* a repeated click cancels the mark */
+                        render(savedUrl); dirty();
+                    });
+                    acts.appendChild(rep); acts.appendChild(del);
+                    box.appendChild(acts);
+                    media.addEventListener('click', function (e) {
+                        e.preventDefault(); e.stopPropagation();
+                        openLightbox(media.src, isImage);
+                    });
+                }
+                input.addEventListener('change', function () {
+                    var f = input.files && input.files[0];
+                    if (!f) { render(savedUrl); return; }
+                    les[flag] = false;
+                    render(URL.createObjectURL(f));
+                    dirty();
+                });
+                if (isImage) {
+                    box.addEventListener('click', function (e) {
+                        if (box.classList.contains('has-file')) return;
+                        e.preventDefault();
+                        var on = !box.classList.contains('paste-target-active');
+                        document.querySelectorAll('.paste-target-active').forEach(function (n) {
+                            n.classList.remove('paste-target-active');
+                        });
+                        if (on) box.classList.add('paste-target-active');
+                    });
+                    document.addEventListener('paste', function (e) {
+                        if (!box.classList.contains('paste-target-active')) return;
+                        var arr = (e.clipboardData || {}).items || [];
+                        for (var i = 0; i < arr.length; i++) {
+                            if (arr[i].type.indexOf('image/') !== 0) continue;
+                            var f = arr[i].getAsFile(); if (!f) continue;
+                            var dt = new DataTransfer(); dt.items.add(f);
+                            input.files = dt.files;
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                            box.classList.remove('paste-target-active');
+                            e.preventDefault(); return;
+                        }
+                    });
+                }
+                /* "Cancel" in the modal must remove both the selected file and the
+                   deletion
+                   mark — otherwise the modal closed but the file still got dropped
+                   on the next save. We register the rollback on the lesson itself.
+                 */
+                (les._fileResets = les._fileResets || []).push(function () {
+                    input.value = '';
+                    les[flag] = false;
+                    render(savedUrl);
+                });
+                render(savedUrl);
+                return wrap;
+            }
+
+            /* ── Lesson panel (lives in the stash, shown in the modal) ── */
+            /* Lesson fields — shared by the lesson modal and the new-module modal. */
+            /* The name is one per node (module and lesson are the same thing), so we hand out
+               the lesson fields as a separate block: for a node with children it is hidden.
+             */
+            function lessonFields(les) {
+                var frag = document.createDocumentFragment();
+                var fTitle = el('div', 'cs-fld');
+                /* No caption needed — the placeholder says what the field is. */
+                var titleInp = document.createElement('input');
+                titleInp.type = 'text'; titleInp.className = 'cs-inp'; titleInp.value = les.title || '';
+                titleInp.placeholder = 'Name';
+                fTitle.appendChild(titleInp);
+                frag.appendChild(fTitle);
+                var lessonBox = el('div', 'cs-lesson-part');
+
+                var set = el('div', 'cs-lset');
+                var prev = el('label', 'cs-check');
+                var prevCb = document.createElement('input');
+                prevCb.type = 'checkbox'; prevCb.checked = !!les.is_preview;
+                prev.appendChild(prevCb);
+                prev.appendChild(document.createTextNode('Free preview'));
+                set.appendChild(prev);
+                lessonBox.appendChild(set);
+                /* We neither ask for nor show the type and duration — they follow from the
+                   content. Recalculation is silent; if the result differs from what is saved,
+                   that is an unsaved edit, so we highlight "Save".
+                 */
+                les.syncMeta = function () {
+                    var t = nodeType(les), min = nodeDuration(les);
+                    if (les.duration_minutes === min && les.lesson_type === t) return;
+                    les.duration_minutes = min;
+                    les.lesson_type = t;
+                    dirty();
+                };
+                les.syncMeta();
+
+                var media = el('div', 'cs-media');
+                media.appendChild(fileCard(les, 'video'));
+                media.appendChild(fileCard(les, 'poster'));
+                lessonBox.appendChild(media);
+
+                var qWrap = el('div', 'quill-wrapper');
+                var qBox = document.createElement('div');
+                qWrap.appendChild(qBox);
+                lessonBox.appendChild(qWrap);
+                frag.appendChild(lessonBox);
+
+                les.titleInp = titleInp; les.prevCb = prevCb;
+                return { frag: frag, qBox: qBox, lessonBox: lessonBox,
+                         inputs: [titleInp, prevCb] };
+            }
+
+            /* Quill is alive only in an attached node — we create it after the modal is shown.
+               The button set is the same QUILL_TOOLBAR as in the course description (it comes
+               from the backend), including the table button: Quill has no handler for it,
+               so we draw the size picker, as in QuillWidget.
+             */
+            var QUILL_TOOLBAR = {{ quill_toolbar_json|safe }};
+            function quillTableHandler(quill) {
+                return function () {
+                    var saved = quill.getSelection();
+                    var existing = document.getElementById('ql-table-picker');
+                    if (existing) { existing.remove(); return; }
+                    var btn = quill.container.previousSibling.querySelector('.ql-table');
+                    var ROWS = 8, COLS = 10;
+                    var popup = document.createElement('div');
+                    popup.id = 'ql-table-picker';
+                    popup.style.cssText = 'position:absolute;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:10px;box-shadow:0 4px 12px rgba(0,0,0,.1);z-index:10002;user-select:none;';
+                    var label = document.createElement('div');
+                    label.style.cssText = 'font-size:12px;color:#6b7280;margin-bottom:8px;text-align:center;';
+                    label.textContent = '1 × 1';
+                    var grid = document.createElement('div');
+                    grid.style.cssText = 'display:grid;grid-template-columns:repeat(' + COLS + ',18px);gap:2px;';
+                    var cells = [];
+                    for (var r = 1; r <= ROWS; r++) {
+                        for (var cc = 1; cc <= COLS; cc++) {
+                            (function (row, col) {
+                                var cell = document.createElement('div');
+                                cell.style.cssText = 'width:18px;height:18px;border:1px solid #d1d5db;border-radius:2px;cursor:pointer;box-sizing:border-box;';
+                                cell.dataset.r = row; cell.dataset.c = col;
+                                cell.addEventListener('mouseenter', function () {
+                                    label.textContent = row + ' × ' + col;
+                                    cells.forEach(function (cl) {
+                                        var inside = (parseInt(cl.dataset.r, 10) <= row && parseInt(cl.dataset.c, 10) <= col);
+                                        cl.style.background = inside ? '#dbeafe' : '';
+                                        cl.style.borderColor = inside ? '#93c5fd' : '#d1d5db';
+                                    });
+                                });
+                                cell.addEventListener('click', function () {
+                                    popup.remove();
+                                    var htmlT = '<table style="border-collapse:collapse;width:100%;table-layout:fixed"><tbody>';
+                                    for (var i = 0; i < row; i++) {
+                                        htmlT += '<tr>';
+                                        for (var j = 0; j < col; j++) {
+                                            htmlT += '<td style="border:1px solid #d1d5db;padding:6px 10px;background:#fff;"><br></td>';
+                                        }
+                                        htmlT += '</tr>';
+                                    }
+                                    htmlT += '</tbody></table><p><br></p>';
+                                    quill.clipboard.dangerouslyPasteHTML(saved ? saved.index : quill.getLength(), htmlT);
+                                });
+                                cells.push(cell); grid.appendChild(cell);
+                            })(r, cc);
+                        }
+                    }
+                    popup.appendChild(label); popup.appendChild(grid);
+                    document.body.appendChild(popup);
+                    var rect = btn ? btn.getBoundingClientRect() : quill.container.getBoundingClientRect();
+                    popup.style.left = (rect.left + window.scrollX) + 'px';
+                    popup.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+                    setTimeout(function () {
+                        document.addEventListener('mousedown', function close(e) {
+                            if (popup.contains(e.target) || e.target === btn) return;
+                            popup.remove();
+                            document.removeEventListener('mousedown', close);
+                        });
+                    }, 0);
+                };
+            }
+            /* An empty Quill editor returns '<p><br></p>' — in the lesson field that is garbage. */
+            function quillHtml(q) {
+                var tmp = document.createElement('div');
+                tmp.innerHTML = q.root.innerHTML;
+                function empty(el) { return el.tagName === 'P' && (el.innerHTML === '<br>' || el.innerHTML === ''); }
+                while (tmp.firstElementChild && empty(tmp.firstElementChild)) tmp.firstElementChild.remove();
+                while (tmp.lastElementChild && empty(tmp.lastElementChild)) tmp.lastElementChild.remove();
+                return tmp.innerHTML;
+            }
+            /* The "Improve selected text" button — the same as in the
+               course description.
+               We clone the icon from the already rendered QuillWidget, so as not to drag
+               a second base64 copy into the template.
+             */
+            function addCleanBtn(q, toolbar) {
+                var src = document.querySelector('.quill-wrapper button[title="Improve the selected text"]');
+                var group = toolbar.querySelector('.ql-formats:last-child');
+                if (!src || !group) return;
+                var btn = src.cloneNode(true);
+                btn.type = 'button';
+                group.style.display = 'inline-flex'; group.style.gap = '4px'; group.style.alignItems = 'center';
+                group.appendChild(btn);
+                btn.addEventListener('click', function () {
+                    var range = q.getSelection();
+                    if (!range || !range.length) { alert('Select text in the editor'); return; }
+                    var text = q.getText(range.index, range.length);
+                    if (!text.trim()) { alert('Select text'); return; }
+                    btn.disabled = true;
+                    fetch('/admin/catalog/generate-description/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json',
+                                   'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value },
+                        body: JSON.stringify({ text: text, prompt: 'clean' }),
+                    }).then(function (r) { return r.json(); }).then(function (d) {
+                        if (d.error) { alert('Error: ' + d.error); return; }
+                        if (!d.html) { alert('Nothing found'); return; }
+                        q.deleteText(range.index, range.length);
+                        q.clipboard.dangerouslyPasteHTML(range.index, d.html);
+                        dirty();
+                    }).catch(function (e) { alert('Error: ' + e); })
+                      .finally(function () { btn.disabled = false; });
+                });
+            }
+            function initQuill(qBox, html) {
+                var q = new Quill(qBox, {
+                    theme: 'snow',
+                    modules: { toolbar: { container: QUILL_TOOLBAR, handlers: {} } },
+                });
+                q.getModule('toolbar').addHandler('table', quillTableHandler(q));
+                var toolbar = qBox.previousElementSibling;
+                /* base_site wraps .ql-picker-options in .ql-picker-options-inner on
+                   DOMContentLoaded; our editors are created later — we do it ourselves,
+                   otherwise the dropdowns have no scroll and have different padding.
+                 */
+                if (toolbar) {
+                    toolbar.querySelectorAll('.ql-picker-options').forEach(function (opts) {
+                        if (opts.querySelector('.ql-picker-options-inner')) return;
+                        if (opts.closest('.ql-color-picker')) return;
+                        var inner = document.createElement('div');
+                        inner.className = 'ql-picker-options-inner';
+                        while (opts.firstChild) inner.appendChild(opts.firstChild);
+                        opts.appendChild(inner);
+                    });
+                    addCleanBtn(q, toolbar);
+                    /* The standard .ql-icon-picker for alignment is broken and hidden in CSS —
+                       base_site replaces it with its own button, but only for editors
+                       that existed at DOMContentLoaded. Ours is created later.
+                     */
+                    var wrap = qBox.closest('.quill-wrapper');
+                    if (wrap && window._pgInjectAlign) window._pgInjectAlign(wrap, q);
+                }
+                if (html) q.clipboard.dangerouslyPasteHTML(html);
+                q.on('text-change', dirty);
+                return q;
+            }
+
+            /* Standard wiring of the lesson modal: "Done" closes, "Cancel" rolls back. */
+            /* ══ Node ══════════════════════════════════════════════════════
+               A module and a lesson are one entity with one name. A table row is a
+               node: while it has no children, it is a lesson (video, photo,
+               text); as soon as another node is added inside, it becomes a section, and
+               its own lesson moves down to become the first child.
+               In the DB a lesson does not live without a module, so a root lesson is stored as
+               a wrapper module of the same name (see is_leaf_module in admin.py).
+             */
+
+            function nodeRows() { return Array.prototype.slice.call(tbody.children); }
+            function depthOf(r) { return r._depth || 0; }
+            function subtree(row) {
+                var out = [row], n = row.nextElementSibling;
+                while (n && depthOf(n) > depthOf(row)) { out.push(n); n = n.nextElementSibling; }
+                return out;
+            }
+            function kidRows(row) { return subtree(row).slice(1); }
+            function hasKids(row) {
+                var n = row.nextElementSibling;
+                return !!(n && depthOf(n) > depthOf(row));
+            }
+            /* Lesson type and duration are computed from the content, not asked for:
+               there is a video → "video" and its duration (from the file metadata),
+               there is none → "text" and reading time (200 words/min).
+             */
+            function nodeType(nd) {
+                if (nd._hasVideo !== undefined) return nd._hasVideo ? 'video' : 'text';
+                if (nd.video_clear) return 'text';
+                return (nd.video_name || nd.video_url) ? 'video' : 'text';
+            }
+            function nodeDuration(nd) {
+                if (nodeType(nd) === 'video') {
+                    /* Metadata has not been read yet — keep the saved value. */
+                    return nd._videoMin || nd.duration_minutes || null;
+                }
+                var txt = nd.quill ? nd.quill.getText()
+                                   : (nd.content || '').replace(/<[^>]*>/g, ' ');
+                var words = (txt.match(/\S+/g) || []).length;
+                return words ? Math.max(1, Math.round(words / 200)) : null;
+            }
+            function newNode() {
+                return { mod_id: null, les_id: null, key: nextKey(), title: '',
+                         is_active: true, lesson_type: 'video', content: '',
+                         duration_minutes: null, is_preview: false };
+            }
+            /* Lesson type and duration are computed from the content, not asked for:
+               there is a video → "video" and its duration (from the file metadata),
+               there is none → "text" and reading time (200 words/min).
+             */
+            function nodeType(nd) {
+                if (nd._hasVideo !== undefined) return nd._hasVideo ? 'video' : 'text';
+                if (nd.video_clear) return 'text';
+                return (nd.video_name || nd.video_url) ? 'video' : 'text';
+            }
+            function nodeDuration(nd) {
+                if (nodeType(nd) === 'video') {
+                    /* Metadata has not been read yet — keep the saved value. */
+                    return nd._videoMin || nd.duration_minutes || null;
+                }
+                var txt = nd.quill ? nd.quill.getText()
+                                   : (nd.content || '').replace(/<[^>]*>/g, ' ');
+                var words = (txt.match(/\S+/g) || []).length;
+                return words ? Math.max(1, Math.round(words / 200)) : null;
+            }
+            function newNode() {
+                return { mod_id: null, les_id: null, key: nextKey(), title: '',
+                         is_active: true, lesson_type: 'video', content: '',
+                         duration_minutes: null, is_preview: false };
+            }
+            /* ── Node modal ─────────────────────────────────────────────── */
+            function snapOf(nd) {
+                return {
+                    title: nd.title || '',
+                    is_preview: nd.prevCb ? nd.prevCb.checked : !!nd.is_preview,
+                    content: nd.quill ? quillHtml(nd.quill) : (nd.content || ''),
+                };
+            }
+            /* createCb ≠ null — creation modal: the row appears only after "Done". */
+            function buildNodePanel(nd, createCb) {
+                var panel = el('div', 'em-box');
+                var creating = !!createCb;
+                panel._temp = creating;
+                var head = el('div', 'em-head');
+                var caption = el('h3', null, 'Lesson');
+                head.appendChild(caption);
+                var close = el('button', 'em-close', '✕'); close.type = 'button'; close.title = 'Close';
+                head.appendChild(close);
+                panel.appendChild(head);
+
+                var body = el('div', 'em-body');
+                var form = el('div', 'cs-form');
+                var refs = lessonFields(nd);
+                form.appendChild(refs.frag);
+                body.appendChild(form);
+                panel.appendChild(body);
+
+                var foot = el('div', 'em-foot');
+                var cancel = el('button', 'em-btn', 'Cancel'); cancel.type = 'button';
+                var done = el('button', 'em-btn primary', 'Done'); done.type = 'button';
+                foot.appendChild(cancel); foot.appendChild(done);
+                panel.appendChild(foot);
+
+                function revert() {
+                    var s = nd._snap || {};
+                    nd.title = s.title || '';
+                    nd.titleInp.value = nd.title;
+                    nd.prevCb.checked = !!s.is_preview;
+                    if (nd.quill) {
+                        nd.quill.setContents([]);
+                        if (s.content) nd.quill.clipboard.dangerouslyPasteHTML(s.content);
+                    }
+                    /* Files are rolled back too: the selected file and the deletion mark. */
+                    (nd._fileResets || []).forEach(function (fn) { fn(); });
+                    if (nd.syncRow) nd.syncRow();
+                    if (nd.syncMeta) nd.syncMeta();
+                    closeModal();
+                }
+                function finish() {
+                    if (creating && !nd._created) {
+                        nd._created = true;
+                        panel._temp = false;
+                        closeModal();
+                        createCb(nd);
+                        return;
+                    }
+                    closeModal();
+                }
+                done.addEventListener('click', finish);
+                close.addEventListener('click', function () {
+                    if (creating && !nd._created) { closeModal(); return; }
+                    closeModal();
+                });
+                cancel.addEventListener('click', function () {
+                    if (creating && !nd._created) { closeModal(); return; }
+                    revert();
+                });
+                refs.inputs.forEach(function (n) {
+                    n.addEventListener('input', function () {
+                        if (n === nd.titleInp) { nd.title = n.value; }
+                        if (nd.syncRow) nd.syncRow();
+                        dirty();
+                    });
+                    n.addEventListener('change', function () {
+                        if (n === nd.titleInp) { nd.title = n.value; }
+                        if (nd.syncRow) nd.syncRow();
+                        dirty();
+                    });
+                    /* Enter in the modal = "Done", not a submit of the course form. */
+                    n.addEventListener('keydown', function (e) {
+                        if (e.key === 'Enter') { e.preventDefault(); finish(); }
+                    });
+                });
+
+                nd.panel = panel; nd.panelCaption = caption;
+                nd.lessonBox = refs.lessonBox;
+                return refs;
+            }
+            /* Lesson content is available on any node: a section can also have its own
+               video or text (an intro). Only the label depends on whether it has children.
+             */
+            function syncPanelMode(nd, branch) {
+                nd.panelCaption.textContent = branch ? 'Module' : 'Lesson';
+            }
+            function openNode(row) {
+                var nd = row._nd, branch = hasKids(row);
+                if (!nd.panel) {
+                    var refs = buildNodePanel(nd, null);
+                    syncPanelMode(nd, branch);
+                    showModal(nd.panel, function () {
+                        nd.quill = initQuill(refs.qBox, nd.content || '');
+                        nd.quill.on('text-change', nd.syncMeta);
+                        nd.syncMeta();
+                    });
+                } else {
+                    nd.titleInp.value = nd.title || '';
+                    nd.syncMeta();
+                    syncPanelMode(nd, branch);
+                    showModal(nd.panel);
+                }
+                nd._snap = snapOf(nd);
+                nd.titleInp.focus();
+            }
+            function openNewNode(caption, cb) {
+                var nd = newNode();
+                var refs = buildNodePanel(nd, cb);
+                syncPanelMode(nd, false);
+                nd.panelCaption.textContent = caption;
+                nd._snap = snapOf(nd);
+                showModal(nd.panel, function () {
+                    nd.quill = initQuill(refs.qBox, '');
+                    nd.quill.on('text-change', nd.syncMeta);
+                    nd.syncMeta();
+                });
+                nd.titleInp.focus();
+            }
+
+            /* ── Node row ─────────────────────────────────────────────── */
+            function buildNodeRow(nd) {
+                nd.key = nd.key || nextKey();
+                var tr = document.createElement('tr');
+                tr.className = 'cs-lrow';
+                tr._nd = nd;
+                nd.row = tr;
+
+                var tdDel = el('td', 'inv-skip-cell');
+                var del = el('button', 'inv-skip-btn', '✕'); del.type = 'button'; del.title = 'Delete';
+                tdDel.appendChild(del);
+                var tdDrag = el('td', 'cs-c-drag');
+                var handle = el('span', 'cs-drag'); handle.title = 'Drag';
+                handle.textContent = DRAG_CHAR;
+                tdDrag.appendChild(handle);
+                var tdTog = el('td', 'cs-c-tog');
+                var chev = el('button', 'cs-toggle'); chev.type = 'button';
+                chev.innerHTML = CHEV_SVG; chev.title = 'Expand';
+                tdTog.appendChild(chev);
+                var tdNum = el('td', 'cs-c-num');
+                var tdName = el('td', 'cs-c-name');
+                var flex = el('div', 'cs-name-flex');
+                var name = el('span', 'cs-lname');
+                var count = el('span', 'cs-count');
+                var acts = el('div', 'cs-row-acts');
+                var edit = el('button', 'cs-icon-btn'); edit.type = 'button';
+                edit.innerHTML = PEN_SVG; edit.title = 'Edit';
+                var add = el('button', 'cs-icon-btn'); add.type = 'button';
+                add.innerHTML = PLUS_SVG; add.title = 'Add an item inside';
+                acts.appendChild(edit); acts.appendChild(add);
+                flex.appendChild(name); flex.appendChild(count); flex.appendChild(acts);
+                tdName.appendChild(flex);
+                var tdShow = el('td', 'cs-c-show');
+                var showCb = document.createElement('input');
+                showCb.type = 'checkbox';
+                showCb.checked = nd.is_active !== false;
+                showCb.title = 'Show on site';
+                showCb.addEventListener('click', function (e) { e.stopPropagation(); });
+                showCb.addEventListener('change', dirty);
+                tdShow.appendChild(showCb);
+                nd.showCb = showCb;
+                /* ✕ is the first column, as in the order items table. */
+                [tdDel, tdDrag, tdTog, tdNum, tdName, tdShow].forEach(function (n) { tr.appendChild(n); });
+                tr._numCell = tdNum; tr._nameCell = tdName;
+                tr._chev = chev; tr._name = name; tr._count = count;
+                tr._depth = nd.depth || 0;
+
+                nd.syncRow = function () {
+                    var t = (nd.title || '').trim();
+                    name.textContent = t || 'Untitled';
+                    name.classList.toggle('is-empty', !t);
+                };
+                nd.syncRow();
+
+                if (nd._open === undefined) nd._open = false;   /* collapsed by default */
+                tr._toggle = function (open) {
+                    nd._open = open;
+                    chev.classList.toggle('open', open);
+                    chev.title = open ? 'Collapse' : 'Expand';
+                    applyVisibility();
+                    syncMaster();
+                };
+                chev.classList.toggle('open', !!nd._open);
+                chev.addEventListener('click', function (e) { e.stopPropagation(); tr._toggle(!nd._open); });
+                /* Clicking the row only collapses/expands it; the editor opens only via the pencil. */
+                tr.addEventListener('click', function (e) {
+                    if (e.target.closest('input, button, .cs-drag')) return;
+                    if (hasKids(tr)) tr._toggle(!nd._open);
+                });
+                edit.addEventListener('click', function (e) { e.stopPropagation(); openNode(tr); });
+                add.addEventListener('click', function (e) { e.stopPropagation(); addChild(tr); });
+                del.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    /* The node's whole subtree goes with it, and that can be an
+                       entire section with video. We don't delete that silently: there is
+                       no undo, the only way back is to leave the form unsaved.
+                     */
+                    var kids = subtree(tr).length - 1;
+                    if (kids > 0 && !confirm('Delete "' + (nd.title || 'untitled') + '" together with ' +
+                                             kids + ' nested items? This can only be undone by not saving the form.')) return;
+                    subtree(tr).forEach(function (r) {
+                        if (r._nd.panel) r._nd.panel.remove();
+                        r.remove();
+                    });
+                    renumber(); dirty();
+                });
+                initDrag(tr, handle);
+                return tr;
+            }
+
+            /* "+" adds a node INSIDE: the parent becomes a section but keeps its own lesson
+               (video, text), so the content stays available on the section too.
+             */
+            function addChild(row) {
+                openNewNode('New item', function (nd) {
+                    var kids = kidRows(row);
+                    var anchor = kids.length ? (kids[kids.length - 1].nextSibling) : row.nextSibling;
+                    nd.depth = depthOf(row) + 1;
+                    tbody.insertBefore(buildNodeRow(nd), anchor);
+                    row._toggle(true);
+                    renumber(); dirty();
+                });
+            }
+
+            /* ── Zebra, visibility, numbering ─────────────────────────────── */
+            function restripe() {
+                var i = 0;
+                tbody.querySelectorAll('tr.cs-lrow').forEach(function (r) {
+                    r.classList.remove('row1', 'row2');
+                    if (r.style.display === 'none') return;
+                    r.classList.add((i++) % 2 === 0 ? 'row1' : 'row2');
+                });
+                /* We don't touch borders: every row always has a line, and there is no doubling at
+                   the bottom,
+                   because the table overlaps the product section's line with its -1px
+                   (see #cs-mtable). Previously the last line was removed dynamically,
+                   and the row height changed, so the text jerked on expand.
+                 */
+            }
+            /* Visibility is computed top to bottom: a collapsed section hides its ENTIRE subtree. */
+            function applyVisibility() {
+                var hiddenDepth = null;
+                nodeRows().forEach(function (r) {
+                    var d = depthOf(r);
+                    if (hiddenDepth !== null && d > hiddenDepth) { r.style.display = 'none'; return; }
+                    hiddenDepth = null;
+                    r.style.display = '';
+                    if (hasKids(r) && r._nd._open === false) hiddenDepth = d;
+                });
+                restripe();
+            }
+            /* The arrow in the header is in the "open" state only when no section is collapsed. */
+            function syncMaster() {
+                var branches = nodeRows().filter(hasKids);
+                var anyClosed = branches.some(function (r) { return r._nd._open === false; });
+                master.classList.toggle('open', !anyClosed && branches.length > 0);
+                master.title = anyClosed ? 'Expand all' : 'Collapse all';
+                master.style.visibility = branches.length ? '' : 'hidden';
+            }
+            /* Continuous numbering by level: 1 → 1.1 → 1.1.1. The row also
+               switches between the section and lesson look, depending on its children.
+             */
+            function renumber() {
+                /* There is never an empty table: while there are no nodes, the screen shows only
+                   the
+                   "+ Add module" button (like the products table in an order).
+                 */
+                table.style.display = tbody.children.length ? '' : 'none';
+                var cnt = [];
+                nodeRows().forEach(function (r) {
+                    var d = depthOf(r), branch = hasKids(r);
+                    /* length = d+1 (not d): we truncate only DEEPER levels and keep our own
+                       counter, otherwise every node would be "1" again.
+                     */
+                    cnt.length = d + 1;
+                    cnt[d] = (cnt[d] || 0) + 1;
+                    r._numCell.textContent = cnt.slice(0, d + 1).join('.');
+                    r._nameCell.style.paddingLeft = (12 + d * 22) + 'px';
+                    r.className = branch ? 'cs-grp' : 'cs-lrow';
+                    r._name.className = branch ? 'cs-mname' : 'cs-lname';
+                    r._name.classList.toggle('is-empty', !(r._nd.title || '').trim());
+                    r._chev.style.display = branch ? '' : 'none';
+                    r.style.cursor = branch ? 'pointer' : 'default';
+                    if (branch) {
+                        var n = kidRows(r).filter(function (k) { return !hasKids(k); }).length;
+                        r._count.textContent = n ? '(' + n + ')' : '';
+                        r._count.title = n + ' lessons (including subsections)';
+                    } else {
+                        r._count.textContent = '';
+                    }
+                });
+                applyVisibility();
+                syncMaster();
+            }
+
+            /* ── Drag and drop: a node moves together with its subtree, the level comes from the
+               horizontal mouse offset (22px per level) ──
+             */
+            function dropLine() {
+                var e = document.getElementById('cs-drop-line');
+                if (!e) { e = document.createElement('div'); e.id = 'cs-drop-line'; document.body.appendChild(e); }
+                return e;
+            }
+            function hideLine() { var e = document.getElementById('cs-drop-line'); if (e) e.style.display = 'none'; }
+            function initDrag(node, handle) {
+                handle.addEventListener('mousedown', function (e) {
+                    if (e.button !== 0) return;
+                    e.preventDefault();
+                    var moving = subtree(node);
+                    var startX = e.clientX, baseDepth = depthOf(node), newDepth = baseDepth;
+                    var ref = null, before = true;
+                    moving.forEach(function (r) { r.classList.add('cs-dragging'); });
+                    document.body.classList.add('cat-dragging-active');
+                    function onMove(ev) {
+                        var peers = nodeRows().filter(function (r) {
+                            return r.style.display !== 'none' && moving.indexOf(r) === -1;
+                        });
+                        ref = null;
+                        if (!peers.length) { hideLine(); return; }
+                        var under = peers[peers.length - 1];
+                        before = false;
+                        for (var i = 0; i < peers.length; i++) {
+                            var rc0 = peers[i].getBoundingClientRect();
+                            if (ev.clientY < rc0.bottom) {
+                                under = peers[i];
+                                before = ev.clientY < rc0.top + rc0.height / 2;
+                                break;
+                            }
+                        }
+                        ref = under;
+                        var prev = before ? under.previousElementSibling : under;
+                        while (prev && moving.indexOf(prev) !== -1) prev = prev.previousElementSibling;
+                        var maxDepth = prev ? depthOf(prev) + 1 : 0;
+                        var want = baseDepth + Math.round((ev.clientX - startX) / 22);
+                        newDepth = Math.max(0, Math.min(want, maxDepth));
+                        var rc = under.getBoundingClientRect(), bx = table.getBoundingClientRect();
+                        var ln = dropLine();
+                        var ind = newDepth * 22;
+                        ln.style.left = (bx.left + ind) + 'px';
+                        ln.style.width = (bx.width - ind) + 'px';
+                        ln.style.top = ((before ? rc.top : rc.bottom) - 1) + 'px';
+                        ln.style.display = 'block';
+                    }
+                    function onUp() {
+                        document.removeEventListener('mousemove', onMove);
+                        document.removeEventListener('mouseup', onUp);
+                        moving.forEach(function (r) { r.classList.remove('cs-dragging'); });
+                        document.body.classList.remove('cat-dragging-active');
+                        hideLine();
+                        if (!ref) return;
+                        var anchor = before ? ref : (subtree(ref).pop().nextSibling);
+                        var delta = newDepth - baseDepth;
+                        if (delta) {
+                            moving.forEach(function (r) { r._depth = Math.max(0, depthOf(r) + delta); });
+                        }
+                        moving.forEach(function (r) { tbody.insertBefore(r, anchor); });
+                        /* The node may have moved into a collapsed section, so we show it together with that section. */
+                        var host = node.previousElementSibling;
+                        while (host && depthOf(host) >= depthOf(node)) host = host.previousElementSibling;
+                        if (host && host._nd._open === false) host._toggle(true);
+                        renumber(); dirty();
+                    }
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
+                });
+            }
+
+            /* ── Fill / reset ── */
+            function rebuild(data) {
+                closeModal();
+                stash.innerHTML = '';
+                tbody.innerHTML = '';
+                (function walk(nodes, depth) {
+                    nodes.forEach(function (n) {
+                        n.depth = depth;
+                        tbody.appendChild(buildNodeRow(n));
+                        walk(n.children || [], depth + 1);
+                    });
+                })(JSON.parse(JSON.stringify(data)), 0);
+                renumber();
+            }
+            addBtn.addEventListener('click', function () {
+                openNewNode('New module', function (nd) {
+                    nd.depth = 0;
+                    tbody.appendChild(buildNodeRow(nd));
+                    renumber(); dirty();
+                });
+            });
+
+            function collect() {
+                var out = [], stack = [];
+                nodeRows().forEach(function (r) {
+                    var nd = r._nd, d = depthOf(r);
+                    var node = {
+                        mod_id: nd.mod_id || null,
+                        les_id: nd.les_id || null,
+                        key: nd.key,
+                        title: (nd.title || '').trim(),
+                        is_active: nd.showCb.checked,
+                        /* The node may never have been opened; then there are no fields
+                           and we take the values that came from the server.
+                         */
+                        lesson_type: nodeType(nd),
+                        content: nd.quill ? quillHtml(nd.quill) : (nd.content || ''),
+                        duration_minutes: nodeDuration(nd),
+                        is_preview: nd.prevCb ? nd.prevCb.checked : !!nd.is_preview,
+                        video_clear: !!nd.video_clear,
+                        poster_clear: !!nd.poster_clear,
+                        children: [],
+                    };
+                    if (d === 0 || !stack[d - 1]) out.push(node);
+                    else stack[d - 1].children.push(node);
+                    stack.length = d;
+                    stack[d] = node;
+                });
+                return out;
+            }
+            host.addEventListener('submit', function () { hidden.value = JSON.stringify(collect()); });
+            rebuild(RAW);
+            /* "Cancel": restore the tree to its saved state. */
+            _csFileResets.push(function () { rebuild(RAW); });
+        })();
+
+        /* "Cancel" calls form.reset(), which does NOT restore either the Quill content
+           (the textarea rolls back, but the editor keeps the old DOM) or the
+           photo/video cards, so we restore both.
+         */
+        window.clCancelHook = function() {
+            _csFileResets.forEach(function (fn) { try { fn(); } catch (e) {} });
+            document.querySelectorAll('.paste-target-active').forEach(function (el) {
+                el.classList.remove('paste-target-active');
+            });
+            Object.values(window._quillInstances || {}).forEach(function(q) {
+                var wrapper = q.root.closest('.quill-wrapper');
+                var ta = wrapper && wrapper.querySelector('textarea');
+                if (!ta) return;
+                q.setContents([]);
+                if (ta.value) q.clipboard.dangerouslyPasteHTML(ta.value);
+            });
+        };
+    });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="app-modal-overlay is-open" style="position:static;background:transparent;display:flex;align-items:flex-start;padding-top:60px;">
+  <div class="app-modal-box app-modal-box--wide">
+    <h2 class="app-modal-title">Create {{ counter_label }}?</h2>
+    <p style="margin:0 0 8px;color:#374151;">A new paired product will be created for <strong>{{ src.name }}</strong>.</p>
+    <p style="margin:0 0 24px;color:#6b7280;font-size:var(--fs-base);">The data (name, brand, categories, description, photos, variants) will be copied. You can then edit them independently.</p>
+    <form method="post" class="app-modal-actions" style="margin-top:0;">
+      {% csrf_token %}
+      <a href="/admin/catalog/product/{{ src.pk }}/change/" class="app-toolbar-btn">Cancel</a>
+      <button type="submit" class="app-toolbar-btn app-toolbar-btn--primary">Create</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

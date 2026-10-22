@@ -1,0 +1,266 @@
+{% comment %}
+Shared tab controller for Quill editors.
+Combines several editors (Description / Raw text / Norms / ...) into ONE block
+with a tab switcher, collapsing (click on the panel outside the tabs)
+and a data-presence indicator.
+API:
+  window.PGQuillTabs(items, mount, opts)
+    items: [{el, label, open, filled}]
+      el     — editor container (form-row, .quill-wrapper or a wrapper)
+      open   — fn to expand the Quill of the active tab
+      filled — (opt.) fn -> bool: whether there is data (when the textarea/.ql-editor is not inside el)
+      right  — (opt.) push the tab (or its group) to the right edge of the panel
+    mount  — mount node; opts.before=true → insert BEFORE mount
+  block.__refreshDots()       — recompute the data-presence indicators. The block updates them
+                                itself when the DOM inside changes (typing in Quill, programmatic
+                                filling, lists); a manual call is needed when data
+                                changes without a DOM change - the value of a plain textarea
+                                or state outside el (when filled is given)
+  window.pgRevealEditor(node) — expand the block and activate the tab of node
+{% endcomment %}
+{% load static %}
+{% comment %}
+Quill is loaded only here (pages with an editor), not globally in base_site.html —
+otherwise 209KB of JS + CSS blocked the rendering of EVERY admin page, including lists.
+{% endcomment %}
+<link href="{% static 'admin/quill/quill.snow.css' %}" rel="stylesheet">
+<script src="{% static 'admin/quill/quill.js' %}"></script>
+<script>
+(function() {
+  if (typeof Quill === 'undefined') return;
+  var SizeStyle = Quill.import('attributors/style/size');
+  SizeStyle.whitelist = ['10px','12px','14px','16px','18px','20px','24px','28px','32px','36px','48px'];
+  Quill.register({'formats/size': SizeStyle}, true);
+})();
+</script>
+<style>
+.qtab-block { border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; margin: 14px 20px; background: #fff; }
+
+/* Tab bar (also the collapse control: a click outside the tabs collapses/expands) */
+.qtab-bar { display: flex; flex-wrap: nowrap; align-items: stretch; gap: 12px; padding: 0 8px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; cursor: pointer; transition: background .12s; }
+/* Hover over the whole clickable strip of the bar (the arrow has no hover of its own) */
+.qtab-bar:hover { background: #f1f3f5; }
+/* Tabs — "underline" style: same height, no borders/background that jump around.
+   Active = bottom line, layout does not shift on click.
+ */
+.qtab {
+    appearance: none; font: inherit; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .4px; color: #c2c7d0;
+    background: transparent; border: none; border-bottom: 2px solid transparent;
+    padding: 11px 12px; margin-bottom: -1px; cursor: pointer; line-height: 1;
+    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+    transition: color .12s, border-color .12s;
+}
+/* Data-presence indicator — WITHOUT dots: empty tabs are pale (semi-transparent),
+   filled ones are saturated dark, the active one is the darkest with an underline.
+ */
+.qtab.has-data { color: #4b5563; }
+.qtab:hover { color: #111827; }
+.qtab.active { color: #111827; border-bottom-color: #111827; }
+/* A pair of related tabs (general + variant of the same field, e.g. "General description"
+   + "Variant description") — no fill: the pair's
+   tabs sit flush (gap 0), and a more noticeable gap separates the pair from its
+   neighbors. This way the pair reads as one block.
+   Inside the pair there is a thin divider between the two tabs.
+ */
+.qtab-pair { display: inline-flex; align-items: stretch; gap: 0; }
+.qtab-pair .qtab + .qtab { position: relative; }
+.qtab-pair .qtab + .qtab::before {
+    content: ''; position: absolute; left: 0; top: 10px; bottom: 10px;
+    width: 1px; background: #e5e7eb;
+}
+/* The dot was removed (no green indicator). */
+.qtab-dot { display: none; }
+
+.qtab-block.collapsed .qtab-body { display: none; }
+.qtab-block.collapsed .qtab-bar { border-bottom: none; }
+/* Collapsed block — tabs stay visible, but NONE is selected
+   (no underline on the active one). Only which tabs are filled is visible (.has-data).
+ */
+.qtab-block.collapsed .qtab.active { color: #c2c7d0; border-bottom-color: transparent; }
+.qtab-block.collapsed .qtab.active.has-data { color: #4b5563; }
+/* Hover of the active tab in the collapsed state: the rule above is more specific than
+   .qtab:hover and killed the highlight (typically this is the default tab — "General
+   description"). We restore the highlight on hover.
+ */
+.qtab-block.collapsed .qtab.active:hover { color: #111827; }
+
+/* Editor zone — a SINGLE look for all types (form-row / wrapper / custom section) */
+#content-main .qtab-item { display: none !important; }
+#content-main .qtab-item.active { display: block !important; }
+/* the editor's own collapsing header is not needed inside the tabs */
+.qtab-item .quill-wrapper > div:first-child,
+.qtab-item.quill-wrapper > div:first-child { display: none !important; }
+/* remove nested borders/padding of the various wrappers */
+#content-main .qtab-item.form-row, #content-main .qtab-item .form-row { padding: 0 !important; border: none !important; margin: 0 !important; }
+/* The editor can be resized by its bottom edge — resize sits on .quill-wrapper
+   (flex-column), because the inner .ql-container has flex:1 and ignores its own height.
+   min-height keeps a minimum for the empty state.
+ */
+.qtab-item .quill-wrapper, .qtab-item.quill-wrapper { border: none !important; box-shadow: none !important; margin: 0 !important; min-height: 220px; resize: vertical; overflow: hidden; }
+/* The raw-text editor (AI) lives INSIDE the content of the Characteristics/Composition tab
+   (both are .info-section) — we give it back its own outline so that it reads as a separate
+   tool. And when raw text is itself a tab ("Raw text"), its wrapper
+   .qtab-item does NOT have .info-section — no frame is needed there (the block is framed by
+   .qtab-block),
+   so it stays embedded like the rest of the tab editors.
+ */
+.info-section .quill-wrapper[data-raw-editor] { border: 1px solid #e5e7eb !important; border-radius: 6px !important; margin-top: 10px !important; }
+.qtab-item .flex-container { display: block !important; }
+/* Quill snow: no double borders — only a thin toolbar/field divider.
+   We keep the native (Quill) button grouping; what matters is only that the set/groups are
+   the same in all editors (see the identical TOOLBAR).
+ */
+.qtab-item .ql-toolbar.ql-snow { border: none !important; border-bottom: 1px solid #f0f0f0 !important; padding: 8px 12px !important; }
+.qtab-item .ql-container.ql-snow { border: none !important; font-size: 14px; }
+.qtab-item .ql-editor { padding: 14px 20px; box-sizing: border-box; }
+</style>
+<script>
+(function() {
+    function stripped(html) {
+        return String(html || '')
+            .replace(/<p>\s*<br\s*\/?>\s*<\/p>/gi, '')
+            .replace(/<[^>]*>/g, '')
+            .replace(/[\s ]|&nbsp;/g, '');
+    }
+    function itemHasData(it) {
+        if (typeof it.filled === 'function') { try { return !!it.filled(); } catch (_) { return false; } }
+        var el = it.el;
+        var q = el.querySelector('.ql-editor');
+        if (q) {
+            if (stripped(q.innerHTML)) return true;
+            return !!el.querySelector('.ql-editor img, .ql-editor table, .ql-editor iframe');
+        }
+        var ta = el.querySelector('textarea[name]');
+        if (ta) return !!stripped(ta.value);
+        return false;
+    }
+
+    window.PGQuillTabs = function(items, mount, opts) {
+        opts = opts || {};
+        items = (items || []).filter(function(it) { return it && it.el; });
+        if (items.length < 2) return null;
+
+        var block = document.createElement('div');
+        block.className = 'qtab-block';
+
+        /* Tab bar (no separate header). */
+        var bar = document.createElement('div');
+        bar.className = 'qtab-bar';
+        block.appendChild(bar);
+
+        /* Body with the editors. */
+        var body = document.createElement('div');
+        body.className = 'qtab-body';
+        block.appendChild(body);
+
+        var tabEls = [];
+        var pairWraps = {};
+        items.forEach(function(it, i) {
+            var t = document.createElement('button');
+            t.type = 'button';
+            t.className = 'qtab' + (it.variant ? ' qtab-variant' : '');
+            var dot = document.createElement('span'); dot.className = 'qtab-dot';
+            var lbl = document.createElement('span'); lbl.textContent = it.label;
+            t.appendChild(dot); t.appendChild(lbl);
+            t.addEventListener('click', function() { block.classList.remove('collapsed'); activate(i); });
+            tabEls.push(t);
+            /* Related tabs (same it.group, e.g. general + variant description) go
+               into a shared .qtab-pair backing. it.right pushes the group (or a single
+               tab) to the right (raw text). Single tabs go straight into the bar.
+             */
+            if (it.group) {
+                var w = pairWraps[it.group];
+                if (!w) {
+                    w = document.createElement('div');
+                    w.className = 'qtab-pair';
+                    if (it.right) w.style.marginLeft = 'auto';
+                    pairWraps[it.group] = w;
+                    bar.appendChild(w);
+                }
+                w.appendChild(t);
+            } else {
+                if (it.right) t.style.marginLeft = 'auto';
+                bar.appendChild(t);
+            }
+            it.el.classList.add('qtab-item');
+            body.appendChild(it.el);
+            it.el.__qtabActivate = function() { block.classList.remove('collapsed'); activate(i); };
+        });
+
+        /* Collapse/expand — by clicking anywhere on the bar EXCEPT the tabs themselves
+           (a click on a tab switches the tab).
+         */
+        bar.addEventListener('click', function(e) {
+            if (e.target.closest('.qtab')) return;
+            block.classList.toggle('collapsed');
+        });
+
+        function refreshDots() {
+            items.forEach(function(it, j) { tabEls[j].classList.toggle('has-data', itemHasData(it)); });
+        }
+        function activate(i) {
+            items.forEach(function(it, j) {
+                var on = j === i;
+                it.el.classList.toggle('active', on);
+                tabEls[j].classList.toggle('active', on);
+                if (on && it.open) { try { it.open(); } catch (_) {} }
+            });
+            refreshDots();
+        }
+
+        /* Indicators follow the content on their own. An editor filled by code (AI wand,
+           "Run through AI", async loading) gives neither a click on the tab
+           nor an event - so without this the tab lit up only when you entered it. Deferred
+           call: Quill writes to the textarea after the DOM change, and typing text emits
+           dozens of changes.
+         */
+        if (window.MutationObserver) {
+            var dotsTimer = null;
+            new MutationObserver(function() {
+                clearTimeout(dotsTimer);
+                dotsTimer = setTimeout(refreshDots, 80);
+            }).observe(body, { childList: true, subtree: true, characterData: true });
+        }
+
+        if (mount && mount.parentNode) {
+            if (opts.before) mount.parentNode.insertBefore(block, mount);
+            else mount.parentNode.insertBefore(block, mount.nextSibling);
+        }
+        activate(opts.active || 0);
+        /* By default the block is always collapsed. The tabs are visible, but the active one is not
+           highlighted (CSS .collapsed), only the filled indicator is visible. A click on a
+           tab expands the block and selects that tab.
+         */
+        block.classList.add('collapsed');
+        block.__activate = activate;
+        block.__refreshDots = refreshDots;
+        return block;
+    };
+
+    /* Find the .qtab-item ancestor of the node, expand the block and activate its tab. */
+    window.pgRevealEditor = function(node) {
+        var el = node;
+        while (el && el !== document.body) {
+            if (el.classList && el.classList.contains('qtab-item') && el.__qtabActivate) {
+                el.__qtabActivate();
+                return true;
+            }
+            el = el.parentNode;
+        }
+        return false;
+    };
+
+    /* Helper: get the open function of the Quill editor inside a container. */
+    window.pgQuillOpener = function(containerEl) {
+        return function() {
+            var w = containerEl.classList && containerEl.classList.contains('quill-wrapper')
+                ? containerEl
+                : containerEl.querySelector('.quill-wrapper');
+            if (!w) return;
+            var fn = w._openEditor || w._open;
+            if (fn) fn();
+        };
+    };
+})();
+</script>

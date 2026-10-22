@@ -1,0 +1,4503 @@
+{% extends "admin/base.html" %}
+{% load static %}
+
+{% block extrahead %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'admin/filter-popup.css' %}">
+<link rel="stylesheet" href="{% static 'admin/stock-demand-modal.css' %}?v=2">
+<script src="{% static 'admin/stock-demand-modal.js' %}?v=2" defer></script>
+<style>
+/* ── Anti-FOUC ─────────────────────────────────────────────────────────────
+   Before our JS rebuilds the sidebar/object-tools/cl-bar, the standard Django
+   admin shows a "bare" layout for a split second (a flat list of models in the
+   sidebar, the Add button separately on the right, etc.). We hide body until
+   DOMContentLoaded (the inline script below removes the class) — this eliminates
+   the flicker.
+ */
+html.preload body { visibility: hidden; }
+</style>
+<script>
+document.documentElement.classList.add('preload');
+document.addEventListener('DOMContentLoaded', function(){
+  /* requestAnimationFrame — so it has time to render with the final styles already applied. */
+  requestAnimationFrame(function(){
+    document.documentElement.classList.remove('preload');
+  });
+});
+</script>
+<script>
+/* ── Disable Tab navigation ─────────────────────────────────────────────────
+   At the user's request, Tab does NOT move focus between admin fields.
+   Intercepted in the capture phase to suppress it before the browser changes focus.
+   To remove — delete this block.
+ */
+(function(){
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Tab' || e.keyCode === 9) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+})();
+</script>
+<script>
+/* ── Clipboard polyfill ───────────────────────────────────────────────────
+   navigator.clipboard is available only in a secure context (HTTPS / localhost).
+   In prod over HTTP (before the domain+SSL is connected) it is undefined — all
+   copy buttons failed with an error. Polyfill: fallback to execCommand, which
+   also works over HTTP. It can be removed, but doesn't have to be — it is safe.
+ */
+(function () {
+  if (navigator.clipboard && navigator.clipboard.writeText) return;
+  navigator.clipboard = navigator.clipboard || {};
+  navigator.clipboard.writeText = function (text) {
+    return new Promise(function (resolve, reject) {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-9999px';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        ok ? resolve() : reject(new Error('copy failed'));
+      } catch (e) { reject(e); }
+    });
+  };
+})();
+</script>
+<script>
+/* ── Global helper: vertical popup position with flip-up ──────────────
+   If a popup of the given height doesn't fit below the trigger and there is more room
+   above — returns top ABOVE the trigger; otherwise — below it. Viewport coordinates
+   (rect — from getBoundingClientRect). Call AFTER the popup is in the DOM and
+   visible (so that offsetHeight is valid):
+     el.style.top = clFlipTop(triggerRect, el.offsetHeight) + 'px';
+   gap — offset from the trigger (default 2), margin — from the screen edges (default 8).
+ */
+/* Current CSS zoom of body (on Mac <1, on PC =1). getBoundingClientRect returns
+   visual px, while position:fixed inside zoom interprets top/left in zoom px —
+   so visual coordinates must be divided by zoom before being assigned to style.
+ */
+window.clZoom = function () {
+  var z = parseFloat(getComputedStyle(document.body).zoom);
+  return (z && z > 0) ? z : 1;
+};
+window.clFlipTop = function (rect, popupH, gap, margin) {
+  gap = (gap == null) ? 2 : gap;
+  margin = (margin == null) ? 8 : margin;
+  var z = window.clZoom();
+  var vh = window.innerHeight;              // visual-px
+  var ph = popupH * z;                      // popupH=offsetHeight(CSS) → visual
+  var below = vh - rect.bottom - margin;    // free space below (visual)
+  var above = rect.top - margin;            // free space above (visual)
+  var topV = (ph > below && above > below)
+    ? Math.max(margin, rect.top - gap - ph) // doesn't fit below — flip upward
+    : (rect.bottom + gap);
+  return topV / z;                          // visual → zoom-px for style.top
+};
+/* Horizontal counterpart: visual X (from getBoundingClientRect) → zoom-px for
+   style.left of a fixed popup. On PC (zoom=1) returns the same value.
+ */
+window.clX = function (vx) {
+  return vx / window.clZoom();
+};
+/* Like clFlipTop, but horizontal: aligns the popup to the trigger's left edge,
+   keeps it within the screen (margin) and returns zoom-px for style.left.
+   popupW — the popup's offsetWidth (CSS px); pass 0 if the width is unknown.
+ */
+window.clFlipLeft = function (rect, popupW, margin) {
+  margin = (margin == null) ? 8 : margin;
+  var z = window.clZoom();
+  var vw = window.innerWidth;               // visual-px
+  var pw = (popupW || 0) * z;               // CSS → visual
+  var leftV = rect.left;                    // visual: at the trigger's left edge
+  if (leftV + pw > vw - margin) leftV = vw - margin - pw;
+  if (leftV < margin) leftV = margin;
+  return leftV / z;                         // visual → zoom-px for style.left
+};
+</script>
+<script>
+/* ── Auto-close filter popups when the mouse moves away ─────────────────────
+   Convention (filter-popup.css): a popup has an id ending in "flt-pop" and
+   is shown with the .open class; the trigger header gets .col-open. Globally
+   we close an open popup IMMEDIATELY once the cursor is NOT over it and NOT over its
+   header — except when something inside has focus (the user is typing
+   in the filter). We close only by removing the classes — same as each list's local
+   closePop (popOwner does not affect the open toggle).
+ */
+(function(){
+  function openPop(){ return document.querySelector('[id$="flt-pop"].open'); }
+  function typingInPop(pop){
+    var a = document.activeElement;
+    return !!(a && pop.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
+  }
+  document.addEventListener('mouseover', function(e){
+    var pop = openPop();
+    if(!pop) return;
+    var stay = pop.contains(e.target)
+      || !!(e.target.closest && e.target.closest('th[data-col].col-open'));
+    if(stay || typingInPop(pop)) return;
+    pop.classList.remove('open');
+    document.querySelectorAll('th[data-col].col-open').forEach(function(th){ th.classList.remove('col-open'); });
+  });
+}());
+</script>
+<style>
+/* ── Global click-to-copy on text (a single style for all tables) ──
+   An element with the .copy-on-click class: cursor + underline on hover, green
+   flash on copy. The value comes from data-copy (otherwise textContent).
+ */
+/* padding-bottom extends the clip area of the host's overflow:hidden (ellipsis/clamp) so that the
+   lowered underline isn't cut off; margin-bottom:-4px removes this padding from the
+   layout (spacing doesn't drift).
+ */
+.copy-on-click { cursor: pointer; padding-bottom: 4px; margin-bottom: -4px; }
+/* Underline below the text and solid (skip-ink:none — doesn't break around letter
+   descenders like g/p/y…).
+ */
+.copy-on-click:hover { text-decoration: underline; text-decoration-color: #9ca3af; text-underline-offset: 4px; text-decoration-skip-ink: none; }
+.copy-on-click.copied { color: #16a34a !important; text-decoration: none; }
+</style>
+<script>
+(function(){
+  /* Capture phase + stop/preventDefault — so that the click copies and does NOT trigger
+     row navigation or following a link.
+   */
+  document.addEventListener('click', function(e){
+    var el = e.target.closest && e.target.closest('.copy-on-click');
+    if(!el) return;
+    e.stopPropagation();
+    e.preventDefault();
+    var val = (el.dataset && el.dataset.copy != null) ? el.dataset.copy : el.textContent;
+    try { navigator.clipboard.writeText(val); } catch(_){}
+    el.classList.add('copied');
+    if(el._copyT) clearTimeout(el._copyT);
+    el._copyT = setTimeout(function(){ el.classList.remove('copied'); }, 900);
+  }, true);
+})();
+</script>
+<script>
+/* ── Changelist URL state persistence ─────────────────────────────────────
+   We save the query of the current list (valid only, without the error flag ?e=1)
+   to localStorage. On the change/add page we modify the href of the "Exit"
+   button so that it leads to the list with the saved filters.
+   We don't redirect a bare URL — to avoid flashes/loops with invalid queries.
+ */
+(function() {
+  try {
+    // Custom lists (product/bundle/dropshipping/orders) manage state themselves
+    // via their own localStorage — they don't need URL state, otherwise there would be an extra
+    // redirect.
+    var CUSTOM = {'catalog/product':1, 'catalog/bundle':1, 'catalog/dropshipping':1, 'orders/order':1};
+    var p = window.location.pathname;
+    var clMatch = p.match(/^\/admin\/([a-z_]+)\/([a-z_]+)\/$/i);
+    if (clMatch) {
+      var slug = clMatch[1] + '/' + clMatch[2];
+      if (CUSTOM[slug]) return;
+      var key = 'admin_cl_state:' + slug;
+      var s = window.location.search;
+      // Filter error page (?e=1, ?e=2) — reset the saved state so that the
+      // redirect below doesn't trap the user on a broken filter.
+      if (s && /[?&]e=\d/.test(s)) {
+        try { localStorage.removeItem(key); } catch(e) {}
+        return;
+      }
+      if (s) {
+        // Valid query — save it as the list's last state.
+        try { localStorage.setItem(key, s); } catch(e) {}
+        return;
+      }
+      // "Bare" URL (arrived via the menu) — restore the last saved state.
+      // We do this in <head> before rendering, so there is almost no flash. The "Reset
+      // filters" button clears the key, so a reset isn't overridden by the
+      // redirect.
+      var saved;
+      try { saved = localStorage.getItem(key); } catch(e) {}
+      if (saved) { window.location.replace(p + saved); }
+      return;
+    }
+    // On the change/add page: replace the href of "Exit" if there is a saved state.
+    var changeMatch = p.match(/^\/admin\/([a-z_]+)\/([a-z_]+)\/(?:add|\d+\/(?:change|history))\/?$/i);
+    if (!changeMatch) return;
+    if (CUSTOM[changeMatch[1] + '/' + changeMatch[2]]) return;
+    var changeKey = 'admin_cl_state:' + changeMatch[1] + '/' + changeMatch[2];
+    var saved;
+    try { saved = localStorage.getItem(changeKey); } catch(e) {}
+    if (!saved) return;
+    document.addEventListener('DOMContentLoaded', function(){
+      var exit = document.querySelector('.submit-row-top a.exit-link');
+      if (!exit) return;
+      try {
+        var u = new URL(exit.href, window.location.origin);
+        // If we already have a query — don't touch it (admin itself passed _changelist_filters).
+        if (!u.search) exit.href = u.pathname + saved;
+      } catch(e) {}
+    });
+  } catch(e) {}
+})();
+</script>
+<script>
+/* ── GLOBAL RIGHT-CLICK BLOCK — must be first ── */
+(function() {
+  function block(e) {
+    if (e.button !== 2) return;
+    e.stopImmediatePropagation();
+    if (e.cancelable) e.preventDefault();
+  }
+  ['mousedown','mouseup','click','auxclick','pointerdown','pointerup','dblclick'].forEach(function(ev) {
+    document.addEventListener(ev, block, true);
+    window.addEventListener(ev, block, true);
+  });
+})();
+</script>
+<style>
+/* ── Instant closing of all popups — without transition/animation ── */
+.ql-picker-options, .ql-picker, .ql-picker-label, .ql-picker-item,
+.picker-popup, .picker-popup-inner,
+[class*="picker"], [class*="dropdown"], [class*="drop"] {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* ── Quill editor — CRM style ── */
+.quill-wrapper { border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; background: #fff; resize: vertical; min-height: 220px; display: flex; flex-direction: column; margin-bottom: 10px; }
+.quill-wrapper .ql-container { flex: 1; overflow-y: auto; }
+.ql-snow .ql-picker-options { max-height: 140px; overflow-y: auto; }
+.ql-snow .ql-picker.ql-size, .ql-snow .ql-picker.ql-header { width: 90px !important; }
+.quill-wrapper .ql-editor { min-height: 0; height: 100%; }
+.quill-wrapper .ql-toolbar { border: none !important; border-bottom: 1px solid #e5e7eb !important; background: #f9fafb; padding: 6px 10px; }
+.quill-wrapper .ql-container { border: none !important; font-family: inherit; font-size: 14px; }
+.quill-wrapper .ql-editor { min-height: 160px; padding: 12px 14px; color: #1f2937; line-height: 1.6; }
+.quill-wrapper .ql-editor.ql-blank::before { color: #9ca3af; font-style: normal; }
+
+/* paragraph spacing in editor */
+.quill-wrapper .ql-editor p { margin: 0 0 10px 0; }
+.quill-wrapper .ql-editor p:last-child { margin-bottom: 0; }
+
+/* tables in editor */
+.quill-wrapper .ql-editor table { border-collapse: collapse; width: 100%; margin: 10px 0; table-layout: fixed; border: 1px solid #d1d5db; }
+.quill-wrapper .ql-editor table td:first-child, .quill-wrapper .ql-editor table th:first-child { width: 40%; }
+.quill-wrapper .ql-editor table td, .quill-wrapper .ql-editor table th { border: 1px solid #d1d5db; padding: 7px 12px; font-size: 13px; color: #1f2937; background: #fff; }
+.quill-wrapper .ql-editor table th, .quill-wrapper .ql-editor table thead td { font-weight: 600; }
+.quill-wrapper .ql-editor table tr:first-child td { font-weight: 600; }
+/* remove the "white box" inside cells — flatten nested blocks */
+.quill-wrapper .ql-editor table td > p,
+.quill-wrapper .ql-editor table th > p,
+.quill-wrapper .ql-editor table td > div,
+.quill-wrapper .ql-editor table th > div {
+    margin: 0 !important; padding: 0 !important;
+    background: transparent !important; border: none !important;
+    display: block; min-height: 1em;
+}
+
+/* superscript / subscript rendering */
+.quill-wrapper .ql-editor sup { vertical-align: super; font-size: 0.75em; line-height: 0; }
+.quill-wrapper .ql-editor sub { vertical-align: sub; font-size: 0.75em; line-height: 0; }
+
+/* link tooltip — CRM style */
+.quill-wrapper .ql-tooltip {
+  position: absolute !important;
+  left: 12px !important;
+  right: auto !important;
+  margin-top: 8px !important;
+  transform: none !important;
+  background: #fff !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 6px !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,.10) !important;
+  padding: 6px 8px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  white-space: nowrap !important;
+  max-width: calc(100% - 24px) !important;
+  z-index: 100 !important;
+  color: #374151 !important;
+  font-size: 13px !important;
+}
+.quill-wrapper .ql-tooltip.ql-hidden { display: none !important; }
+.quill-wrapper .ql-tooltip[data-mode=link]::before { content: 'Link:' !important; color: #6b7280 !important; font-size: 12px !important; margin-right: 4px !important; border-right: none !important; padding-right: 0 !important; }
+.quill-wrapper .ql-tooltip[data-mode=video]::before { content: 'Video URL:' !important; color: #6b7280 !important; font-size: 12px !important; margin-right: 4px !important; border-right: none !important; padding-right: 0 !important; }
+.quill-wrapper .ql-tooltip[data-mode=formula]::before { content: 'Formula:' !important; color: #6b7280 !important; font-size: 12px !important; margin-right: 4px !important; border-right: none !important; padding-right: 0 !important; }
+.quill-wrapper .ql-tooltip:not([data-mode])::before { content: '' !important; margin: 0 !important; padding: 0 !important; border: none !important; }
+.quill-wrapper .ql-tooltip input[type=text] {
+  flex: 1 1 auto !important;
+  min-width: 200px !important;
+  max-width: 360px !important;
+  height: 28px !important;
+  padding: 0 8px !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 4px !important;
+  font-size: 13px !important;
+  color: #1f2937 !important;
+  background: #fff !important;
+  outline: none !important;
+  display: inline-block !important;
+}
+.quill-wrapper .ql-tooltip input[type=text]:focus { border-color: #9ca3af !important; }
+.quill-wrapper .ql-tooltip:not(.ql-editing) input[type=text] { display: none !important; }
+.quill-wrapper .ql-tooltip.ql-editing a.ql-preview { display: none !important; }
+.quill-wrapper .ql-tooltip a.ql-preview {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  max-width: 360px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  color: #374151 !important;
+  text-decoration: none !important;
+  font-size: 13px !important;
+  border: none !important;
+  padding: 0 4px !important;
+}
+.quill-wrapper .ql-tooltip a.ql-preview:hover { color: #1f2937 !important; text-decoration: underline !important; }
+.quill-wrapper .ql-tooltip a.ql-action,
+.quill-wrapper .ql-tooltip a.ql-remove {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 28px !important;
+  box-sizing: border-box !important;
+  padding: 0 12px !important;
+  margin: 0 !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 4px !important;
+  background: #fff !important;
+  color: #374151 !important;
+  font-size: 13px !important;
+  font-family: inherit !important;
+  font-weight: 400 !important;
+  line-height: 1 !important;
+  cursor: pointer !important;
+  text-decoration: none !important;
+  white-space: nowrap !important;
+}
+.quill-wrapper .ql-tooltip a.ql-action::before,
+.quill-wrapper .ql-tooltip a.ql-action::after,
+.quill-wrapper .ql-tooltip a.ql-remove::before,
+.quill-wrapper .ql-tooltip a.ql-remove::after {
+  border: none !important; margin: 0 !important; padding: 0 !important; content: '' !important;
+}
+.quill-wrapper .ql-tooltip.ql-editing a.ql-action::before { content: 'Save' !important; }
+.quill-wrapper .ql-tooltip:not(.ql-editing) a.ql-action::before { content: 'Edit' !important; }
+.quill-wrapper .ql-tooltip a.ql-remove::before { content: 'Remove' !important; }
+.quill-wrapper .ql-tooltip a.ql-action:hover,
+.quill-wrapper .ql-tooltip a.ql-remove:hover {
+  border-color: #9ca3af !important;
+  background: #f9fafb !important;
+  color: #1f2937 !important;
+}
+.quill-wrapper .ql-tooltip .ql-tooltip-close {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+  width: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 4px !important;
+  background: #fff !important;
+  color: #6b7280 !important;
+  font-size: 14px !important;
+  font-family: inherit !important;
+  font-weight: 400 !important;
+  line-height: 1 !important;
+  cursor: pointer !important;
+}
+.quill-wrapper .ql-tooltip .ql-tooltip-close:hover { border-color: #9ca3af !important; }
+
+/* code-block — styling */
+.quill-wrapper .ql-editor .ql-code-block-container {
+  background: #f3f4f6;
+  color: #1f2937;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin: 10px 0;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+.quill-wrapper .ql-editor .ql-code-block {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  margin: 0;
+  white-space: pre;
+  font-family: inherit;
+}
+/* inline code (if any) */
+.quill-wrapper .ql-editor code {
+  background: #f3f4f6;
+  color: #1f2937;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+  font-size: 0.9em;
+}
+/* blockquote — while we're at it */
+.quill-wrapper .ql-editor blockquote {
+  border-left: 3px solid #9ca3af;
+  background: #f9fafb;
+  margin: 10px 0;
+  padding: 8px 14px;
+  color: #374151;
+  border-radius: 0 4px 4px 0;
+}
+
+/* toolbar buttons */
+.quill-wrapper .ql-toolbar button {
+    width: 28px !important;
+    height: 28px !important;
+    border: 1px solid #d1d5db !important;
+    border-radius: 4px !important;
+    background: #fff !important;
+    color: #374151;
+    padding: 0 !important;
+    margin: 1px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+.quill-wrapper .ql-toolbar button svg { width: 18px !important; height: 18px !important; }
+
+/* Icons are always the same color — in any state */
+.quill-wrapper .ql-toolbar button .ql-stroke,
+.quill-wrapper .ql-toolbar button:hover .ql-stroke,
+.quill-wrapper .ql-toolbar button:focus .ql-stroke,
+.quill-wrapper .ql-toolbar button:active .ql-stroke,
+.quill-wrapper .ql-toolbar button.ql-active .ql-stroke { stroke: #6b7280 !important; }
+.quill-wrapper .ql-toolbar button .ql-fill,
+.quill-wrapper .ql-toolbar button:hover .ql-fill,
+.quill-wrapper .ql-toolbar button:focus .ql-fill,
+.quill-wrapper .ql-toolbar button:active .ql-fill,
+.quill-wrapper .ql-toolbar button.ql-active .ql-fill { fill: #6b7280 !important; }
+.quill-wrapper .ql-toolbar button,
+.quill-wrapper .ql-toolbar button:hover,
+.quill-wrapper .ql-toolbar button:focus,
+.quill-wrapper .ql-toolbar button:active,
+.quill-wrapper .ql-toolbar button.ql-active { color: #6b7280 !important; opacity: 1 !important; background: #fff !important; }
+
+/* Hover — only the border gets darker */
+.quill-wrapper .ql-toolbar button:hover,
+.quill-wrapper .ql-toolbar button.ql-active { border-color: #9ca3af !important; }
+
+/* Pickers — size and border */
+.quill-wrapper .ql-toolbar .ql-picker { height: 28px !important; border: 1px solid #d1d5db !important; border-radius: 4px !important; background: #fff !important; margin: 1px !important; }
+.quill-wrapper .ql-toolbar .ql-picker:hover { border-color: #9ca3af !important; }
+.quill-wrapper .ql-toolbar .ql-picker-label { height: 28px !important; line-height: 28px !important; }
+.quill-wrapper .ql-picker-label { border-color: transparent !important; }
+.quill-wrapper .ql-picker-options { border: 1px solid #e5e7eb; border-radius: 4px; box-shadow: 0 4px 16px rgba(0,0,0,.10) !important; margin-top: 6px !important; }
+
+/* Picker label — text and icon color always the same, no blue */
+.quill-wrapper .ql-toolbar .ql-picker-label,
+.quill-wrapper .ql-toolbar .ql-picker-label:hover,
+.quill-wrapper .ql-toolbar .ql-picker-label.ql-active,
+.quill-wrapper .ql-snow .ql-picker.ql-expanded .ql-picker-label { color: #374151 !important; opacity: 1 !important; }
+.quill-wrapper .ql-toolbar .ql-picker-label .ql-stroke,
+.quill-wrapper .ql-toolbar .ql-picker-label:hover .ql-stroke,
+.quill-wrapper .ql-toolbar .ql-picker-label.ql-active .ql-stroke,
+.quill-wrapper .ql-snow .ql-picker.ql-expanded .ql-picker-label .ql-stroke { stroke: #6b7280 !important; }
+.quill-wrapper .ql-toolbar .ql-picker-label .ql-fill,
+.quill-wrapper .ql-toolbar .ql-picker-label:hover .ql-fill,
+.quill-wrapper .ql-toolbar .ql-picker-label.ql-active .ql-fill,
+.quill-wrapper .ql-snow .ql-picker.ql-expanded .ql-picker-label .ql-fill,
+.quill-wrapper .ql-snow .ql-picker.ql-expanded .ql-picker-label .ql-color-label { fill: #6b7280 !important; }
+
+/* Picker items in the dropdown (not for colors) */
+.quill-wrapper .ql-toolbar .ql-picker:not(.ql-color-picker) .ql-picker-item { color: #374151 !important; display: block !important; padding: 5px 12px !important; }
+.quill-wrapper .ql-toolbar .ql-picker:not(.ql-color-picker) .ql-picker-item:hover { color: #374151 !important; background: #f3f4f6 !important; }
+.quill-wrapper .ql-toolbar .ql-picker:not(.ql-color-picker) .ql-picker-item.ql-selected { color: #374151 !important; }
+
+/* Icon picker (align) — hidden, replaced by a custom button */
+.quill-wrapper .ql-toolbar .ql-icon-picker { display: none !important; }
+
+/* ── Global fix: filter/sort badge in the table header ──
+   The badge is always on the right (absolute), vertically centered. We guarantee
+   a minimum column width so that in narrow headers (e.g. "Photo")
+   text + badge + padding fit exactly without overlapping.
+ */
+table thead th[data-col] {
+    min-width: 70px !important;
+    padding-right: 26px !important;
+    position: relative !important;
+}
+table thead th .th-badge {
+    position: absolute !important;
+    right: 7px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    display: flex !important;
+    align-items: center !important;
+    pointer-events: none !important;
+    margin: 0 !important;
+}
+
+/* color-picker items — standard Quill */
+.quill-wrapper .ql-toolbar .ql-color-picker .ql-picker-item { display: inline-block !important; padding: 0 !important; }
+.quill-wrapper .ql-toolbar.ql-snow .ql-color-picker .ql-picker-item:hover,
+.quill-wrapper .ql-toolbar.ql-snow .ql-color-picker .ql-picker-item.ql-selected { border-color: #374151 !important; }
+
+/* Picker options — overflow:hidden clips scrollbar to border-radius; inner div scrolls */
+/* width by content: with width:100% (the width of the button itself) long items like
+   "Heading 1" were cut off horizontally — overflow:hidden simply hid them.
+ */
+.quill-wrapper .ql-picker:not(.ql-color-picker) .ql-picker-options { overflow: hidden !important; max-height: none !important; padding: 0 !important; width: max-content !important; min-width: auto !important; }
+.quill-wrapper .ql-picker-options-inner { max-height: 140px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+/* Icon picker — do not clip by width */
+.quill-wrapper .ql-icon-picker .ql-picker-options { overflow: visible !important; width: max-content !important; }
+
+/* focus ring */
+.quill-wrapper[data-raw-editor] { min-height: 0; margin-bottom: 0; resize: none; }
+
+/* Size picker — show px value as label instead of "Normal" */
+.ql-snow .ql-picker.ql-size .ql-picker-item::before { content: attr(data-value) !important; }
+.ql-snow .ql-picker.ql-size .ql-picker-label::before { content: attr(data-value) !important; }
+.ql-snow .ql-picker.ql-size .ql-picker-item:not([data-value])::before { content: 'Normal' !important; }
+.ql-snow .ql-picker.ql-size .ql-picker-label:not([data-value])::before { content: 'Normal' !important; }
+</style>
+{# The JS block with runtime style injection was removed: it duplicated the CSS rules above (lines ~253-296). #}
+{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+/* ============================================================
+   SHOP ADMIN — Design System
+   Palette:
+     #fff          white
+     #f9fafb       off-white (card headers, subtle bg)
+     #f3f4f6       page bg, hover bg
+     #e5e7eb       borders (cards, containers)
+     #d1d5db       borders (inputs, buttons)
+     #9ca3af       muted text, focus border, placeholders
+     #6b7280       secondary text, labels, section titles
+     #374151       primary text, buttons
+     #1f2937       dark text, strong hover
+   Rules:
+     – No shadows on hover
+     – No transforms on hover
+     – All interactive elements share one visual language
+     – radius 6px containers · 4px inputs+buttons
+   ============================================================ */
+
+/* ── Force consistent border colors regardless of browser color scheme ── */
+:root {
+    --hairline-color: #e5e7eb !important;
+    --border-color:   #e5e7eb !important;
+}
+
+/* ── CSS Variables (Django admin tokens) ── */
+:root, html[data-theme="light"], html[data-theme="auto"] {
+    --primary:            #374151;
+    --secondary:          #1f2937;
+    --accent:             #6b7280;
+    --link-fg:            #374151;
+    --link-hover-color:   #1f2937;
+    --link-selected-fg:   #374151;
+    --button-bg:          #fff;
+    --button-hover-bg:    #f3f4f6;
+    --default-button-bg:  #374151;
+    --default-button-fg:  #fff;
+    --selected-row:       #f9fafb;
+    --selected-bg:        #f3f4f6;
+    --darkened-bg:        #f9fafb;
+    --border-color:       #e5e7eb;
+    --hairline-color:     #e5e7eb;
+    --error-fg:           #991b1b;
+    --font:               -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+    /* ── Design system tokens (unified in Phase 1) ── */
+    --radius-card:    6px;
+    --radius-input:   4px;
+    --radius-modal:   8px;
+
+    --shadow-popup:    0 4px 16px rgba(0, 0, 0, .10);
+    --shadow-dropdown: 0 6px 16px rgba(0, 0, 0, .18);
+    --shadow-modal:    0 8px 32px rgba(0, 0, 0, .18);
+    --shadow-preview:  0 6px 20px rgba(0, 0, 0, .14);
+    --shadow-lightbox: 0 8px 40px rgba(0, 0, 0, .50);
+
+    --pad-form-row:     14px 20px;
+    --pad-section-head: 9px 16px;
+    --pad-table-head:   10px 12px;
+    --pad-table-cell:   8px 12px;
+    --label-w:          170px;
+
+    --row-h-dense:    56px;
+    --btn-h-default:  28px;
+    --btn-h-toolbar:  32px;
+    --btn-h-strong:   36px;
+
+    --fs-xs:   10px;
+    --fs-sm:   11px;
+    --fs-md:   12px;
+    --fs-base: 13px;
+    --fs-lg:   15px;
+    --fs-xl:   18px;
+
+    /* Semantic badge colors (replaces ad-hoc #dcfce7/#166534 etc) */
+    --ok-bg:     #dcfce7;
+    --ok-fg:     #166534;
+    --ok-border: #86efac;
+
+    --warn-bg:     #fef3c7;
+    --warn-fg:     #92400e;
+    --warn-border: #fde68a;
+
+    --info-bg:     #dbeafe;
+    --info-fg:     #1e40af;
+    --info-border: #93c5fd;
+
+    --err-bg:     #fee2e2;
+    --err-fg:     #991b1b;
+    --err-border: #fca5a5;
+
+    --muted-bg:     #f3f4f6;
+    --muted-fg:     #6b7280;
+    --muted-border: #d1d5db;
+}
+
+/* ============================================================
+   COMMON COMPONENTS — Phase 1
+   Allows gradually moving duplicated CSS out of other templates' styles.
+   All these classes are additive, they break nothing.
+   ============================================================
+ */
+
+/* ── Badge (unifies .lg-action, .le-badge, .u-role, .u-act-badge, .inv-status-badge) ── */
+.app-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    line-height: 1.4;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+.app-badge--ok    { background: var(--ok-bg);   color: var(--ok-fg);   border-color: var(--ok-border); }
+.app-badge--warn  { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
+.app-badge--info  { background: var(--info-bg); color: var(--info-fg); border-color: var(--info-border); }
+.app-badge--err   { background: var(--err-bg);  color: var(--err-fg);  border-color: var(--err-border); }
+.app-badge--muted { background: var(--muted-bg); color: var(--muted-fg); border-color: var(--muted-border); }
+
+/* ── Product label pill — shape like .or-picker-btn (CRM standard), but the color
+   is taken from the Label.color model field via --label-color (not the semantic data-tone). ──
+ */
+.app-label {
+    display: inline-flex;
+    align-items: center;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: var(--radius-input);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    margin: 1px 2px 1px 0;
+    white-space: nowrap;
+    box-sizing: border-box;
+    vertical-align: middle;
+    background: color-mix(in srgb, var(--label-color, #6b7280) 14%, #fff);
+    color:      color-mix(in srgb, var(--label-color, #6b7280) 78%, #000);
+    border: 1px solid color-mix(in srgb, var(--label-color, #6b7280) 32%, #fff);
+}
+
+/* ── Status / label pill — global standard for CRM tables.
+   Reference — .or-picker-btn from the orders page (orders/order/change_list).
+   Color is set via data-tone (semantics), the palette matches the order
+   statuses. The .is-static modifier — a non-clickable label (no hover/cursor).
+   The orders page has its own local rules (.or-picker-btn[data-val=...] +
+   widths via --or-status-w) — they don't conflict with data-tone. ──
+ */
+.or-picker-btn {
+    display: inline-flex; align-items: center;
+    height: 26px; padding: 0 10px;
+    border: 1px solid #d1d5db; border-radius: var(--radius-input);
+    background: transparent; cursor: pointer; font-size: 12px; font-weight: 500;
+    color: #374151; font-family: inherit; white-space: nowrap;
+    box-sizing: border-box; outline: none;
+}
+.or-picker-btn.is-static { cursor: default; }
+.or-picker-btn:not(.is-static):hover { filter: brightness(0.96); }
+.or-picker-btn[data-tone="neutral"],
+.or-picker-btn[data-tone="muted"] { background-color: #f3f4f6; border-color: #e5e7eb; color: #6b7280; }
+.or-picker-btn[data-tone="warn"]  { background-color: #fef3c7; border-color: #fde68a; color: #92400e; }
+.or-picker-btn[data-tone="info"]  { background-color: #dbeafe; border-color: #bfdbfe; color: #1e40af; }
+.or-picker-btn[data-tone="ok"]    { background-color: #dcfce7; border-color: #bbf7d0; color: #166534; }
+.or-picker-btn[data-tone="err"]   { background-color: #fee2e2; border-color: #fecaca; color: #991b1b; }
+
+/* Dropdown for a clickable .or-picker-btn (value selection). Global — any
+   CRM table can make an inline status picker.
+ */
+.or-picker-popup {
+    position: fixed; z-index: 99999; background: #fff;
+    border: 1px solid #e5e7eb; border-radius: var(--radius-card);
+    box-shadow: var(--shadow-popup); padding: 0; overflow: hidden; min-width: 90px;
+}
+.or-picker-item { padding: 7px 10px; font-size: 12px; color: #374151; cursor: pointer; white-space: nowrap; }
+.or-picker-item:hover { background: #f9fafb; }
+.or-picker-item.active { font-weight: 600; color: #111827; }
+
+/* ── Quantity button (unifies .delta-btn, .oi-qty-btn, .bi-qty-btn).
+   .bpc-btn is NOT a qty button (it is the packaging toggle style) — it stays in its own template.
+ */
+.app-qty-btn,
+.delta-btn,
+.oi-qty-btn,
+.bi-qty-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid #d1d5db;
+    border-radius: var(--radius-input);
+    background: #fff;
+    color: #374151;
+    font-size: 16px;
+    font-family: inherit;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+.app-qty-btn:hover,
+.delta-btn:hover,
+.oi-qty-btn:not(:disabled):hover,
+.bi-qty-btn:hover { border-color: #9ca3af; background: #f3f4f6; }
+.app-qty-btn:disabled,
+.oi-qty-btn:disabled { opacity: 0.45; cursor: default; }
+
+/* Unified +/− signs for ALL qty buttons and addlink. Drawn with ONE SVG mask
+   (not two separate CSS strips) — otherwise, due to subpixel positioning,
+   the horizontal and vertical lines rendered with different thickness. The mask gives a crisp
+   result, both lines are always identical. Color is currentColor (#374151).
+ */
+.app-qty-btn, .delta-btn, .oi-qty-btn, .bi-qty-btn { font-size: 0 !important; position: relative; }
+.app-qty-btn::before, .delta-btn::before, .oi-qty-btn::before, .bi-qty-btn::before {
+    content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0; margin: auto;
+    width: 12px; height: 12px;
+    background-color: currentColor;
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M1.5 6h9' stroke='white' stroke-width='2' stroke-linecap='round'/></svg>") center / 12px 12px no-repeat;
+    mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M1.5 6h9' stroke='white' stroke-width='2' stroke-linecap='round'/></svg>") center / 12px 12px no-repeat;
+}
+.app-qty-btn.is-plus::before, .delta-btn.is-plus::before, .oi-qty-btn.is-plus::before, .bi-qty-btn.is-plus::before {
+    -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M6 1.5v9M1.5 6h9' stroke='white' stroke-width='2' stroke-linecap='round'/></svg>");
+    mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M6 1.5v9M1.5 6h9' stroke='white' stroke-width='2' stroke-linecap='round'/></svg>");
+}
+
+/* ── Icon delete button (unifies .av-del, .bi-del-btn, .attr-row-del, .pg-del-btn, .ch-btn-del) ── */
+.app-icon-del {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-input);
+    background: transparent;
+    color: #9ca3af;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+}
+.app-icon-del:hover {
+    background: var(--err-bg);
+    border-color: var(--err-border);
+    color: #dc2626;
+}
+
+/* ── Modal box (unifies #revert-modal-box, .pg-modal, confirm_pair card)
+   #or-export-box has a more complex structure (header+body+footer) — kept separate.
+ */
+.app-modal-overlay,
+#revert-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .35);
+    z-index: 99999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+.app-modal-overlay[data-open="1"],
+.app-modal-overlay.is-open,
+#revert-modal.open { display: flex; }
+
+.app-modal-box,
+#revert-modal-box {
+    background: #fff;
+    border-radius: var(--radius-modal);
+    box-shadow: var(--shadow-modal);
+    max-width: 420px;
+    width: calc(100% - 32px);
+    padding: 24px 28px;
+    color: #1f2937;
+}
+.app-modal-box--wide  { max-width: 560px; }
+.app-modal-box--small { max-width: 360px; padding: 20px 22px; }
+
+.app-modal-title {
+    font-size: var(--fs-xl);
+    font-weight: 700;
+    margin: 0 0 12px 0;
+    color: #1f2937;
+}
+.app-modal-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 18px;
+}
+
+/* ── Photo preview popup (unifies pv-, pb-, bi-pv-, .app-photo-preview).
+   br-photo-preview and oi-pv-preview have their own special sizes/position — kept separate.
+ */
+.app-photo-preview,
+.pv-photo-preview,
+.pb-photo-preview,
+.bi-pv-preview {
+    display: none;
+    position: fixed;
+    z-index: 99999;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: var(--radius-card);
+    padding: 4px;
+    box-shadow: var(--shadow-preview);
+    pointer-events: none;
+}
+.app-photo-preview img,
+.pv-photo-preview img,
+.pb-photo-preview img,
+.bi-pv-preview img {
+    width: 180px;
+    height: 180px;
+    object-fit: cover;
+    border-radius: var(--radius-input);
+    display: block;
+}
+/* Hover trigger on the parent wrapper element */
+.pv-photo-wrap:hover .pv-photo-preview,
+.pb-photo-wrap:hover .pb-photo-preview,
+.bi-pv-photo-wrap:hover .bi-pv-preview { display: block; }
+
+/* ── Lightbox (unifies #pv-lightbox, #pb-lightbox, #br-lightbox, #inv-lightbox, #ntf-lightbox,
+   .pg-lightbox) ──
+   JS in the templates controls it via inline style.display='flex'/'none' — our CSS must not have
+   !important
+   on display, otherwise the toggle breaks.
+ */
+.app-lightbox,
+.pg-lightbox {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .88);
+    z-index: 99998;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-out;
+}
+.app-lightbox[data-open="1"],
+.app-lightbox.is-open { display: flex; }
+.app-lightbox img,
+.pg-lightbox img {
+    max-width: 90vw;
+    max-height: 90vh;
+    object-fit: contain;
+    box-shadow: var(--shadow-lightbox);
+    border-radius: var(--radius-input);
+}
+
+/* ── Picker popup (single source of truth) — the reference is .attr-popup.
+   Aliases for all custom admin popups are picked up.
+   Basic structure: position:fixed/absolute, white box with border+shadow, min-width 150px.
+   .attr-popup and others may have their own extra content (ul/li, drop-inner, etc.) — the standard
+   covers only the container.
+ */
+.app-picker,
+.attr-popup,
+.picker-popup,
+.sel-picker-popup,
+.np-city-drop,
+.np-wh-drop,
+.oi-drop,
+.bi-drop {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-popup);
+    z-index: 99999;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+/* Standard inner picker list: ul > li */
+.app-picker ul,
+.attr-popup ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 240px;
+    overflow-y: auto;
+}
+.app-picker ul li,
+.attr-popup ul li {
+    padding: 7px 14px;
+    font-size: var(--fs-base);
+    color: #374151;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+/* Scrolling inside popups must not propagate to the page */
+.picker-popup, .picker-popup-inner,
+.attr-popup, .attr-popup ul,
+.app-picker, .app-picker ul,
+.app-filter-pop, .picker-list,
+.np-city-drop, .np-wh-drop, .oi-drop, .bi-drop,
+.sel-picker-popup, .ntf-picker-popup,
+.fp-pop, .fp-list { overscroll-behavior: contain; }
+
+/* Single-list popups: hover background on the whole row, selected item in bold */
+.app-picker ul li,
+.attr-popup ul li { transition: background .12s; }
+.app-picker ul li:hover,
+.attr-popup ul li:hover,
+.attr-popup ul li.hovered { background: #f3f4f6; }
+.app-picker ul li.is-selected,
+.attr-popup ul li.is-selected { font-weight: 600; color: #111827; }
+.app-picker ul li.is-disabled,
+.attr-popup ul li.disabled,
+.attr-popup ul li.is-disabled { color: #9ca3af; cursor: default; }
+.app-picker ul li.is-disabled:hover,
+.attr-popup ul li.disabled:hover,
+.attr-popup ul li.is-disabled:hover { background: #fff; }
+
+/* ── Picker / filter rows with a checkbox or radio — hover only on the text and the input (not on the whole row) ── */
+.picker-item label,
+.fp-item label { transition: color .12s; }
+.picker-item label:hover,
+.fp-item label:hover { color: #111827; }
+.picker-item label:hover input[type=checkbox]:not(:checked),
+.picker-item label:hover input[type=radio]:not(:checked) { border-color: #9ca3af; }
+
+/* ── Filter popup + calendar (ready standard for the future migration of .fp-* / .cal-*).
+   We don't touch the current templates — each has its own small differences that need manual
+   checking.
+ */
+.app-filter-pop {
+    display: none;
+    position: fixed;
+    z-index: 9999;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0 0 var(--radius-card) var(--radius-card);
+    box-shadow: var(--shadow-dropdown);
+    min-width: 180px;
+    max-width: 320px;
+    overflow: hidden;
+}
+.app-filter-pop.is-open { display: block; }
+.app-filter-pop__sort-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 14px;
+    font-size: var(--fs-md); color: #6b7280;
+    cursor: pointer;
+    border-bottom: 1px solid #f3f4f6;
+}
+.app-filter-pop__sort-row:hover { background: #f5f5f5; }
+.app-filter-pop__sort-row.is-on { background: #eff6ff; color: #2563eb; }
+.app-filter-pop__body { padding: 10px 14px; }
+.app-filter-pop__label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #9ca3af; margin-bottom: 6px; }
+.app-filter-pop__pills { display: flex; gap: 3px; flex-wrap: wrap; }
+.app-filter-pop__pill {
+    padding: 3px 8px;
+    border: 1px solid #d1d5db; border-radius: 20px;
+    font-size: var(--fs-sm); color: #6b7280;
+    cursor: pointer; background: #fff; user-select: none;
+}
+.app-filter-pop__pill:hover { background: #f3f4f6; color: #374151; }
+.app-filter-pop__pill.is-on { background: #1f2937; border-color: #1f2937; color: #fff; }
+.app-filter-pop__search {
+    width: 100%; box-sizing: border-box;
+    height: 28px; padding: 0 8px;
+    border: 1px solid #d1d5db; border-radius: var(--radius-input);
+    font-size: var(--fs-base); outline: none;
+}
+.app-filter-pop__search:focus { border-color: #9ca3af; }
+.app-filter-pop__item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 2px;
+    font-size: var(--fs-base); color: #374151;
+}
+.app-filter-pop__divider { height: 1px; background: #e5e7eb; margin: 8px 0; }
+.app-filter-pop__clear {
+    display: block; margin-top: 8px;
+    padding: 0; border: none; background: none;
+    font-size: var(--fs-sm); color: #9ca3af;
+    cursor: pointer; text-align: left;
+}
+.app-filter-pop__clear:hover { color: #dc2626; }
+
+/* Date range calendar (ready standard; the current .cal-* in templates remain ad-hoc) */
+.app-cal__nav { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 4px; }
+.app-cal__nav-btn {
+    background: #f9fafb; border: 1px solid #d1d5db; border-radius: var(--radius-input);
+    width: 26px; height: 26px;
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #374151; font-size: 16px; line-height: 1; padding: 0;
+}
+.app-cal__nav-btn:hover { background: #e5e7eb; border-color: #9ca3af; color: #111; }
+.app-cal__title { font-size: var(--fs-md); font-weight: 600; color: #374151; text-align: center; flex: 1; }
+.app-cal__grid { display: grid; grid-template-columns: repeat(7, 1fr); padding: 0 6px 8px; }
+.app-cal__dow { font-size: var(--fs-xs); color: #9ca3af; text-align: center; padding: 2px 0 5px; font-weight: 600; }
+.app-cal__day { font-size: var(--fs-md); text-align: center; padding: 5px 0; cursor: pointer; color: #374151; user-select: none; border-radius: var(--radius-input); }
+.app-cal__day.is-empty { cursor: default; pointer-events: none; }
+.app-cal__day:not(.is-empty):not(.is-sel-start):not(.is-sel-end):hover { background: #d1d5db; }
+.app-cal__day.is-today { font-weight: 700; color: #111; }
+.app-cal__day.is-sel-start, .app-cal__day.is-sel-end { background: #1f2937; color: #fff; }
+.app-cal__day.is-in-range { background: #e5e7eb; border-radius: 0; }
+
+/* ── Toolbar (unifies .le-topbar, complementary to .submit-row-top / .cl-bar) ── */
+.app-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+}
+.app-toolbar > .spacer { flex: 1 1 auto; }
+
+.app-toolbar-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: var(--btn-h-toolbar);
+    padding: 0 14px;
+    border: 1px solid #d1d5db;
+    border-radius: var(--radius-input);
+    background: #fff;
+    color: #374151;
+    font-size: var(--fs-base);
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+}
+.app-toolbar-btn:hover { background: #f3f4f6; border-color: #9ca3af; }
+.app-toolbar-btn--primary {
+    background: var(--default-button-bg);
+    color: var(--default-button-fg);
+    border-color: var(--default-button-bg);
+}
+.app-toolbar-btn--primary:hover { background: var(--secondary); border-color: var(--secondary); color: #fff; }
+.app-toolbar-btn--danger {
+    background: var(--err-bg);
+    color: var(--err-fg);
+    border-color: var(--err-border);
+}
+.app-toolbar-btn--danger:hover { background: #fecaca; border-color: #f87171; }
+
+
+/* ── Base ── */
+html, body { margin: 0 !important; padding: 0 !important; }
+body {
+    background: #f3f4f6;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    color: #374151;
+    line-height: 1.5;
+}
+.main { margin: 0 !important; padding: 0 !important; }
+#content { margin: 0 !important; }
+#content-main { margin: 0 !important; }
+a { color: #374151; text-decoration: none; }
+a:hover { color: #1f2937; text-decoration: none; }
+* { box-sizing: border-box; }
+
+/* ── Header ── */
+#header { display: none !important; }
+
+/* ── Breadcrumbs – hidden ── */
+div.breadcrumbs { display: none !important; }
+.theme-toggle { display: none !important; }
+
+/* ── Module / Section headers ── */
+.module caption, .module > h2 {
+    background: #f9fafb;
+    color: #6b7280;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    padding: 9px 16px;
+    border-bottom: 1px solid #e5e7eb;
+    margin: 0;
+}
+.module caption a.section, .module > h2 a {
+    color: #374151 !important;
+    text-decoration: none;
+}
+.module caption a.section:hover, .module > h2 a:hover { color: #1f2937 !important; }
+
+/* ── Module card ── */
+.module {
+    border: 1px solid #e5e7eb;
+    border-radius: 0;
+    overflow: hidden;
+    margin-bottom: 14px;
+    background: #fff;
+}
+.module table { border: none; }
+.module table td, .module table th {
+    border-bottom: 1px solid #f3f4f6;
+    padding: 9px 14px;
+    font-size: 13px;
+}
+.module table tbody tr:hover { background: #f9fafb; }
+
+/* ── Changelist module — no rounded corners, full width ── */
+#changelist.module {
+    border-radius: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    background: transparent !important;
+    /* visible — otherwise overflow:hidden makes #changelist a scroll container
+       and breaks the sticky thead (it sticks to something other than the window)
+     */
+    overflow: visible !important;
+}
+#changelist .changelist-form-container,
+#changelist .changelist-form-container > div { width: 100% !important; max-width: 100% !important; }
+
+/* ── Result list table ── */
+#result_list { border-collapse: collapse; border-top: none !important; }
+#result_list thead th {
+    background: #f9fafb;
+    border-top: none;
+    border-bottom: 1px solid #e5e7eb;
+    border-left: 1px solid #e5e7eb;
+    padding: 10px 12px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #6b7280;
+    white-space: nowrap;
+    text-align: left;
+    vertical-align: middle;
+}
+#result_list thead th:first-child { border-left: none; }
+#result_list thead th a {
+    color: #6b7280 !important;
+    text-decoration: none !important;
+    pointer-events: none !important;
+    cursor: default !important;
+}
+#result_list thead th { cursor: default !important; padding: 10px 12px !important; }
+#result_list thead th .sortoptions { display: none !important; }
+#result_list thead th div.clear { display: none !important; }
+#result_list thead th .text a,
+#result_list thead th .text span { padding: 0 !important; display: inline !important; }
+#result_list tbody tr { border-bottom: 1px solid #e5e7eb; cursor: pointer; height: 56px; }
+#result_list tbody tr:hover { background: #f0f1f3 !important; }
+#result_list tbody tr td, #result_list tbody tr th {
+    padding: 8px 12px;
+    font-size: 13px;
+    vertical-align: middle;
+    border-left: 1px solid #e5e7eb;
+    text-align: left;
+    overflow: hidden;
+}
+
+/* ── Fixed row height + long text wraps to 2 lines with an ellipsis.
+   Works for the name cell in the custom products table and for any <a>
+   in the standard Django changelist. The td/tr height doesn't grow — the text
+   is truncated.
+ */
+#result_list tbody td a,
+#result_list tbody th a,
+#pv-table tbody td a,
+#pv-table tbody th a,
+#pv-table .pv-name-cell a {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+            line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.3;
+    max-height: 2.6em;
+}
+/* Make sure the cell itself doesn't overflow the row */
+#pv-table tbody tr td,
+#pv-table tbody tr th { overflow: hidden; }
+#pv-table .pv-name-cell { min-width: 0; max-width: 100%; }
+#result_list tbody tr td:first-child,
+#result_list tbody tr th:first-child { border-left: none; }
+#result_list a, #result_list a:link, #result_list a:visited,
+#result_list a:hover, #result_list a:focus { text-decoration: none !important; color: #374151 !important; }
+/* A row selected via its checkbox is NOT highlighted — we keep the regular zebra (Django paints
+   tr.selected/:has(:checked)).
+   We take the same zebra CSS variables → works in any table; hover and filter highlight remain.
+ */
+#changelist tbody tr.selected:nth-child(2n+1),
+#changelist tbody tr:has(.action-select:checked):nth-child(2n+1) { background: var(--body-bg); }
+#changelist tbody tr.selected:nth-child(2n),
+#changelist tbody tr:has(.action-select:checked):nth-child(2n) { background: var(--darkened-bg); }
+.addlink, .changelink { color: #374151 !important; }
+
+/* ── Layout ── */
+.main { display: flex !important; flex-direction: row !important; align-items: stretch !important; min-height: 100vh !important; }
+/* main.content — direct flex child of .main (not #content!)
+   We override nav_sidebar.css: .main.shifted > #nav-sidebar + .content { max-width: calc(100% -
+   299px) }
+ */
+main.content,
+.main > #nav-sidebar ~ .content,
+.main.shifted > #nav-sidebar ~ .content {
+    flex: 1 !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    width: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: visible !important;
+}
+#content { padding: 0 !important; margin: 0 !important; flex: 1 !important; min-width: 0 !important; background: #fff !important; }
+.change-list #content { flex-direction: row !important; }
+#content h1 { display: none !important; }
+#content h2:not(.help) { display: none !important; }
+#content-main { padding: 0 !important; margin: 0 !important; width: 100% !important; flex: 1 !important; }
+main.content > br.clear { display: none !important; }
+table.tbl-touches-pager tbody tr:last-child { border-bottom: none !important; }
+.tbl-pad-fill {
+  background:
+    linear-gradient(to bottom, transparent 55px, #e5e7eb 55px, #e5e7eb 56px) 0 0 / 100% 56px repeat-y,
+    repeating-linear-gradient(to bottom, #fff 0, #fff 56px, #f9fafb 56px, #f9fafb 112px);
+  pointer-events: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+.tbl-pad-fill.parity-odd {
+  background:
+    linear-gradient(to bottom, transparent 55px, #e5e7eb 55px, #e5e7eb 56px) 0 0 / 100% 56px repeat-y,
+    repeating-linear-gradient(to bottom, #f9fafb 0, #f9fafb 56px, #fff 56px, #fff 112px);
+}
+.results { width: 100% !important; overflow: visible !important; }
+#result_list { width: 100% !important; table-layout: auto !important; }
+
+/* ── Sticky thead for all CRM changelist tables ──
+   The row with column names sticks below .cl-bar on scroll.
+   --clbar-h = height of .cl-bar, measured in JS below.
+ */
+table#pv-table thead tr th,
+table#or-table thead tr th,
+table#u-table thead tr th,
+table#lg-table thead tr th,
+table#ds-table thead tr th,
+table#pb-table thead tr th,
+table#br-table thead tr th,
+table#cs-table thead tr th,
+table#inv-list-table thead tr th,
+table#result_list thead tr th {
+    position: -webkit-sticky !important;
+    position: sticky !important;
+    top: var(--clbar-h, 0px) !important;
+    z-index: 15 !important;
+    /* border-collapse "eats" the border-bottom of a sticky cell on scroll —
+       we remove the default border-bottom and draw the line with an inset shadow,
+       which belongs to the cell itself and isn't duplicated
+     */
+    border-bottom: 0 !important;
+    box-shadow: inset 0 -1px 0 #e5e7eb !important;
+}
+
+/* ── Sidebar ── */
+#toggle-nav-sidebar { display: none !important; }
+#nav-filter { display: none !important; }
+#nav-sidebar,
+.main > #nav-sidebar,
+.main.shifted > #nav-sidebar {
+    visibility: visible !important;
+    margin-left: 0 !important;
+    left: auto !important;
+    flex: none !important;
+}
+/* Disable the rubber-band scroll bounce: on a Mac, near the bottom edge it
+   repeatedly crosses the sticky sidebar's "unstick" point (under zoom its
+   height ≈ the content height) → the sidebar icons/arrows jittered.
+ */
+html, body { overscroll-behavior: none; }
+#nav-sidebar {
+    display: flex !important;
+    flex-direction: column;
+    /* 219 = 210px menu + 9px scrollbar column on the right. The scrollbar has its own
+       column rather than lying over the text, so the width was added, not taken away.
+     */
+    width: 219px;
+    min-width: 219px;
+    flex-shrink: 0;
+    background-color: #fff !important;
+    border-top: 0 !important;
+    border-right: 1px solid #e5e7eb;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow: hidden;
+    padding: 0 !important;
+}
+#nav-sidebar > *:first-child { margin-top: 0 !important; }
+/* The sidebar is split into two zones (the layout is done by JS, .sidebar-pin-bottom is the
+   boundary):
+   the section list scrolls on its own, the bottom with utilities always stays on screen.
+   Previously there were no zones, and with fully expanded menu groups
+   (≈1120px vs ~760px on a laptop) flexbox didn't give a scroll but squeezed the groups: .module
+   inherits
+   overflow:hidden from the card (.module above), and for a flex child this disables
+   min-height:auto → the group's minimum is 0 → rows were clipped, and the next header
+   was drawn right up against a half-clipped row.
+ */
+#nav-sidebar .sidebar-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    /* Vertical scroll only. The width is held by table-layout:fixed and
+       .sb-row-label — this is just a safeguard, there is nothing to clip here.
+     */
+    overflow-x: hidden;
+    /* Isolate the menu's inner scroll from the page scroll (overscroll-chaining). */
+    overscroll-behavior: contain;
+}
+#nav-sidebar .sidebar-foot {
+    flex: 0 0 auto;
+    position: relative;
+    border-top: 1px solid #e5e7eb;
+}
+/* The menu scrollbar is drawn by the browser itself — there is no custom one here (an attempt to
+   draw our own failed: it looked different on different machines).
+   ::-webkit-scrollbar only narrows it to 9px instead of the system ~15px and sets
+   the colors. Note: it can NOT switch an overlay scrollbar to a classic one — where
+   the system has "Show scroll bars: When scrolling", the scrollbar stays
+   overlay and takes up no space (verified). So the menu width is calculated
+   so that there is enough room for the text in both cases.
+   The scrollbar appears only when there is something to scroll, and only in the scroll zone —
+   the bottom with utilities doesn't scroll, so there is no scrollbar above it.
+ */
+/* We deliberately do NOT set scrollbar-width here: if it is set, Chrome ignores
+   ::-webkit-scrollbar and keeps the system overlay scrollbar of zero width.
+ */
+#nav-sidebar .sidebar-scroll::-webkit-scrollbar { width: 9px; }
+#nav-sidebar .sidebar-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
+#nav-sidebar .sidebar-scroll::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 999px;
+    /* Transparent margins on the sides — like a regular browser scrollbar: the visible part of the
+       thumb (5px) is narrower than the track (9px). Margins only on the sides: at the top and
+       bottom
+       the thumb must reach the very edges of the track.
+     */
+    border-left: 2px solid transparent;
+    border-right: 2px solid transparent;
+    background-clip: padding-box;
+}
+#nav-sidebar .sidebar-scroll::-webkit-scrollbar-thumb:hover { background: #a8a8a8; background-clip: padding-box; }
+/* Soft shadow above the bottom — a hint that there are more items further down the list. */
+#nav-sidebar .sidebar-foot::before {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 100%;
+    height: 24px;
+    background: linear-gradient(to top, rgba(17, 24, 39, 0.07), rgba(17, 24, 39, 0));
+    opacity: 0;
+    transition: opacity .15s;
+    pointer-events: none;
+}
+#nav-sidebar.sb-has-more .sidebar-foot::before { opacity: 1; }
+body.sidebar-hidden #nav-sidebar { display: none !important; }
+#nav-sidebar .sticky { position: static !important; padding: 0 !important; }
+/* Pre-hide catalog so JS restructure has no flash */
+#nav-sidebar .app-catalog { display: none !important; }
+
+#nav-sidebar .module {
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    margin: 0;
+    padding: 0;
+    /* Both guard against flexbox squeezing the group: overflow:visible restores
+       min-height:auto, flex-shrink:0 is an extra safeguard.
+     */
+    overflow: visible;
+    flex-shrink: 0;
+}
+#nav-sidebar .module + .module { border-top: 1px solid #e5e7eb !important; }
+/* If the previous group is collapsed, its header already has a border-bottom, so we don't duplicate
+   it.
+   If it is expanded, a divider is needed, otherwise the last row merges with the next header.
+ */
+#nav-sidebar .sidebar-group-module.is-collapsed + .module { border-top: none !important; }
+/* The bottom utilities block is pushed down by a gap (margin-top:auto) — no lines around the gap
+   are needed,
+   the gap itself separates. We remove the "dangling" line above .sidebar-pin-bottom.
+ */
+#nav-sidebar .module.sidebar-pin-bottom { border-top: none !important; }
+/* ── Sidebar groups: header with icon, hover state, collapse ── */
+.sidebar-group-header {
+    display: flex; align-items: center; gap: 11px;
+    padding: 12px 14px 10px; font-size: 13px; font-weight: 600;
+    color: #111827; letter-spacing: 0.1px;
+    /* Imitating a "half weight" between 600 and 700 — a barely visible text-shadow adds density. */
+    text-shadow: 0 0 0.55px currentColor;
+    cursor: pointer; user-select: none;
+    transition: background .15s;
+    position: relative;
+    /* Bottom divider — always visible, doesn't change on collapse/expand. */
+    border-bottom: 1px solid #e5e7eb;
+}
+.sidebar-group-header:hover { background: #f3f4f6; }
+.sidebar-group-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px;
+    color: #000;
+    flex-shrink: 0;
+}
+.sidebar-group-icon svg { width: 18px; height: 18px; display: block; }
+.sidebar-group-title { flex: 1; }
+/* Chevron — always visible but muted; rotates on is-collapsed */
+.sidebar-group-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px;
+    color: #9ca3af; line-height: 1;
+    transition: transform .18s ease, color .15s;
+    flex-shrink: 0; margin-left: 2px;
+}
+.sidebar-group-toggle svg { width: 18px; height: 18px; display: block; }
+.sidebar-group-header:hover .sidebar-group-toggle { color: #4b5563; }
+.sidebar-group-module.is-collapsed .sidebar-group-toggle { transform: rotate(-90deg); color: #6b7280; }
+.sidebar-group-module.is-collapsed .sidebar-group-table { display: none; }
+/* Bottom divider — the same as in the base style, we only remove the extra margin. */
+.sidebar-group-module:not(.is-collapsed) .sidebar-group-header {
+    margin-bottom: 0;
+}
+.sidebar-group-module:not(.is-collapsed) .sidebar-group-table {
+    margin-top: 0;
+}
+/* Barely visible divider between model rows inside a group. */
+#nav-sidebar .sidebar-group-table tbody tr + tr {
+    border-top: 1px solid #ececef;
+}
+/* ── Sidebar standalone button (not a group, doesn't expand) ── */
+.sidebar-link-module { position: relative; }
+.sidebar-link-button {
+    display: flex; align-items: center; gap: 11px;
+    padding: 12px 14px; font-size: 13px; font-weight: 600;
+    color: #111827 !important; text-decoration: none !important;
+    letter-spacing: 0.1px;
+    text-shadow: 0 0 0.55px currentColor;
+    transition: background .15s;
+}
+.sidebar-link-button:hover { background: #f3f4f6; }
+.sidebar-link-button .sidebar-group-icon { color: #000; }
+/* Active state — same as regular sidebar rows: highlighted row + black bar on the left. */
+#nav-sidebar .sidebar-link-module.sidebar-active .sidebar-link-button {
+    background: #f3f4f6 !important;
+    color: #111827 !important;
+}
+#nav-sidebar .sidebar-link-module.sidebar-active::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: #374151;
+}
+#nav-sidebar .sidebar-link-module.sidebar-active .sidebar-link-button:hover {
+    background: #ebedf0 !important;
+}
+#nav-sidebar .module caption, #nav-sidebar .module > h2 { display: none !important; }
+
+/* table-layout:fixed — otherwise `width:100%` loses to the content's minimum width:
+   the table grows to fit the longest row ("Stock subscriptions") and on the
+   narrow
+   laptop sidebar (186px) it overflows by ~12px → horizontal scroll in the menu.
+ */
+#nav-sidebar table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+/* Reset any Django background on rows */
+#nav-sidebar .current-model,
+#nav-sidebar tr.row1,
+#nav-sidebar tr.row2 { background: transparent !important; }
+#nav-sidebar table tbody tr {
+    display: flex;
+    align-items: center;
+    margin: 0;
+    border-radius: 0;
+    border: none;
+    background: transparent;
+    transition: background 0.12s;
+    position: relative;
+}
+#nav-sidebar table tbody tr:hover { background: #f3f4f6 !important; }
+#nav-sidebar .module th { padding-left: 0 !important; }
+#nav-sidebar table tbody tr th { flex: 1; padding: 0; border: none; font-weight: 500; min-width: 0; }
+#nav-sidebar table tbody tr th a {
+    display: flex;
+    align-items: center;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: #374151 !important;
+    text-decoration: none !important;
+    white-space: nowrap;
+    /* Safeguard in case JS didn't manage to wrap the name in .sb-row-label. */
+    overflow: hidden;
+}
+/* The ellipsis lives on the name, not on the whole row: otherwise it eats the counter
+   "(3)" at the end of the row, and that is the most valuable thing in the Inbox.
+ */
+.sb-row-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#nav-sidebar table tbody tr.sidebar-active { background: #f3f4f6 !important; }
+#nav-sidebar table tbody tr.sidebar-active::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: #374151;
+}
+#nav-sidebar table tbody tr.sidebar-active:hover { background: #ebedf0 !important; }
+#nav-sidebar table tbody tr.sidebar-active th a { color: #111827 !important; font-weight: 600; }
+
+/* Sub-row — a state of the parent section (Low/Out of stock under
+   Products,
+   Receipts/Payment details under Orders). The same technique
+   as for the
+   packagings of a grouped product in #pv-table (.pv-multi .pv-name-cell::before
+   { content: "─" }) — a dash before the name instead of a line/background/dot.
+ */
+#nav-sidebar table tbody tr.sb-row-nested th a::before { content: "─"; color: #9ca3af; margin-right: 8px; flex-shrink: 0; }
+/* A parent row with its own page (Products, Orders) stays a
+   regular link itself; the chevron only collapses/expands the sub-rows under it
+   (doesn't interfere with navigation — a separate element with its own click handler).
+ */
+#nav-sidebar table tbody tr.sb-row-parent th { display: flex; align-items: center; padding-right: 8px !important; }
+#nav-sidebar table tbody tr.sb-row-parent th a { flex: 1; min-width: 0; }
+.sb-row-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; color: #9ca3af; line-height: 1; flex-shrink: 0;
+    transition: transform .18s ease, color .15s; cursor: pointer;
+}
+.sb-row-toggle svg { width: 18px; height: 18px; display: block; }
+#nav-sidebar table tbody tr.sb-row-parent:hover .sb-row-toggle { color: #4b5563; }
+#nav-sidebar table tbody tr.sb-row-parent.is-collapsed .sb-row-toggle { transform: rotate(-90deg); color: #6b7280; }
+/* "Orders" — looks like the former sidebar-link-button: bold text,
+   icon, the same slightly denser text-shadow.
+ */
+#nav-sidebar table tbody tr.sb-row-featured th a {
+    display: flex; align-items: center;
+    font-weight: 600; color: #111827 !important; letter-spacing: 0.1px;
+    text-shadow: 0 0 0.55px currentColor;
+}
+#nav-sidebar table tbody tr.sb-row-featured .sidebar-group-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; color: #000; flex-shrink: 0;
+    margin-right: 11px;
+}
+#nav-sidebar table tbody tr.sb-row-featured .sidebar-group-icon svg { width: 18px; height: 18px; display: block; }
+
+/* (+) button — in the side menu style */
+#nav-sidebar table tbody tr td { padding: 0 10px 0 0; border: none; flex-shrink: 0; }
+#nav-sidebar .addlink {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    position: relative !important;
+    width: 22px !important;
+    height: 22px !important;
+    padding: 0 !important;
+    border-radius: 4px !important;
+    border: 1px solid #d1d5db !important;
+    background: #fff !important;
+    background-image: none !important;
+    font-size: 0 !important;
+    line-height: 1 !important;
+    text-decoration: none !important;
+    vertical-align: middle !important;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+/* "+" uses the same SVG mask as the qty buttons — the same crisp cross, both lines
+   of equal thickness.
+ */
+#nav-sidebar .addlink::before {
+    content: '' !important;
+    position: absolute !important;
+    top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important;
+    margin: auto !important;
+    width: 12px !important;
+    height: 12px !important;
+    background-color: #374151 !important;
+    background-image: none !important;
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M6 1.5v9M1.5 6h9' stroke='white' stroke-width='2' stroke-linecap='round'/></svg>") center / 12px 12px no-repeat !important;
+    mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M6 1.5v9M1.5 6h9' stroke='white' stroke-width='2' stroke-linecap='round'/></svg>") center / 12px 12px no-repeat !important;
+}
+#nav-sidebar .addlink::after { content: none !important; }
+#nav-sidebar tr.sidebar-active .addlink { background: #f3f4f6 !important; background-image: none !important; }
+#nav-sidebar table tbody tr:hover .addlink { background: #f3f4f6 !important; background-image: none !important; }
+#nav-sidebar .addlink:hover,
+#nav-sidebar tr.sidebar-active .addlink:hover { background: #e5e7eb !important; border-color: #9ca3af !important; }
+/* Remove the "+" buttons for adding models in the side navigation (after the styles above, to
+   override display:inline-flex). The add button at the top of lists (object-tools) is left alone.
+ */
+#nav-sidebar .addlink { display: none !important; }
+#nav-sidebar table tbody tr td { padding: 0 !important; }
+
+/* Counter in parentheses next to the group name: "Customers (4)". Always visible, even when the group is collapsed. */
+.sidebar-group-count,
+#nav-sidebar .sb-row-count {
+    display: none;
+    margin-left: 6px;
+    color: #9ca3af;
+    font-size: 13px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+.sidebar-group-count.has-count,
+#nav-sidebar .sb-row-count.has-count { display: inline; }
+#nav-sidebar .sb-row-count { flex-shrink: 0; }
+
+/* ── Sidebar rail (toggle bar) ── */
+.sidebar-rail {
+    width: 18px;
+    flex-shrink: 0;
+    background: #fff;
+    border-right: 1px solid #e5e7eb;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.12s, border-color 0.12s, width 0.12s;
+    user-select: none;
+    z-index: 100;
+}
+.sidebar-rail:hover { background: #f3f4f6; border-right-color: #d1d5db; }
+.sidebar-rail-arrow {
+    color: #9ca3af;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1;
+    transition: color 0.12s;
+    pointer-events: none;
+}
+.sidebar-rail:hover .sidebar-rail-arrow { color: #374151; }
+
+/* ── Submit row (Save bar) ── */
+.submit-row-top {
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    background: #fff !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 6px !important;
+    padding: 10px 16px !important;
+    margin: 10px 16px 8px !important;
+    overflow: visible !important;
+    flex-wrap: wrap !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 200 !important;
+}
+.submit-spacer { flex: 1 !important; min-width: 8px !important; }
+
+/* Primary Save button */
+.submit-row input[type=submit].default,
+.submit-row input[name="_save"] {
+    height: 28px;
+    background: #374151 !important;
+    color: #fff !important;
+    border: 1px solid #374151 !important;
+    border-radius: 4px !important;
+    padding: 0 14px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    cursor: pointer !important;
+    text-shadow: none !important;
+    text-transform: none !important;
+    box-shadow: none !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    font-family: inherit !important;
+}
+.submit-row input[type=submit].default:hover,
+.submit-row input[name="_save"]:hover {
+    background: #1f2937 !important;
+    border-color: #1f2937 !important;
+    color: #fff !important;
+}
+
+/* Secondary save buttons */
+.submit-row input[name="_continue"],
+.submit-row input[name="_addanother"] {
+    height: 28px;
+    background: #fff !important;
+    color: #6b7280 !important;
+    border: 1px solid #d1d5db !important;
+    border-radius: 4px !important;
+    padding: 0 10px !important;
+    font-size: 13px !important;
+    line-height: 1 !important;
+    font-weight: 400 !important;
+    cursor: pointer !important;
+    text-shadow: none !important;
+    box-shadow: none !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    font-family: inherit !important;
+}
+.submit-row input[name="_continue"]:hover,
+.submit-row input[name="_addanother"]:hover {
+    background: #f9fafb !important;
+    border-color: #d1d5db !important;
+    color: #374151 !important;
+}
+.submit-row input[type=submit]:focus,
+.submit-row input[type=submit]:focus-visible { outline: none !important; box-shadow: none !important; }
+
+/* Link buttons (Log out, History, Delete) */
+.submit-row a.historylink, .submit-row a.exit-link {
+    height: 28px;
+    background: #fff;
+    color: #374151 !important;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    padding: 0 10px;
+    font-size: 13px;
+    font-weight: 400;
+    text-decoration: none !important;
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+    cursor: pointer;
+}
+.submit-row a.historylink:hover, .submit-row a.exit-link:hover {
+    background: #f3f4f6;
+    border-color: #9ca3af;
+    color: #1f2937 !important;
+}
+.submit-row a.deletelink {
+    height: 28px;
+    background: #fff;
+    color: #b91c1c !important;
+    border: 1px solid #fca5a5 !important;
+    border-radius: 4px;
+    padding: 0 10px;
+    font-size: 13px;
+    font-weight: 400;
+    text-decoration: none !important;
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+    cursor: pointer;
+}
+.submit-row a.deletelink:hover { background: #fef2f2 !important; border-color: #f87171 !important; color: #991b1b !important; }
+.submit-row:not(.submit-row-top) { display: none !important; }
+
+/* ── Change form — white background, no cards ── */
+.change-form main.content { background: #fff !important; }
+.change-list main.content { background: #fff !important; }
+.change-form .inline-group,
+.change-form fieldset.module {
+    border: none !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+.change-form .form-row { border-bottom: 1px solid #e5e7eb !important; }
+/* :1059 .change-form .aligned .form-row { padding-left/right: 20px } — removed: duplicate of .form-row at :1181 */
+.change-form .inline-group > h2,
+.change-form fieldset.module > h2 { background: transparent !important; border-bottom: none !important; }
+/* 16px indent — only for elements without their own padding */
+.change-form .variant-tab-bar { padding-left: 16px !important; padding-right: 16px !important; }
+.change-form .preview-split .info-section { margin-left: 0 !important; margin-right: 0 !important; }
+.change-form .preview-split { padding-left: 16px !important; padding-right: 16px !important; }
+.change-form #general-info-toggle > summary { padding-left: 16px !important; padding-right: 16px !important; }
+/* discount-row and inline form-row outside the fieldset */
+.change-form .discount-row { padding-left: 20px !important; padding-right: 20px !important; }
+.change-form .inline-related > .form-row { padding-left: 20px !important; padding-right: 20px !important; }
+
+/* ── Object tools (Add button) ── */
+ul.object-tools { margin: 0; padding: 0; float: right; clear: right; list-style: none; }
+/* Standard Django History button — temporarily hidden everywhere */
+ul.object-tools li a.historylink { display: none !important; }
+.submit-row a.historylink { display: none !important; }
+ul.object-tools li { display: inline-block; margin-left: 6px; }
+ul.object-tools a.addlink, ul.object-tools a.viewsitelink {
+    height: 36px;
+    background: #fff;
+    color: #374151 !important;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    padding: 0 16px;
+    font-size: 13px;
+    font-weight: 400;
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none !important;
+}
+ul.object-tools a.addlink::before { content: none; }
+ul.object-tools a.addlink:hover, ul.object-tools a.viewsitelink:hover {
+    background: #f3f4f6;
+    border-color: #9ca3af;
+    color: #1f2937 !important;
+}
+
+/* Background for the sticky bar — needed so content doesn't show through on scroll */
+.submit-row-top.cl-bar { background: #fff !important; border-bottom: 1px solid #e5e7eb !important; }
+
+/* ── Changelist top bar ── */
+.cl-bar {
+    display: flex !important;
+    align-items: center;
+    gap: 4px;
+    overflow: visible !important;
+    background: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 10px 16px !important;
+    margin: 0 !important;
+    flex-wrap: wrap !important;
+}
+/* Submit buttons inside cl-bar look like cl-top-btn */
+.cl-bar input[type=submit].default,
+.cl-bar input[type=submit] {
+    height: 32px !important;
+    background: #fff !important;
+    color: #374151 !important;
+    border: 1px solid #d1d5db !important;
+    border-radius: 4px !important;
+    padding: 0 12px !important;
+    margin: 0 !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    cursor: pointer !important;
+    text-shadow: none !important;
+    text-transform: none !important;
+    box-shadow: none !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    font-family: inherit !important;
+    vertical-align: middle !important;
+    box-sizing: border-box !important;
+}
+.cl-bar input[type=submit].default:hover,
+.cl-bar input[type=submit]:hover {
+    background: #f3f4f6 !important;
+    border-color: #9ca3af !important;
+    color: #1f2937 !important;
+}
+.cl-top-btn {
+    height: 32px !important;
+    background: #fff !important;
+    color: #374151 !important;
+    border: 1px solid #d1d5db !important;
+    border-radius: 4px !important;
+    padding: 0 10px !important;
+    margin: 0 !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    line-height: normal !important;
+    cursor: pointer !important;
+    text-decoration: none !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    vertical-align: middle !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    font-family: inherit !important;
+    box-sizing: border-box !important;
+    text-shadow: none !important;
+    box-shadow: none !important;
+}
+.cl-top-btn:hover { background: #f3f4f6 !important; border-color: #9ca3af !important; color: #1f2937 !important; }
+.cl-top-btn-danger { color: var(--err-fg) !important; border-color: var(--err-border) !important; }
+.cl-top-btn-danger:hover { background: var(--err-bg) !important; border-color: var(--err-border) !important; color: var(--err-fg) !important; }
+.cl-counter { margin-left: 6px; font-size: 12px; color: #9ca3af; }
+.cl-bar-error { font-size: 12px; color: #b91c1c; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 4px; padding: 3px 10px; }
+/* ── CRM action buttons that do nothing without selected rows (Delete, Export)
+   are hidden completely instead of a grey disabled state: they free up space, and when they become
+   active they appear in the same position. The marker is opt-in:
+     • .cl-btn-idle      — toggle in syncDelBtn (the Delete button);
+     • .hide-when-disabled — hidden only while the button is :disabled.
+   We deliberately do NOT hide the other disabled buttons: "in progress" ones (spinners, TTN
+   (waybill), AI generation)
+   and validation ones (empty field) — there, disappearing = loss of feedback. ──
+ */
+.cl-btn-idle,
+.hide-when-disabled:disabled { display: none !important; }
+
+/* ── Hidden elements ── */
+.changelist-footer { display: none !important; }
+#toolbar { display: none !important; }
+#changelist-filter { display: none !important; }
+.toplinks { display: none !important; }
+#changelist-search { display: none !important; }
+div.actions { display: none !important; }
+
+/* ── Form layout ── */
+.aligned label:not([for]) { display: none; }
+.field-order_number label, .field-created_at label, .field-updated_at label { display: inline !important; }
+.form-row {
+    padding: 14px 20px;
+    border-bottom: 1px solid #f3f4f6;
+    margin: 0 !important;
+}
+.form-row > p { margin: 0; }
+.form-row .help, .form-row p.help {
+    color: #9ca3af;
+    font-size: 12px;
+    margin-top: 4px;
+    line-height: 1.4;
+    display: block;
+}
+.aligned label { float: none !important; padding-top: 0 !important; }
+.aligned .form-row { display: flex; align-items: flex-start; gap: 0; }
+.aligned .form-row > label:first-child {
+    width: 170px;
+    min-width: 170px;
+    padding: 0 14px 0 0 !important;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--body-quiet-color);
+    flex-shrink: 0;
+}
+.aligned .form-row > label.required::after { content: ':'; }
+.aligned .form-row > label.required { font-weight: 400 !important; }
+.aligned .form-row > div { flex: 1; min-width: 0; padding-top: 0 !important; }
+.aligned .form-row .readonly { padding-top: 6px; display: inline-block; font-size: 13px; color: #374151; }
+
+/* ── Inputs ── */
+input[type=text], input[type=email], input[type=number],
+input[type=password], input[type=url], input[type=tel],
+input[type=date], input[type=datetime-local], input[type=search] {
+    height: 28px;
+    border: 1px solid #d1d5db !important;
+    border-radius: 4px !important;
+    padding: 0 10px !important;
+    font-size: 13px !important;
+    color: #374151 !important;
+    background: #fff !important;
+    outline: none !important;
+    box-shadow: none !important;
+    font-family: inherit !important;
+    -webkit-appearance: none;
+    appearance: none;
+}
+input[type=text]:focus, input[type=email]:focus, input[type=number]:focus,
+input[type=password]:focus, input[type=url]:focus, input[type=tel]:focus,
+input[type=date]:focus, input[type=datetime-local]:focus, input[type=search]:focus {
+    border-color: #9ca3af !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+/* Remove the arrows on number inputs */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; }
+textarea {
+    border: 1px solid #d1d5db !important;
+    border-radius: 4px !important;
+    padding: 8px 10px !important;
+    font-size: 13px !important;
+    color: #374151 !important;
+    background: #fff !important;
+    outline: none !important;
+    box-shadow: none !important;
+    resize: vertical !important;
+    min-height: 80px !important;
+    font-family: inherit !important;
+    line-height: 1.5 !important;
+}
+textarea:focus { border-color: #9ca3af !important; box-shadow: none !important; }
+select:not([size]):not([multiple]) {
+    height: 28px;
+    border: 1px solid #d1d5db !important;
+    border-radius: 4px !important;
+    padding: 0 28px 0 10px !important;
+    font-size: 13px !important;
+    color: #374151 !important;
+    background-color: #fff !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239ca3af'/%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 10px center !important;
+    background-size: 10px 6px !important;
+    outline: none !important;
+    box-shadow: none !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    cursor: pointer;
+    font-family: inherit !important;
+}
+select:not([size]):not([multiple]):focus {
+    border-color: #9ca3af !important;
+    box-shadow: none !important;
+    outline: none !important;
+}
+input[type=checkbox], input[type=radio] { accent-color: #374151; cursor: pointer; }
+/* Selection checkboxes in tables — a single size */
+#result_list .action-checkbox input[type=checkbox],
+#result_list thead .action-checkbox-column input[type=checkbox],
+#pv-table .col-cb input[type=checkbox],
+#pb-table .col-cb input[type=checkbox],
+#or-table .col-cb input[type=checkbox],
+#ds-table .col-cb input[type=checkbox],
+#br-table .col-cb input[type=checkbox],
+#cs-table .col-cb input[type=checkbox],
+#inv-list-table .col-cb input[type=checkbox],
+#u-table .col-cb input[type=checkbox],
+#lg-table .col-cb input[type=checkbox] {
+    width: 16px !important;
+    height: 16px !important;
+    vertical-align: middle !important;
+    cursor: pointer !important;
+    accent-color: #374151 !important;
+}
+#result_list td.action-checkbox,
+#result_list th.action-checkbox-column,
+#changelist table thead th.action-checkbox-column,
+#changelist table tbody td.action-checkbox {
+    width: 44px !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    padding: 0 !important;
+    text-align: center !important;
+    vertical-align: middle !important;
+    border-left: none !important;
+}
+#result_list td.action-checkbox input[type=checkbox],
+#result_list th.action-checkbox-column input[type=checkbox] {
+    display: inline-block !important;
+    margin: 0 !important;
+    vertical-align: middle !important;
+}
+input::placeholder, textarea::placeholder { color: #9ca3af !important; }
+
+/* ── Buttons (all shared) ── */
+.button, a.button, input.button,
+.related-widget-wrapper a,
+.add-row a,
+a.inlinechangelink {
+    height: 28px;
+    background: #fff !important;
+    color: #374151 !important;
+    border: 1px solid #d1d5db !important;
+    border-radius: 4px !important;
+    padding: 0 12px !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    text-decoration: none !important;
+    cursor: pointer !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    font-family: inherit !important;
+}
+.button:hover, a.button:hover,
+.related-widget-wrapper a:hover,
+a.inlinechangelink:hover {
+    background: #f3f4f6 !important;
+    border-color: #9ca3af !important;
+    color: #1f2937 !important;
+    text-decoration: none !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+.inline-deletelink {
+    background: none !important;
+    border: none !important;
+    color: #d1d5db !important;
+    cursor: pointer !important;
+    padding: 2px 6px !important;
+    font-size: 13px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    line-height: 1 !important;
+}
+.inline-deletelink:hover { color: #b91c1c !important; background: #fef2f2 !important; border-radius: 3px !important; }
+
+/* ── Related widget ── */
+.related-widget-wrapper {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    flex-wrap: wrap !important;
+}
+.related-widget-wrapper a { padding: 0 8px !important; font-size: 12px !important; }
+.related-widget-wrapper a img { display: none !important; }
+
+/* ── Fieldsets (form sections) ── */
+fieldset.module {
+    border: none !important;
+    border-bottom: 1px solid #e5e7eb !important;
+    border-radius: 0 !important;
+    margin-bottom: 0 !important;
+    padding: 0 0 16px 0 !important;
+    overflow: hidden !important;
+    box-shadow: none !important;
+    background: #fff !important;
+}
+fieldset.module:last-of-type {
+    border-bottom: none !important;
+    padding-bottom: 0 !important;
+}
+fieldset.module > h2 {
+    background: #f9fafb !important;
+    color: #6b7280 !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.7px !important;
+    padding: 9px 16px !important;
+    margin: 0 !important;
+    border-bottom: 1px solid #e5e7eb !important;
+    border-radius: 0 !important;
+}
+fieldset.module.collapsed > h2 { border-bottom: none !important; }
+.collapse-toggle {
+    background: none !important;
+    border: none !important;
+    color: #9ca3af !important;
+    font-size: 12px !important;
+    cursor: pointer !important;
+    padding: 0 0 0 8px !important;
+    font-weight: 400 !important;
+    text-decoration: none !important;
+    font-family: inherit !important;
+}
+.collapse-toggle:hover { color: #374151 !important; }
+
+/* ── Inline groups ── */
+.inline-group {
+    border: 1px solid #e5e7eb !important;
+    border-radius: 0 !important;
+    overflow: hidden !important;
+    margin-bottom: 14px !important;
+    background: #fff !important;
+}
+.inline-group > h2 {
+    background: #f9fafb !important;
+    color: #6b7280 !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.7px !important;
+    padding: 9px 16px !important;
+    margin: 0 !important;
+    border-bottom: 1px solid #e5e7eb !important;
+}
+.inline-group .tabular thead th {
+    background: #f9fafb !important;
+    color: #6b7280 !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.4px !important;
+    padding: 7px 12px !important;
+    border-bottom: 1px solid #e5e7eb !important;
+    border-left: 1px solid #f3f4f6 !important;
+    white-space: nowrap !important;
+}
+.inline-group .tabular thead th:first-child { border-left: none !important; }
+.inline-group .tabular tbody tr { border-bottom: 1px solid #f3f4f6 !important; }
+.inline-group .tabular tbody tr:hover { background: #f9fafb !important; }
+.inline-group .tabular tbody td {
+    padding: 8px 12px !important;
+    border-left: 1px solid #f3f4f6 !important;
+    vertical-align: middle !important;
+    border-bottom: none !important;
+}
+.inline-group .tabular tbody td:first-child { border-left: none !important; }
+
+/* Stacked inline */
+.inline-group .stacked .inline-related {
+    border-bottom: 1px solid #e5e7eb !important;
+    padding: 14px 16px !important;
+}
+.inline-group .stacked .inline-related:last-of-type { border-bottom: none !important; }
+.inline-group .stacked h3 {
+    background: #f9fafb !important;
+    color: #6b7280 !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+    padding: 7px 12px !important;
+    margin: -14px -16px 14px !important;
+    border-bottom: 1px solid #e5e7eb !important;
+}
+.inline-group .stacked h3 .inline_label { display: none !important; }
+
+/* Add row */
+.add-row {
+    background: #f9fafb !important;
+    border-top: 1px solid #e5e7eb !important;
+    padding: 8px 14px !important;
+    margin: 0 !important;
+}
+.add-row a {
+    border: 1px dashed #d1d5db !important;
+    font-size: 12px !important;
+    color: #6b7280 !important;
+    padding: 4px 12px !important;
+    border-radius: 4px !important;
+    height: auto !important;
+    background: #fff !important;
+}
+.add-row a:hover {
+    background: #f3f4f6 !important;
+    border-color: #9ca3af !important;
+    border-style: solid !important;
+    color: #374151 !important;
+}
+.add-row a::before { content: none !important; }
+
+/* ── Help text ── */
+.help, p.help {
+    color: #9ca3af !important;
+    font-size: 12px !important;
+    margin-top: 3px !important;
+    line-height: 1.4 !important;
+}
+
+/* ── Errors — hide Django blocks, show only red border ── */
+ul.errorlist { display: none !important; }
+p.errornote { display: none !important; }
+.form-row.errors input,
+.form-row.errors select,
+.form-row.errors textarea { border: 1px solid #dc2626 !important; box-shadow: none !important; outline: none !important; }
+
+/* ── Messages — all hidden ── */
+ul.messagelist { display: none !important; }
+
+/* ── Calendar popup ── */
+.calendarbox, .clockbox {
+    border: 1px solid #e5e7eb !important;
+    border-radius: 6px !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,.07) !important;
+    background: #fff !important;
+    overflow: hidden !important;
+}
+.calendar caption {
+    background: #f9fafb !important;
+    color: #374151 !important;
+    font-weight: 600 !important;
+    font-size: 13px !important;
+    padding: 8px 12px !important;
+    border-bottom: 1px solid #e5e7eb !important;
+}
+.calendar thead { background: #f9fafb !important; }
+.calendar thead th { color: #9ca3af !important; font-size: 12px !important; font-weight: 600 !important; padding: 6px 4px !important; }
+.calendar td { padding: 2px !important; }
+.calendar td a {
+    color: #374151 !important;
+    border-radius: 3px !important;
+    padding: 4px 6px !important;
+    display: block;
+    text-align: center;
+    font-size: 12px;
+    text-decoration: none;
+}
+.calendar td a:hover { background: #f3f4f6 !important; }
+.calendar td.today a { background: #374151 !important; color: #fff !important; font-weight: 600 !important; }
+.calendar td.selected a { background: #374151 !important; color: #fff !important; }
+.calendarnav-previous a, .calendarnav-next a { color: #374151 !important; font-size: 13px !important; }
+.timelist a { color: #374151 !important; }
+.timelist a:hover { background: #f3f4f6 !important; color: #1f2937 !important; }
+.calendar-icon, .clock-icon { filter: grayscale(1) opacity(0.35) !important; }
+
+/* ── Paginator ── */
+.paginator { color: #6b7280 !important; font-size: 12px !important; padding: 10px 0 !important; }
+.paginator a, .paginator .this-page {
+    border: 1px solid #d1d5db !important;
+    border-radius: 4px !important;
+    padding: 3px 9px !important;
+    margin: 0 2px !important;
+    font-size: 12px !important;
+    text-decoration: none !important;
+    display: inline-block !important;
+}
+.paginator a { background: #fff !important; color: #374151 !important; }
+.paginator a:hover { background: #f3f4f6 !important; border-color: #d1d5db !important; }
+.paginator .this-page {
+    background: #374151 !important;
+    color: #fff !important;
+    border-color: #374151 !important;
+    font-weight: 500 !important;
+}
+
+/* ── Per-page selector ── */
+.pp-selector { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; font-size: 12px; color: #6b7280; vertical-align: middle; }
+.pp-selector span { color: #9ca3af; }
+.pp-btn { display: inline-block; padding: 3px 9px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; color: #374151; text-decoration: none; font-size: 12px; }
+.pp-btn:hover { background: #f3f4f6 !important; border-color: #d1d5db !important; }
+.pp-btn.pp-active { background: #374151 !important; color: #fff !important; border-color: #374151 !important; font-weight: 500; }
+
+/* ── No hover shadows or transforms anywhere ── */
+a:hover, button:hover, input:hover, .button:hover {
+    box-shadow: none !important;
+    transform: none !important;
+}
+
+/* ── Revert button in history ── */
+.log-revert-btn {
+    font-size: 12px;
+    padding: 3px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: #fff;
+    color: #374151;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.log-revert-btn:hover { background: #f3f4f6; border-color: #9ca3af; }
+
+/* ── Revert modal overlay ── */
+/* #revert-modal / #revert-modal-box — styles moved to .app-modal-overlay / .app-modal-box (aliases) above. */
+#revert-modal-msg { font-size: 14px; color: #374151; margin-bottom: 18px; line-height: 1.5; }
+#revert-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+#revert-modal-confirm {
+    padding: 6px 16px; border-radius: 4px; border: none;
+    background: #374151; color: #fff; font-size: 13px; cursor: pointer;
+}
+#revert-modal-confirm:hover { background: #1f2937; }
+#revert-modal-cancel {
+    padding: 6px 16px; border-radius: 4px;
+    border: 1px solid #d1d5db; background: #fff; color: #374151;
+    font-size: 13px; cursor: pointer;
+}
+#revert-modal-cancel:hover { background: #f3f4f6; }
+
+/* Filter popup: hover only changes text color, label covers text+checkbox (not the whole row) */
+.fp-item label { color: #6b7280; transition: color .12s; }
+.fp-item label:hover { color: #000; }
+.fp-date-tab { transition: color .12s; }
+.fp-date-tab:hover { color: #000 !important; }
+</style>
+
+<script>
+/* Force light theme */
+document.documentElement.dataset.theme = 'light';
+
+/* ── Global mousedown: instantly closes all Quill pickers (.ql-expanded) ── */
+document.addEventListener('mousedown', function(e) {
+  if (e.button !== 0) return;
+  document.querySelectorAll('.ql-picker.ql-expanded').forEach(function(picker) {
+    if (picker.contains(e.target)) return;
+    picker.classList.remove('ql-expanded');
+    var opts = picker.querySelector('.ql-picker-options');
+    if (opts) opts.setAttribute('aria-hidden', 'true');
+  });
+}, true);
+
+/* ── Wheel outside a popup: closes all open popups (standard dropdown behavior).
+   Wheel inside a popup — overscroll-behavior:contain in CSS prevents the page from scrolling. ──
+ */
+window.addEventListener('wheel', function(e) {
+  var POPUP_SEL = '.picker-popup, .attr-popup, .app-picker, .app-filter-pop, .sel-picker-popup, .ntf-picker-popup, .np-city-drop, .np-wh-drop, .oi-drop, .bi-drop, .ql-picker-options, [id$="flt-pop"]';
+  if (e.target.closest && e.target.closest(POPUP_SEL)) return;
+  document.querySelectorAll(POPUP_SEL).forEach(function(p) {
+    var d = p.style.display;
+    if (d && d !== 'none') p.style.display = 'none';
+    if (p.classList.contains('open')) p.classList.remove('open');
+    if (p.classList.contains('is-open')) p.classList.remove('is-open');
+    if (p.classList.contains('ql-expanded')) p.classList.remove('ql-expanded');
+  });
+  document.querySelectorAll('.ql-picker.ql-expanded').forEach(function(picker) {
+    picker.classList.remove('ql-expanded');
+  });
+}, { passive: true });
+
+/* ── Enter in the filter popup on the changelist: don't submit the form, just close the popup ── */
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter') return;
+  var pop = e.target.closest && e.target.closest('[id$="flt-pop"]');
+  if (!pop) return;
+  e.preventDefault();
+  e.stopPropagation();
+  pop.classList.remove('open');
+  document.querySelectorAll('th.col-open').forEach(function(th){ th.classList.remove('col-open'); });
+  if (e.target.blur) e.target.blur();
+}, true);
+
+/* ── Hover preview (photo etc.): don't let the popup go off the screen edge + hide it on scroll ── */
+(function(){
+  var SEL_WRAP = '[class$="-photo-wrap"], [class*="-photo-wrap "]';
+  var SEL_PREVIEW = '.pv-photo-preview, .pb-photo-preview, .br-photo-preview, .bi-pv-preview';
+  var GAP = 6, MARGIN = 8;
+  function adjust(wrap){
+    var preview = wrap.querySelector(SEL_PREVIEW);
+    if (!preview) return;
+    requestAnimationFrame(function(){
+      var z = (window.clZoom ? window.clZoom() : 1);
+      var pr = preview.getBoundingClientRect();
+      if (pr.width === 0 || pr.height === 0) return;
+      var wr = wrap.getBoundingClientRect();
+      var vh = window.innerHeight, vw = window.innerWidth;   // visual-px
+      if (wr.bottom + GAP + pr.height > vh - MARGIN) {
+        var topAbove = wr.top - pr.height - GAP;             // visual
+        preview.style.top = (Math.max(MARGIN, topAbove) / z) + 'px';
+      }
+      /* pr.left — the actual visual position of the preview (reflects the base set via clX) */
+      if (pr.left + pr.width > vw - MARGIN) {
+        preview.style.left = (Math.max(MARGIN, vw - pr.width - MARGIN) / z) + 'px';
+      }
+    });
+  }
+  document.addEventListener('mouseover', function(e){
+    var t = e.target;
+    if (!t || !t.closest) return;
+    var wrap = t.closest(SEL_WRAP);
+    if (!wrap) return;
+    adjust(wrap);
+  }, true);
+
+  /* Scroll: kill all previews, restore them after scrolling stops (CSS :hover will redraw them) */
+  var scrollTimer = null;
+  function hideAllPreviews(){
+    document.querySelectorAll(SEL_PREVIEW).forEach(function(p){
+      p.style.setProperty('display', 'none', 'important');
+    });
+  }
+  function restorePreviews(){
+    document.querySelectorAll(SEL_PREVIEW).forEach(function(p){
+      p.style.removeProperty('display');
+    });
+  }
+  document.addEventListener('scroll', function(){
+    hideAllPreviews();
+    if (scrollTimer) clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(restorePreviews, 180);
+  }, true);
+})();
+
+document.addEventListener('DOMContentLoaded', function () {
+
+  /* ── Wrap Quill picker-options in scrollable inner div (not color pickers) ── */
+  document.querySelectorAll('.quill-wrapper .ql-picker-options').forEach(function(opts) {
+    if (opts.querySelector('.ql-picker-options-inner')) return;
+    if (opts.closest('.ql-color-picker')) return;
+    var inner = document.createElement('div');
+    inner.className = 'ql-picker-options-inner';
+    while (opts.firstChild) inner.appendChild(opts.firstChild);
+    opts.appendChild(inner);
+  });
+
+  /* ── Quill link tooltip patches: link handler override + close btn + keep open after Save ── */
+  setTimeout(function() {
+    if (!window._quillInstances) return;
+    Object.keys(window._quillInstances).forEach(function(k) {
+      var q = window._quillInstances[k];
+      if (!q || q._tooltipPatched) return;
+      q._tooltipPatched = true;
+
+      // Override the toolbar link handler — always open the tooltip, never toggle it
+      var toolbar = q.getModule && q.getModule('toolbar');
+      if (toolbar) {
+        toolbar.addHandler('link', function() {
+          var range = q.getSelection();
+          if (!range) return;
+          var format = q.getFormat(range);
+          if (format.link) {
+            q.theme.tooltip.linkRange = range;
+          } else {
+            delete q.theme.tooltip.linkRange;
+          }
+          q.theme.tooltip.edit('link', format.link || '');
+        });
+      }
+
+      var tooltip = q.theme && q.theme.tooltip && q.theme.tooltip.root;
+      if (!tooltip) return;
+
+      // Close button
+      if (!tooltip.querySelector('.ql-tooltip-close')) {
+        var closeBtn = document.createElement('button');
+        closeBtn.className = 'ql-tooltip-close';
+        closeBtn.type = 'button';
+        closeBtn.innerHTML = '✕';
+        closeBtn.title = 'Close';
+        closeBtn.addEventListener('mousedown', function(e) {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          tooltip.classList.add('ql-hidden');
+        });
+        tooltip.appendChild(closeBtn);
+      }
+
+      // Remove: remove the link, don't close the tooltip
+      var removeBtn = tooltip.querySelector('a.ql-remove');
+      if (removeBtn && !removeBtn._fixed) {
+        removeBtn._fixed = true;
+        removeBtn.addEventListener('click', function(e) {
+          var range = q.theme.tooltip.linkRange || q.getSelection();
+          if (range && range.length > 0) {
+            q.formatText(range, 'link', false);
+          } else if (range) {
+            var hit = q.scroll.descendant
+              ? q.scroll.descendant(function(blot){ return blot.statics && blot.statics.blotName === 'link'; }, range.index)
+              : [null, 0];
+            var link = hit[0], offset = hit[1] || 0;
+            if (link) q.formatText(range.index - offset, link.length(), 'link', false);
+          }
+          delete q.theme.tooltip.linkRange;
+          var input = tooltip.querySelector('input');
+          if (input) input.value = '';
+          // Don't hide — keep the tooltip open in edit mode
+          tooltip.classList.remove('ql-hidden');
+          tooltip.classList.add('ql-editing');
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }, true);
+      }
+
+      // Save: handle link/video — close the tooltip after applying
+      var saveBtn = tooltip.querySelector('a.ql-action');
+      if (saveBtn && !saveBtn._noCloseHook) {
+        saveBtn._noCloseHook = true;
+        saveBtn.addEventListener('click', function(e) {
+          var mode = tooltip.getAttribute('data-mode');
+          var input = tooltip.querySelector('input');
+          var url = input ? input.value.trim() : '';
+          if (!url) return;
+
+          if (mode === 'link') {
+            var range = q.theme.tooltip.linkRange || q.getSelection(true);
+            if (!range) return;
+            if (range.length === 0) {
+              q.insertText(range.index, url, 'link', url);
+              q.setSelection(range.index + url.length, 0);
+            } else {
+              q.formatText(range.index, range.length, 'link', url);
+            }
+          } else if (mode === 'video') {
+            var range = q.getSelection(true);
+            if (!range) return;
+            var videoUrl = url;
+            var yt = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/);
+            if (yt) videoUrl = 'https://www.youtube.com/embed/' + yt[1] + '?showinfo=0';
+            var vm = url.match(/^https?:\/\/(?:www\.)?vimeo\.com\/(\d+)/);
+            if (vm) videoUrl = 'https://player.vimeo.com/video/' + vm[1];
+            q.insertEmbed(range.index, 'video', videoUrl, 'user');
+            q.setSelection(range.index + 1, 0);
+          } else {
+            return; // formula etc — let Quill handle
+          }
+          delete q.theme.tooltip.linkRange;
+          if (input) input.value = '';
+          tooltip.classList.add('ql-hidden');
+          tooltip.classList.remove('ql-editing');
+          // Backup: Quill may re-show the tooltip via the selection-change handler
+          setTimeout(function() {
+            tooltip.classList.add('ql-hidden');
+            tooltip.classList.remove('ql-editing');
+          }, 0);
+          setTimeout(function() {
+            tooltip.classList.add('ql-hidden');
+            tooltip.classList.remove('ql-editing');
+          }, 50);
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }, true);
+      }
+    });
+  }, 0);
+
+
+  /* ── Table editor toolbar — delete row/column/table ── */
+  setTimeout(function() {
+    if (!window._quillInstances) return;
+    Object.keys(window._quillInstances).forEach(function(k) {
+      var q = window._quillInstances[k];
+      if (!q || q._tableUI) return;
+      q._tableUI = true;
+      var editor = q.root;
+
+      var bar = document.createElement('div');
+      bar.style.cssText = 'position:absolute;display:none;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:3px;box-shadow:0 4px 12px rgba(0,0,0,.1);z-index:9999;gap:2px;flex-direction:row;align-items:center;';
+      document.body.appendChild(bar);
+
+      var currCell = null;
+
+      function directRows(table) {
+        var rows = [];
+        Array.from(table.children).forEach(function(ch) {
+          if (ch.tagName === 'TR') rows.push(ch);
+          else if (ch.tagName === 'TBODY' || ch.tagName === 'THEAD' || ch.tagName === 'TFOOT') {
+            Array.from(ch.children).forEach(function(tr) { if (tr.tagName === 'TR') rows.push(tr); });
+          }
+        });
+        return rows;
+      }
+      function cellIndex(cell) {
+        var row = cell.closest('tr');
+        return row ? Array.from(row.children).indexOf(cell) : -1;
+      }
+      function sync() {
+        var ta = q.container.parentNode.querySelector('textarea');
+        if (ta) ta.value = q.root.innerHTML === '<p><br></p>' ? '' : q.root.innerHTML;
+        if (window.pgMarkDirty) window.pgMarkDirty();
+      }
+      function mkBtn(svg, title, action) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.title = title; b.innerHTML = svg;
+        b.style.cssText = 'width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;background:#fff;border:1px solid #d1d5db;border-radius:4px;color:#6b7280;cursor:pointer;padding:0;';
+        b.addEventListener('mouseenter', function(){ b.style.borderColor='#9ca3af'; });
+        b.addEventListener('mouseleave', function(){ b.style.borderColor='#d1d5db'; });
+        b.addEventListener('mousedown', function(e){ if(e.button!==0)return; e.preventDefault(); e.stopPropagation(); action(); });
+        bar.appendChild(b);
+        return b;
+      }
+
+      var RED = '#dc2626';
+      var ico = function(highlight) {
+        return '<svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">' +
+          (highlight || '') +
+          '<rect x="3" y="3" width="12" height="12"/><line x1="3" y1="7" x2="15" y2="7"/><line x1="3" y1="11" x2="15" y2="11"/><line x1="7" y1="3" x2="7" y2="15"/><line x1="11" y1="3" x2="11" y2="15"/>' +
+          '</svg>';
+      };
+
+      mkBtn(ico('<rect x="3.5" y="7.5" width="11" height="3" fill="'+RED+'" stroke="none"/>'), 'Delete row', function() {
+        if (!currCell) return;
+        var table = currCell.closest('table');
+        var row = currCell.closest('tr');
+        if (directRows(table).length > 1) row.remove();
+        else table.remove();
+        currCell = null; bar.style.display = 'none'; sync();
+      });
+      mkBtn(ico('<rect x="7.5" y="3.5" width="3" height="11" fill="'+RED+'" stroke="none"/>'), 'Delete column', function() {
+        if (!currCell) return;
+        var idx = cellIndex(currCell);
+        if (idx < 0) return;
+        var table = currCell.closest('table');
+        var rows = directRows(table);
+        if (rows[0] && rows[0].children.length > 1) {
+          rows.forEach(function(r) { if (r.children[idx]) r.children[idx].remove(); });
+        } else { table.remove(); }
+        currCell = null; bar.style.display = 'none'; sync();
+      });
+      mkBtn('<svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="12" height="12"/><line x1="3" y1="7" x2="15" y2="7"/><line x1="3" y1="11" x2="15" y2="11"/><line x1="7" y1="3" x2="7" y2="15"/><line x1="11" y1="3" x2="11" y2="15"/><line x1="4" y1="4" x2="14" y2="14" stroke="'+RED+'" stroke-width="2.2"/><line x1="14" y1="4" x2="4" y2="14" stroke="'+RED+'" stroke-width="2.2"/></svg>', 'Delete table', function() {
+        if (!currCell) return;
+        currCell.closest('table').remove();
+        currCell = null; bar.style.display = 'none'; sync();
+      });
+
+      function showBar(cell) {
+        currCell = cell;
+        var table = cell.closest('table');
+        if (!table) return;
+        var rect = table.getBoundingClientRect();
+        bar.style.display = 'flex';
+        var top = rect.top + window.scrollY - 36;
+        if (rect.top < 40) top = rect.bottom + window.scrollY + 6;
+        bar.style.top = top + 'px';
+        bar.style.left = (rect.left + window.scrollX) + 'px';
+      }
+      function hideBar() { bar.style.display = 'none'; currCell = null; }
+
+      editor.addEventListener('click', function(e) {
+        var cell = e.target.closest('td, th');
+        if (cell && editor.contains(cell)) showBar(cell);
+        else hideBar();
+      });
+      document.addEventListener('mousedown', function(e) {
+        if (e.button !== 0) return;
+        if (bar.contains(e.target)) return;
+        if (editor.contains(e.target) && e.target.closest('td, th')) return;
+        hideBar();
+      }, true);
+    });
+  }, 0);
+
+  /* ── Custom align button (replaces broken ql-icon-picker) ── */
+  var _alignSvg = function(x1s) {
+    return '<svg style="width:16px;height:16px;flex-shrink:0" viewBox="0 0 18 18" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + x1s + '</svg>';
+  };
+  var _alignSvgs = {
+    '':       _alignSvg('<line x1="3" x2="15" y1="9" y2="9"/><line x1="3" x2="13" y1="14" y2="14"/><line x1="3" x2="9" y1="4" y2="4"/>'),
+    'center': _alignSvg('<line x1="15" x2="3" y1="9" y2="9"/><line x1="14" x2="4" y1="14" y2="14"/><line x1="12" x2="6" y1="4" y2="4"/>'),
+    'right':  _alignSvg('<line x1="15" x2="3" y1="9" y2="9"/><line x1="15" x2="5" y1="14" y2="14"/><line x1="15" x2="9" y1="4" y2="4"/>'),
+    'justify':_alignSvg('<line x1="15" x2="3" y1="9" y2="9"/><line x1="15" x2="3" y1="14" y2="14"/><line x1="15" x2="3" y1="4" y2="4"/>'),
+  };
+  var _alignLabels = { '': 'Align left', 'center': 'Center', 'right': 'Align right', 'justify': 'Justify' };
+
+  function _pgInjectAlign(wrapper, quillInst) {
+    var iconPicker = wrapper.querySelector('.ql-icon-picker');
+    if (!iconPicker || wrapper._pgAlignDone) return;
+    wrapper._pgAlignDone = true;
+
+    if (!quillInst && window._quillInstances) {
+      Object.keys(window._quillInstances).forEach(function(k) {
+        var q = window._quillInstances[k];
+        if (q && q.container && wrapper.contains(q.container)) quillInst = q;
+      });
+    }
+
+    var alignBtn = document.createElement('button');
+    alignBtn.type = 'button';
+    alignBtn.title = 'Alignment';
+    alignBtn.innerHTML = _alignSvgs[''];
+    alignBtn.style.cssText = 'padding:2px;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;color:#6b7280;background:#fff;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;flex-shrink:0;vertical-align:middle;';
+    alignBtn.addEventListener('mouseenter', function() { alignBtn.style.borderColor = '#9ca3af'; });
+    alignBtn.addEventListener('mouseleave', function() { alignBtn.style.borderColor = '#d1d5db'; });
+    iconPicker.parentNode.insertBefore(alignBtn, iconPicker.nextSibling);
+
+    var alignDropdown = document.createElement('div');
+    /* z-index above modals (.em-modal = 10000): the editor can also be inside a window. */
+    alignDropdown.style.cssText = 'position:fixed;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:4px;display:none;z-index:10050;box-shadow:0 4px 12px rgba(0,0,0,.1);flex-direction:row;gap:2px;';
+    document.body.appendChild(alignDropdown);
+
+    ['', 'center', 'right', 'justify'].forEach(function(val) {
+      var item = document.createElement('button');
+      item.type = 'button';
+      item.title = _alignLabels[val];
+      item.innerHTML = _alignSvgs[val];
+      item.style.cssText = 'padding:2px;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;color:#6b7280;background:#fff;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;';
+      item.addEventListener('mouseenter', function() { item.style.borderColor = '#9ca3af'; item.style.background = '#f9fafb'; });
+      item.addEventListener('mouseleave', function() { item.style.borderColor = '#d1d5db'; item.style.background = '#fff'; });
+      item.addEventListener('click', function(e) {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        if (quillInst) quillInst.format('align', val || false);
+        alignBtn.innerHTML = _alignSvgs[val];
+        closeAlignDropdown();
+      });
+      alignDropdown.appendChild(item);
+    });
+
+    var _alignOpen = false;
+    function openAlignDropdown() {
+      var rect = alignBtn.getBoundingClientRect();
+      alignDropdown.style.display = 'flex';
+      alignDropdown.style.left = (window.clX ? window.clX(rect.left) : rect.left) + 'px';
+      alignDropdown.style.top = (window.clFlipTop ? window.clFlipTop(rect, alignDropdown.offsetHeight, 8) : (rect.bottom + 8)) + 'px';
+      _alignOpen = true;
+      setTimeout(function() { document.addEventListener('mousedown', alignOutsideClick); }, 0);
+    }
+    function closeAlignDropdown() {
+      alignDropdown.style.display = 'none';
+      _alignOpen = false;
+      document.removeEventListener('mousedown', alignOutsideClick);
+    }
+    function alignOutsideClick(e) {
+      if (e.button !== 0) return;
+      if (!alignDropdown.contains(e.target) && e.target !== alignBtn) closeAlignDropdown();
+    }
+    alignBtn.addEventListener('mousedown', function(e) {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      if (_alignOpen) closeAlignDropdown(); else openAlignDropdown();
+    });
+
+    function syncAlignIcon() {
+      if (!quillInst) return;
+      var range = quillInst.getSelection();
+      var val = range ? (quillInst.getFormat(range).align || '') : '';
+      alignBtn.innerHTML = _alignSvgs[val] || _alignSvgs[''];
+    }
+    if (quillInst) {
+      quillInst.on('selection-change', syncAlignIcon);
+      quillInst.on('text-change', syncAlignIcon);
+    }
+  }
+  /* Available from outside — for editors that are initialized later (lazily). */
+  window._pgInjectAlign = _pgInjectAlign;
+  document.querySelectorAll('.quill-wrapper').forEach(function(wrapper) { _pgInjectAlign(wrapper); });
+
+  /* ── Sidebar ── */
+  var sPath = window.location.pathname;
+  /* Aliases: the key is the actual path, the value is which menu item to highlight */
+  var sidebarAliases = {
+    '/admin/catalog/dropshippingproduct/': '/admin/catalog/dropshippingvariant/',
+  };
+  var sActiveHref = null;
+  Object.keys(sidebarAliases).forEach(function(prefix){
+    if (sPath.startsWith(prefix)) sActiveHref = sidebarAliases[prefix];
+  });
+  document.querySelectorAll('#nav-sidebar th a').forEach(function (a) {
+    var href = a.getAttribute('href');
+    if (!href || href === '/admin/') return;
+    if (sActiveHref ? href === sActiveHref : sPath.startsWith(href)) {
+      a.closest('tr').classList.add('sidebar-active');
+    }
+  });
+  // Standalone buttons (sidebar-link-module): highlighted the same way as rows.
+  document.querySelectorAll('#nav-sidebar .sidebar-link-button').forEach(function (a) {
+    var href = a.getAttribute('href');
+    if (!href || href === '/admin/') return;
+    if (sActiveHref ? href === sActiveHref : sPath.startsWith(href)) {
+      a.closest('.sidebar-link-module').classList.add('sidebar-active');
+    }
+  });
+  if (localStorage.getItem('shopSidebar') === '0') document.body.classList.add('sidebar-hidden');
+  var rail = document.querySelector('.sidebar-rail');
+  if (!rail) {
+    var sb = document.getElementById('nav-sidebar');
+    if (sb) {
+      rail = document.createElement('div');
+      rail.className = 'sidebar-rail';
+      rail.innerHTML = '<span class="sidebar-rail-arrow"></span>';
+      sb.parentNode.insertBefore(rail, sb);
+    }
+  }
+  if (rail) {
+    var arrow = rail.querySelector('.sidebar-rail-arrow');
+    function updateRail() {
+      var h = document.body.classList.contains('sidebar-hidden');
+      arrow.textContent = h ? '›' : '‹';
+      rail.title = h ? 'Show menu' : 'Hide menu';
+    }
+    updateRail();
+    rail.addEventListener('click', function () {
+      document.body.classList.toggle('sidebar-hidden');
+      localStorage.setItem('shopSidebar', document.body.classList.contains('sidebar-hidden') ? '0' : '1');
+      updateRail();
+    });
+  }
+
+  /* ══ CHANGELIST ══ */
+  var clForm = document.getElementById('changelist-form');
+  if (clForm) {
+
+    /* ── Add / Delete / counter bar ── */
+    if (!document.querySelector('.cl-bar')) {
+      var bar = document.createElement('div');
+      bar.className = 'submit-row submit-row-top cl-bar';
+
+      var ph = window.location.pathname.replace(/\/$/, '').split('/');
+      var adminBase = '/' + ph[1];
+      var appSlug   = ph[ph.length - 2];
+      var modelSlug = ph[ph.length - 1];
+      var isLogEntry = appSlug === 'admin' && modelSlug === 'logentry';
+      var urlParams = new URLSearchParams(window.location.search);
+      var backApp   = urlParams.get('app');
+      var backModel = urlParams.get('model');
+
+      /* 1. ← Back + Restore (only for the History page) */
+      var revertLogBtn = null;
+      var revertLogDelBtn = null;
+      if (isLogEntry) {
+        if (backApp && backModel) {
+          var backBtn = document.createElement('a');
+          backBtn.href = adminBase + '/' + backApp + '/' + backModel + '/';
+          backBtn.className = 'cl-top-btn';
+          backBtn.textContent = '← Back';
+          bar.appendChild(backBtn);
+        }
+        revertLogBtn = document.createElement('button');
+        revertLogBtn.type = 'button';
+        revertLogBtn.className = 'cl-top-btn';
+        revertLogBtn.textContent = 'Revert';
+        bar.appendChild(revertLogBtn);
+      }
+
+      /* 2. Add */
+      var addLink = document.querySelector('ul.object-tools a.addlink');
+      if (addLink) {
+        var addBtn = document.createElement('a');
+        addBtn.href = addLink.href;
+        addBtn.className = 'cl-top-btn';
+        addBtn.textContent = 'Add';
+        bar.appendChild(addBtn);
+      }
+
+      /* 3. History — hidden (the journal is temporarily disabled) */
+
+      /* Import + Add manually — only for dropshipping */
+      if (appSlug === 'catalog' && modelSlug === 'dropshippingvariant') {
+        var importBtn = document.createElement('button');
+        importBtn.type = 'button';
+        importBtn.className = 'cl-top-btn';
+        importBtn.textContent = 'Import';
+        importBtn.addEventListener('click', function() {
+          importBtn.disabled = true;
+          importBtn.textContent = 'Importing...';
+          var csrf = (document.cookie.match('(?:^|;)\\s*csrftoken=([^;]*)') || [])[1] || '';
+          csrf = decodeURIComponent(csrf);
+          var f = document.createElement('form');
+          f.method = 'post'; f.action = 'import/';
+          var ci = document.createElement('input');
+          ci.type = 'hidden'; ci.name = 'csrfmiddlewaretoken'; ci.value = csrf;
+          f.appendChild(ci); document.body.appendChild(f); f.submit();
+        });
+        bar.appendChild(importBtn);
+      }
+
+      /* Generate sheets — only for orders */
+      if (appSlug === 'orders' && modelSlug === 'order') {
+        var genBtn = document.createElement('button');
+        genBtn.type = 'button';
+        genBtn.id = 'or-gen-top-btn';
+        genBtn.className = 'cl-top-btn hide-when-disabled';
+        genBtn.textContent = 'Export';
+        genBtn.disabled = true;
+        genBtn.style.opacity = '0.45';
+        genBtn.style.cursor = 'default';
+        genBtn.style.transition = 'opacity .15s';
+        bar.appendChild(genBtn);
+      }
+
+      var counter = document.createElement('span');
+      counter.className = 'cl-counter';
+      bar.appendChild(counter);
+
+      /* Spacer — pushes "Delete" to the right */
+      var spacer = document.createElement('span');
+      spacer.style.flex = '1';
+      bar.appendChild(spacer);
+
+      /* Reset filters — on the right next to "Delete". It appears only
+         if the URL has any query parameters (filters / search / sorting).
+         Custom pages (e.g. the dropshipping changelist) manage
+         their own button with id="ds-reset-filters" themselves — and we don't duplicate it.
+       */
+      (function() {
+        if (document.getElementById('ds-reset-filters')) return;
+        var qs = window.location.search;
+        if (!qs || qs === '?' || qs.length < 2) return;
+        var resetBtn = document.createElement('a');
+        resetBtn.href = window.location.pathname;
+        resetBtn.className = 'cl-top-btn';
+        resetBtn.id = 'ds-reset-filters';
+        resetBtn.textContent = 'Reset filters';
+        // Clear the saved state, otherwise the head script will immediately restore the filters.
+        resetBtn.addEventListener('click', function(){
+          try {
+            var m = window.location.pathname.match(/^\/admin\/([a-z_]+)\/([a-z_]+)\/$/i);
+            if (m) localStorage.removeItem('admin_cl_state:' + m[1] + '/' + m[2]);
+          } catch(e) {}
+        });
+        bar.appendChild(resetBtn);
+      })();
+
+      /* Delete — on the right. By default "idle" (grey, not clickable)
+         while nothing is selected in the table. It is activated in updateCounter when
+         there are selected checkboxes. Also duplicated on onclick — a safeguard in case
+         someone removes the class manually.
+       */
+      var delBtn = document.createElement(isLogEntry ? 'button' : 'a');
+      if (isLogEntry) { delBtn.type = 'button'; } else { delBtn.href = '#'; }
+      delBtn.className = 'cl-top-btn cl-top-btn-danger cl-btn-idle';
+      delBtn.textContent = 'Delete';
+
+      delBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+
+        function submitDelete(nameAttr, items) {
+          var csrf = (document.cookie.match('(?:^|;)\\s*csrftoken=([^;]*)') || [])[1] || '';
+          csrf = decodeURIComponent(csrf);
+          var f = document.createElement('form');
+          f.method = 'post';
+          f.action = window.location.href;
+          var csrfInp = document.createElement('input');
+          csrfInp.type = 'hidden'; csrfInp.name = 'csrfmiddlewaretoken'; csrfInp.value = csrf;
+          f.appendChild(csrfInp);
+          if (nameAttr === '_selected_action') {
+            var actInp = document.createElement('input');
+            actInp.type = 'hidden'; actInp.name = 'action'; actInp.value = 'delete_selected';
+            f.appendChild(actInp);
+            var idxInp = document.createElement('input');
+            idxInp.type = 'hidden'; idxInp.name = 'index'; idxInp.value = '0';
+            f.appendChild(idxInp);
+            var postInp = document.createElement('input');
+            postInp.type = 'hidden'; postInp.name = 'post'; postInp.value = 'yes';
+            f.appendChild(postInp);
+          } else {
+            var dvInp = document.createElement('input');
+            dvInp.type = 'hidden'; dvInp.name = 'delete_variants'; dvInp.value = '1';
+            f.appendChild(dvInp);
+          }
+          Array.from(items).forEach(function(cb) {
+            var inp = document.createElement('input');
+            inp.type = 'hidden'; inp.name = nameAttr; inp.value = cb.value;
+            f.appendChild(inp);
+          });
+          document.body.appendChild(f);
+          f.submit();
+        }
+
+        function confirmDelete(count, onConfirm) {
+          if (window.confirm('Delete ' + count + ' record(s)? This action cannot be undone.')) {
+            onConfirm();
+          }
+        }
+
+        var pvTable = document.getElementById('pv-table');
+        var pbTable = document.getElementById('pb-table');
+        if (pvTable) {
+          var items = pvTable.querySelectorAll('.pv-cb:checked');
+          if (!items.length) { showBarError('Select records to delete'); return; }
+          confirmDelete(items.length, function() { submitDelete('variant_ids', items); });
+        } else if (pbTable) {
+          // Bundles: row = packaging, we delete the selected BundleVariant (variant_ids).
+          // .pb-sel-cb:checked also includes the hidden off-page checkboxes (#pb-sel-hidden).
+          var items = pbTable.querySelectorAll('.pb-sel-cb:checked');
+          if (!items.length) { showBarError('Select records to delete'); return; }
+          confirmDelete(items.length, function() { submitDelete('variant_ids', items); });
+        } else {
+          var items = document.querySelectorAll('input[name="_selected_action"]:checked');
+          if (!items.length) { showBarError('Select records to delete'); return; }
+          confirmDelete(items.length, function() { submitDelete('_selected_action', items); });
+        }
+      });
+      bar.appendChild(delBtn);
+
+      function showBarError(msg) {
+        var old = bar.querySelector('.cl-bar-error');
+        if (old) old.remove();
+        var err = document.createElement('span');
+        err.className = 'cl-bar-error';
+        err.textContent = msg;
+        bar.insertBefore(err, spacer);
+        setTimeout(function() { err.remove(); }, 3000);
+      }
+
+      var cm = document.getElementById('content-main');
+      if (cm) cm.insertBefore(bar, cm.firstChild);
+
+      var tools = document.querySelector('ul.object-tools');
+      if (tools) tools.style.display = 'none';
+
+      function updateCounter() {
+        var total, checked;
+        var pvTable = document.getElementById('pv-table');
+        var pbTable = document.getElementById('pb-table');
+        var orTable = document.getElementById('or-table');
+        if (pvTable) {
+          total   = pvTable.querySelectorAll('tbody tr:not(.pv-empty-row)').length;
+          checked = pvTable.querySelectorAll('.pv-cb:checked').length;
+        } else if (pbTable) {
+          total   = pbTable.querySelectorAll('tbody tr').length;
+          checked = pbTable.querySelectorAll('.pb-sel-cb:checked').length;
+        } else if (orTable) {
+          total   = window._orTotal || 0;
+          checked = window._orSelected || 0;
+        } else {
+          // Total — the number of ROWS with a checkbox (not any tr — otherwise
+          // empty-state / spacer rows break the total==checked comparison
+          // and the header checkbox never becomes checked, only indeterminate).
+          total   = document.querySelectorAll('input[name="_selected_action"]').length;
+          checked = document.querySelectorAll('input[name="_selected_action"]:checked').length;
+        }
+        counter.textContent = 'Selected: ' + checked + ' of ' + total;
+        /* "Delete" — active only if something is selected. */
+        if (delBtn) delBtn.classList.toggle('cl-btn-idle', !checked);
+        /* Header checkbox of the standard Django change_list (#action-toggle):
+           Django doesn't always include its actions.js (ours is hidden),
+           so we keep the state manually: indeterminate if partially selected, checked if
+           all rows are selected, otherwise empty.
+         */
+        var headToggle = document.getElementById('action-toggle');
+        if (headToggle && !pvTable && !pbTable && !orTable) {
+          if (!checked) { headToggle.checked = false; headToggle.indeterminate = false; }
+          else if (checked === total) { headToggle.checked = true; headToggle.indeterminate = false; }
+          else { headToggle.checked = false; headToggle.indeterminate = true; }
+        }
+      }
+      window._updateCounter = updateCounter;
+
+      /* Custom change_list templates (product/users/brand/review/… — ~13 lists)
+         override window._updateCounter with their own version, which updates the counter
+         but does NOT touch cl-btn-idle on the "Delete" button. Because of this the
+         button stayed
+         grey/inactive even with rows selected. So we keep the button's idle state
+         separately here: we read the already rendered counter 'Selected: N of M'
+         (the format is the same in all versions) and don't depend on the overridden function.
+       */
+      function syncDelBtn(){
+        if (!delBtn || !counter) return;
+        var m = (counter.textContent || '').match(/Selected:\s*(\d+)/);
+        var checked = m ? parseInt(m[1], 10) : 0;
+        delBtn.classList.toggle('cl-btn-idle', !checked);
+      }
+
+      /* Click on the header checkbox — toggle all rows on the page. */
+      document.addEventListener('change', function(e){
+        var t = e.target;
+        if (!t || t.id !== 'action-toggle') return;
+        var rows = document.querySelectorAll('input[name="_selected_action"]');
+        rows.forEach(function(cb){ cb.checked = t.checked; });
+      });
+
+      // Call via window._updateCounter — so that overrides from change_list templates
+      // (where SEL.size / currentFiltered.length give the exact "cross-page" value)
+      // take effect instead of base_site's DOM-based counter.
+      function _doUpdate(){ (window._updateCounter || updateCounter)(); syncDelBtn(); }
+      document.addEventListener('change', function (e) {
+        var t = e.target;
+        if (!t || t === document || t.nodeName === '#document') { _doUpdate(); return; }
+        if (t.name === '_selected_action' ||
+            t.id === 'action-toggle' ||
+            t.id === 'pv-sel-all' ||
+            t.id === 'pb-sel-all' ||
+            t.classList.contains('pv-cb') ||
+            t.classList.contains('pb-sel-cb')) _doUpdate();
+      });
+      _doUpdate();
+
+      /* ── Restore (History) ── */
+      if (revertLogBtn) {
+        function getCookieBar(name) {
+          var m = document.cookie.match('(?:^|;)\\s*' + name + '=([^;]*)');
+          return m ? decodeURIComponent(m[1]) : null;
+        }
+        function getSelectedIds() {
+          return Array.from(document.querySelectorAll('input[name="_selected_action"]:checked'))
+            .map(function(cb) { return cb.value; });
+        }
+        function doRevert(id, cascade) {
+          var url = '/admin/history/revert/' + id + '/' + (cascade ? '?cascade=1' : '');
+          return fetch(url, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': getCookieBar('csrftoken') },
+          }).then(function(r) { return r.json(); });
+        }
+        function showBarMsg(msg, isError) {
+          var old = bar.querySelector('.cl-bar-error, .cl-bar-ok');
+          if (old) old.remove();
+          var el = document.createElement('span');
+          el.className = isError ? 'cl-bar-error' : 'cl-bar-error';
+          el.style.color = isError ? '#b91c1c' : '#166534';
+          el.style.background = isError ? '#fef2f2' : '#f0fdf4';
+          el.style.border = '1px solid ' + (isError ? '#fca5a5' : '#bbf7d0');
+          el.style.borderRadius = '4px';
+          el.style.padding = '3px 10px';
+          el.style.fontSize = '12px';
+          el.textContent = msg;
+          bar.insertBefore(el, spacer);
+          setTimeout(function() { if (el.parentNode) el.remove(); }, 5000);
+        }
+
+        revertLogBtn.addEventListener('click', function() {
+          var ids = getSelectedIds();
+          if (!ids.length) { showBarError('Select at least one event'); return; }
+
+          var results = [];
+          var cascadeQueue = []; // [{id, deletionMsg}]
+
+          function processNext(idx) {
+            if (idx >= ids.length) {
+              // All done — handle cascades or show results
+              if (cascadeQueue.length) {
+                var first = cascadeQueue[0];
+                var modal = document.getElementById('revert-modal');
+                var msgEl = document.getElementById('revert-modal-msg');
+                var confirmBtn = document.getElementById('revert-modal-confirm');
+                var cancelBtn = document.getElementById('revert-modal-cancel');
+                msgEl.textContent = first.msg;
+                confirmBtn.style.display = '';
+                cancelBtn.textContent = 'Cancel';
+                modal.classList.add('open');
+                confirmBtn.onclick = function() {
+                  modal.classList.remove('open');
+                  var cascadeIds = cascadeQueue.map(function(c) { return c.id; });
+                  Promise.all(cascadeIds.map(function(cid) { return doRevert(cid, true); }))
+                    .then(function(res) {
+                      var errs = res.filter(function(r) { return !r.ok; });
+                      if (errs.length) showBarMsg(errs.map(function(r){return r.error;}).join('; '), true);
+                      else { showBarMsg('Reverted ' + (ids.length) + ' event(s)', false); setTimeout(function(){location.reload();}, 1200); }
+                    });
+                };
+                cancelBtn.onclick = function() { modal.classList.remove('open'); };
+              } else {
+                var errs = results.filter(function(r) { return r && r.error; });
+                if (errs.length) showBarMsg(errs.map(function(r){return r.error;}).join('; '), true);
+                else { showBarMsg('Reverted ' + ids.length + ' event(s)', false); setTimeout(function(){location.reload();}, 1200); }
+              }
+              return;
+            }
+            doRevert(ids[idx], false).then(function(data) {
+              if (data.needs_cascade) {
+                cascadeQueue.push({ id: ids[idx], msg: data.message });
+              } else if (!data.ok) {
+                results.push(data);
+              } else {
+                results.push(data);
+              }
+              processNext(idx + 1);
+            }).catch(function() {
+              results.push({ error: 'Network error' });
+              processNext(idx + 1);
+            });
+          }
+
+          processNext(0);
+        });
+      }
+    }
+
+    /* ── Disable sorting in table headers ── */
+    document.querySelectorAll('#result_list thead th').forEach(function (th) {
+      if (th.classList.contains('action-checkbox-column')) return;
+      th.style.cursor = 'default';
+      th.style.pointerEvents = 'none';
+      var a = th.querySelector('a');
+      if (a) {
+        a.style.pointerEvents = 'none';
+        a.style.cursor = 'default';
+        a.removeAttribute('href');
+      }
+      var so = th.querySelector('.sortoptions');
+      if (so) so.style.display = 'none';
+    });
+
+    /* ── Clickable table rows ── */
+    window._hadSelection = false;
+    document.addEventListener('mousedown', function(e) { if (e.button !== 0) return; window._hadSelection = false; });
+    document.addEventListener('selectionchange', function() {
+      if (window.getSelection && window.getSelection().toString().length > 0) window._hadSelection = true;
+    });
+    document.querySelectorAll('#result_list tbody tr').forEach(function (tr) {
+      tr.addEventListener('click', function (e) {
+        if (e.button !== 0) return;
+        if (e.target.closest('a') || e.target.closest('input') || e.target.closest('label')) return;
+        var cb = tr.querySelector('input[name="_selected_action"]');
+        if (cb && cb.checked) return;
+        if (window._hadSelection) return;
+        var link = tr.querySelector('a');
+        if (link) window.location.href = link.href;
+      });
+    });
+
+    return;
+  }
+
+  /* ══ CHANGE FORM without a custom template: move submit-row to the top ══ */
+  if (!document.querySelector('.submit-row-top')) {
+    var row = document.querySelector('.submit-row');
+    if (row) {
+      row.classList.add('submit-row-top', 'cl-bar');
+      var form = document.querySelector('#content-main form');
+      if (form) form.insertBefore(row, form.firstChild);
+
+      /* Exit — the first button on the left */
+      if (!row.querySelector('.exit-link')) {
+        var pp = window.location.pathname.replace(/\/$/, '').split('/');
+        var exitBtn = document.createElement('a');
+        exitBtn.href = pp.slice(0, 4).join('/') + '/';
+        exitBtn.className = 'exit-link';
+        exitBtn.textContent = 'Exit';
+        row.insertBefore(exitBtn, row.firstChild);
+      }
+
+      /* Save and add another — if not there yet */
+      if (!row.querySelector('[name="_addanother"]')) {
+        var saveEl = row.querySelector('[name="_save"]') || row.querySelector('[name="_continue"]');
+        if (saveEl) {
+          var addBtn = document.createElement('input');
+          addBtn.type = 'submit'; addBtn.name = '_addanother';
+          addBtn.value = 'Save and add another';
+          saveEl.after(addBtn);
+        }
+      }
+
+      /* Spacer before the right-hand buttons */
+      if (!row.querySelector('.submit-spacer')) {
+        var spacerEl = document.createElement('span');
+        spacerEl.className = 'submit-spacer';
+        /* Insert after the last submit button */
+        var lastSubmit = row.querySelector('[name="_addanother"]') || row.querySelector('[name="_save"]');
+        if (lastSubmit) lastSubmit.after(spacerEl);
+        else row.appendChild(spacerEl);
+      }
+
+      /* Delete — take it from object-tools or build it from the URL. History is hidden. */
+      var objTools = document.querySelector('ul.object-tools');
+      if (objTools) {
+        var delLink = objTools.querySelector('a.deletelink');
+        if (delLink && !row.querySelector('.deletelink')) {
+          var delBtn2 = document.createElement('a');
+          delBtn2.href = delLink.href;
+          delBtn2.className = 'deletelink';
+          delBtn2.textContent = 'Delete';
+          row.appendChild(delBtn2);
+        }
+        objTools.style.display = 'none';
+      }
+    }
+  }
+
+});
+</script>
+
+<script>
+(function () {
+  var modal = document.getElementById('revert-modal');
+  var msgEl = document.getElementById('revert-modal-msg');
+  var confirmBtn = document.getElementById('revert-modal-confirm');
+  var cancelBtn = document.getElementById('revert-modal-cancel');
+  if (!modal) return;
+
+  var pendingId = null;
+
+  function getCookie(name) {
+    var m = document.cookie.match('(?:^|;)\\s*' + name + '=([^;]*)');
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+
+  function openModal(id, label) {
+    pendingId = id;
+    msgEl.textContent = 'Revert the action for "' + label + '"?';
+    modal.classList.add('open');
+  }
+
+  function closeModal() {
+    modal.classList.remove('open');
+    pendingId = null;
+  }
+
+  cancelBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+
+  confirmBtn.addEventListener('click', function () {
+    if (!pendingId) return;
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = '...';
+    fetch('/admin/history/revert/' + pendingId + '/', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCookie('csrftoken') },
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      closeModal();
+      if (data.ok) {
+        msgEl.textContent = data.message;
+        modal.classList.add('open');
+        confirmBtn.style.display = 'none';
+        cancelBtn.textContent = 'Close';
+      } else {
+        msgEl.textContent = 'Error: ' + (data.error || 'unknown error');
+        modal.classList.add('open');
+        confirmBtn.style.display = 'none';
+        cancelBtn.textContent = 'Close';
+      }
+    })
+    .catch(function () {
+      closeModal();
+      alert('Network error');
+    })
+    .finally(function () {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Revert';
+      confirmBtn.style.display = '';
+      cancelBtn.textContent = 'Cancel';
+    });
+  });
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.log-revert-btn');
+    if (!btn) return;
+    var id = btn.dataset.id;
+    var row = btn.closest('tr');
+    var label = row ? (row.querySelector('.field-object_repr') || row.querySelector('td:nth-child(4)')).textContent.trim() : '#' + id;
+    openModal(id, label);
+  });
+})();
+
+/* ── Per-page selector (all standard changelist pages) ── */
+(function () {
+    var paginator = document.querySelector('.paginator');
+    if (!paginator) return;
+    var params = new URLSearchParams(window.location.search);
+    var isAll = params.has('all');
+    function url(all) {
+        var p = new URLSearchParams(window.location.search);
+        if (all) { p.set('all', '1'); } else { p.delete('all'); }
+        p.delete('p');
+        return '?' + p.toString();
+    }
+    var sel = document.createElement('span');
+    sel.className = 'pp-selector';
+    sel.innerHTML =
+        '<span>Per page:</span>' +
+        '<a href="' + url(false) + '" class="pp-btn' + (!isAll ? ' pp-active' : '') + '">50</a>' +
+        '<a href="' + url(true)  + '" class="pp-btn' + ( isAll ? ' pp-active' : '') + '">All</a>';
+    paginator.appendChild(sel);
+})();
+
+</script>
+
+<style>
+/* ============================================================
+   ADMIN — RESPONSIVE / MOBILE
+   ============================================================ */
+
+/* Mobile burger — hidden on desktop, appears only on mobile/tablet */
+.mobile-burger {
+  display: none;
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  width: 40px;
+  height: 40px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  z-index: 1500;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  cursor: pointer;
+  color: #374151;
+  user-select: none;
+}
+.mobile-burger:hover { background: #f9fafb; border-color: #d1d5db; }
+.mobile-burger svg { width: 20px; height: 20px; }
+
+@media (max-width: 1024px) {
+  /* Show burger */
+  .mobile-burger { display: flex !important; }
+
+  /* Hide the desktop sidebar-rail on mobile — replaced by the burger */
+  .sidebar-rail { display: none !important; }
+
+  /* Sidebar — hidden by default, shown via body.mobile-sidebar-open */
+  #nav-sidebar { display: none !important; }
+  body.mobile-sidebar-open #nav-sidebar {
+    display: flex !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    bottom: 0 !important;
+    width: 280px !important;
+    max-width: 85vw !important;
+    z-index: 1400 !important;
+    background: #fff !important;
+    box-shadow: 0 0 24px rgba(0,0,0,0.3) !important;
+    overflow: hidden !important;
+    flex: none !important;
+    flex-direction: column !important;
+    padding-top: 56px !important;
+  }
+  /* Overlay when the drawer is open */
+  body.mobile-sidebar-open::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 1390;
+  }
+
+  /* Container — full width on mobile */
+  #container, .main {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+  #content {
+    width: 100% !important;
+    padding: 12px !important;
+    box-sizing: border-box !important;
+  }
+  #content-main {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Top bar — room for the burger */
+  .breadcrumbs,
+  .submit-row-top {
+    padding-left: 60px !important;
+  }
+
+  /* Tables — horizontal scroll */
+  .results,
+  #changelist .results,
+  #content table {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  /* Pager — compact */
+  [id$="-pager"] {
+    padding: 6px 10px !important;
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+    font-size: 12px !important;
+  }
+  [id$="-pager"] a, [id$="-pager"] span {
+    padding: 4px 8px !important;
+  }
+
+  /* Submit row top — wrap buttons */
+  .submit-row-top {
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    padding: 8px 12px 8px 60px !important;
+  }
+  .submit-row-top input[type=submit],
+  .submit-row-top a {
+    font-size: 13px !important;
+    padding: 6px 12px !important;
+  }
+
+  /* Notifications page — full width */
+  .ntf-shell, .ntf-card { padding: 12px !important; }
+}
+
+/* ──────────────────────────────────────────────────────────────
+   LAPTOP TIER — MacBook 13"/14" (1025–1440px)
+   The base layout is built for a wide monitor. In this range
+   (between desktop and the mobile drawer) we win back horizontal space:
+   narrower sidebar + denser table paddings. We do NOT reduce the font —
+   only service widths and spacing.
+   ──────────────────────────────────────────────────────────────
+ */
+@media (min-width: 1025px) and (max-width: 1440px) {
+  /* ── COMPACT MAC THEME WITHOUT CSS zoom ──────────────────────────────────────
+     CSS `zoom` is NOT supported by old Safari (<17.4) → the whole mac mode fell apart
+     ("everything shifts, extra spacing"). So instead of zoom we ACTUALLY reduce the font/
+     spacing/widths — works in any Safari and doesn't break fixed/sticky.
+     We keep --mac-zoom:1 → clZoom()=1, coordinate divisions become ÷1 (no-op),
+     popups/zebra/pager are positioned as on PC. ──────────────────────────────
+   */
+  body { --mac-zoom: 1; }
+
+  /* Smaller base font — the main "scale" lever: narrower text →
+     JS tables compute narrower columns → wide tables fit; rows are shorter.
+   */
+  #content, #content-main { font-size: 12px; }
+  #result_list, table[id$="-table"], table[id$="-table"] td, table[id$="-table"] th { font-size: 12px; }
+  .cl-bar, .submit-row-top { font-size: 12px; }
+
+  /* Sidebar — narrower, items denser and smaller (sticky, as on PC — without zoom
+     there is no jitter).
+   */
+  /* 202, not 186: at 186px the longest Inbox items ("Stock subscriptions")
+     were cut off with an ellipsis. Together with padding 10 instead of 12 this gives the text a
+     margin of
+     ~11px — the same as the desktop tier. You must not tune the width to "just fit": in different
+     browsers font metrics
+     vary by a couple of pixels, and a 1px margin gets eaten. The padding was reduced in sync in
+     rows and headers,
+     otherwise section names stop aligning with group headers.
+   */
+  #nav-sidebar,
+  .main > #nav-sidebar,
+  .main.shifted > #nav-sidebar {
+    width: 211px !important; min-width: 211px !important;
+  }
+  .sidebar-group-header { font-size: 12px !important; padding: 9px 10px 7px !important; }
+  .sidebar-link-button  { font-size: 12px !important; padding: 9px 10px !important; }
+  #nav-sidebar table tbody tr th a { font-size: 12px !important; padding: 7px 10px !important; }
+
+  /* Denser horizontal table paddings. */
+  #result_list thead th { padding-left: 8px !important; padding-right: 8px !important; }
+  #result_list tbody tr td,
+  #result_list tbody tr th { padding-left: 8px !important; padding-right: 8px !important; }
+  .module table td, .module table th { padding-left: 10px !important; padding-right: 10px !important; }
+}
+
+@media (max-width: 768px) {
+  /* Form rows — stack the label above the input */
+  .aligned .form-row {
+    flex-direction: column !important;
+    gap: 4px !important;
+    padding: 8px 0 !important;
+  }
+  .aligned .form-row > label:first-child {
+    width: 100% !important;
+    min-width: 0 !important;
+    text-align: left !important;
+    padding: 0 !important;
+    font-size: 12px !important;
+    color: #6b7280 !important;
+  }
+  .aligned .form-row > div { width: 100% !important; }
+
+  /* Inputs — full width */
+  .aligned .form-row input[type=text],
+  .aligned .form-row input[type=email],
+  .aligned .form-row input[type=number],
+  .aligned .form-row input[type=password],
+  .aligned .form-row input[type=tel],
+  .aligned .form-row select,
+  .aligned .form-row textarea {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Submit row (regular — at the bottom of the form) */
+  .submit-row {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 12px !important;
+  }
+  .submit-row input[type=submit],
+  .submit-row a {
+    flex: 1 1 100% !important;
+    min-width: 0 !important;
+    text-align: center !important;
+  }
+
+  /* Module — compact */
+  .module {
+    border-radius: 6px !important;
+    margin-bottom: 8px !important;
+  }
+  .module h2, .module caption {
+    font-size: 14px !important;
+    padding: 8px 12px !important;
+  }
+
+  /* Content padding */
+  #content { padding: 8px !important; }
+
+  /* Breadcrumbs — horizontal scroll */
+  .breadcrumbs {
+    font-size: 11px !important;
+    padding: 6px 12px 6px 56px !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+  }
+
+  /* Inline-related (related models) — compact */
+  .inline-related { margin-bottom: 12px !important; }
+  .inline-related .module table {
+    display: block !important;
+    overflow-x: auto !important;
+  }
+
+  /* Change list filters — hidden */
+  #changelist-filter { display: none !important; }
+
+  /* Login page */
+  .login #container, .login #content {
+    padding: 16px !important;
+    max-width: 100% !important;
+  }
+}
+
+/* iPhone/small screens — even more compact */
+@media (max-width: 420px) {
+  .mobile-burger { width: 36px; height: 36px; top: 8px; left: 8px; }
+  .breadcrumbs { padding-left: 50px !important; }
+  .submit-row-top { padding-left: 50px !important; }
+  body { font-size: 13px !important; }
+}
+
+/* ── Global override — any custom forms/fields with fixed sizes ── */
+@media (max-width: 768px) {
+  /* All inputs/selects/textareas — full width */
+  #content input[type=text],
+  #content input[type=email],
+  #content input[type=tel],
+  #content input[type=number],
+  #content input[type=password],
+  #content input[type=search],
+  #content input[type=url],
+  #content select,
+  #content textarea {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Fix the most common fixed 400px / 770px / 560px in custom forms */
+  #id_customer_name, #id_customer_email, #id_customer_phone,
+  #id_delivery_address, #id_comment, #id_admin_notes,
+  .oi-add-inp, .oi-drop, #cl-search-drop, #cl-search-input,
+  .vpick-input, .vpick-drop {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* "Field:value" two-column custom rows → stacked in a column */
+  .bpc-row, .order-bpc-row, .form-pair-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 4px !important;
+  }
+  .bpc-lbl, .form-pair-row > label:first-child {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding-right: 0 !important;
+    padding-bottom: 2px !important;
+    font-size: 12px !important;
+  }
+
+  /* Inline table in custom forms (products in an order) */
+  #oi-table, #pv-table, #cs-table, #items-table {
+    display: block !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    max-width: 100% !important;
+  }
+
+  /* Custom bottom bars / fixed pagers — more compact */
+  .cl-bar, .cl-bar-bottom {
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    padding-left: 60px !important;
+  }
+}
+</style>
+
+<script>
+/* ── Mobile burger menu for the admin ── */
+(function(){
+  function init(){
+    if (!document.body) { setTimeout(init, 10); return; }
+    if (document.getElementById('mobile-burger')) return;
+
+    var burger = document.createElement('div');
+    burger.id = 'mobile-burger';
+    burger.className = 'mobile-burger';
+    burger.setAttribute('aria-label', 'Menu');
+    burger.title = 'Menu';
+    burger.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
+    document.body.appendChild(burger);
+
+    burger.addEventListener('click', function(e){
+      e.stopPropagation();
+      e.preventDefault();
+      document.body.classList.toggle('mobile-sidebar-open');
+    });
+
+    /* Close the drawer on click outside it */
+    document.addEventListener('click', function(e){
+      if (!document.body.classList.contains('mobile-sidebar-open')) return;
+      var sb = document.getElementById('nav-sidebar');
+      if (sb && sb.contains(e.target)) {
+        /* If a link in the sidebar was clicked — close it */
+        if (e.target.closest('a')) {
+          document.body.classList.remove('mobile-sidebar-open');
+        }
+        return;
+      }
+      if (burger.contains(e.target)) return;
+      document.body.classList.remove('mobile-sidebar-open');
+    });
+
+    /* ESC — closes */
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape') document.body.classList.remove('mobile-sidebar-open');
+    });
+
+    /* On switching to desktop size — make sure the class is absent */
+    window.addEventListener('resize', function(){
+      if (window.innerWidth > 1024) document.body.classList.remove('mobile-sidebar-open');
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+{% endblock %}
+
+{% block footer %}
+{{ block.super }}
+<div id="revert-modal">
+  <div id="revert-modal-box">
+    <div id="revert-modal-msg"></div>
+    <div id="revert-modal-actions">
+      <button id="revert-modal-cancel" type="button">Cancel</button>
+      <button id="revert-modal-confirm" type="button">Revert</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block nav-sidebar %}
+{{ block.super }}
+<script>
+/* Initial counts from the server — so counters don't flicker on reload/navigation.
+   Fill them in right when the rows are created + hide the sidebar until JS has built the groups.
+ */
+window.__INITIAL_NTF__ = {{ sidebar_initial_counts|default:"{}"|safe }};
+</script>
+<style>
+/* Until JS has built the custom groups, hide the original Django modules
+   so the standard app cards don't flicker before our groups.
+ */
+#nav-sidebar:not(.ready) .app-catalog,
+#nav-sidebar:not(.ready) .app-admin,
+#nav-sidebar:not(.ready) .app-orders,
+#nav-sidebar:not(.ready) .app-users,
+#nav-sidebar:not(.ready) .app-blog,
+#nav-sidebar:not(.ready) .app-token_blacklist,
+#nav-sidebar:not(.ready) .app-auth { visibility: hidden; }
+</style>
+<script>
+/* Create the sidebar rail synchronously so it doesn't flicker on reload */
+(function(){
+  var sb = document.getElementById('nav-sidebar');
+  if (!sb || document.querySelector('.sidebar-rail')) return;
+  var hidden = localStorage.getItem('shopSidebar') === '0';
+  if (hidden) document.body.classList.add('sidebar-hidden');
+  var rail = document.createElement('div');
+  rail.className = 'sidebar-rail';
+  rail.title = hidden ? 'Show menu' : 'Hide menu';
+  rail.innerHTML = '<span class="sidebar-rail-arrow">' + (hidden ? '›' : '‹') + '</span>';
+  sb.parentNode.insertBefore(rail, sb);
+})();
+(function() {
+  var sidebar = document.getElementById('nav-sidebar');
+  var catalog = sidebar ? sidebar.querySelector('.app-catalog') : null;
+  if (!catalog) return;
+  var getRow = function(cls) { return catalog.querySelector('.' + cls); };
+  var rows = {
+    product:    getRow('model-product'),
+    bundle:     getRow('model-bundle'),
+    drop:       getRow('model-dropshippingvariant'),
+    dropProd:   getRow('model-dropshippingproduct'),
+    category:   getRow('model-category'),
+    label:      getRow('model-label'),
+    attribute:  getRow('model-attribute'),
+    brand:      getRow('model-brand'),
+    review:     getRow('model-review'),
+    stockNotif: getRow('model-stocknotification'),
+    dropEvent:  getRow('model-dropsyncevent'),
+  };
+  // Pull out the rows from the other app modules.
+  var pickRow = function(appCls, modelCls) {
+    var app = sidebar.querySelector('.' + appCls);
+    return app ? app.querySelector('.' + modelCls) : null;
+  };
+  var adminApp = sidebar.querySelector('.app-admin');
+  var ordersApp = sidebar.querySelector('.app-orders');
+  var usersApp = sidebar.querySelector('.app-users');
+  var blogApp = sidebar.querySelector('.app-blog');
+  var tokensApp = sidebar.querySelector('.app-token_blacklist');
+  var authApp = sidebar.querySelector('.app-auth');
+  var extraRows = {
+    order:           pickRow('app-orders',          'model-order'),
+    invoice:         pickRow('app-orders',          'model-invoice'),
+    user:            pickRow('app-users',           'model-user'),
+    blog:            pickRow('app-blog',            'model-blogpost'),
+    outToken:        pickRow('app-token_blacklist', 'model-outstandingtoken'),
+    blockToken:      pickRow('app-token_blacklist', 'model-blacklistedtoken'),
+  };
+
+  // Lucide-style SVG icons (stroke-1.75, 16×16)
+  var GROUP_ICONS = {
+    inbox:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
+    sklad:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
+    orders:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>',
+    dovid:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
+    klient:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    content:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>',
+    settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+    site:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+    courses:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></svg>',
+  };
+  var CHEVRON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+
+  function makeGroup(title, rowEls, groupId) {
+    var wrap = document.createElement('div');
+    wrap.className = 'module sidebar-group-module';
+    if (groupId) {
+      wrap.setAttribute('data-group-id', groupId);
+      // Apply the collapsed state from localStorage synchronously — no flicker.
+      if (localStorage.getItem('shopGroupCollapsed_' + groupId) === '1') {
+        wrap.classList.add('is-collapsed');
+      }
+    }
+    var header = document.createElement('div');
+    header.className = 'sidebar-group-header';
+    var iconSvg = (groupId && GROUP_ICONS[groupId]) || '';
+    var countId = groupId ? 'sidebar-group-count-' + groupId : '';
+    header.innerHTML =
+      '<span class="sidebar-group-icon">' + iconSvg + '</span>' +
+      '<span class="sidebar-group-title">' + title +
+        (countId ? ' <span class="sidebar-group-count" id="' + countId + '"></span>' : '') +
+      '</span>' +
+      '<span class="sidebar-group-toggle">' + CHEVRON_SVG + '</span>';
+    header.addEventListener('click', function() {
+      wrap.classList.toggle('is-collapsed');
+      var isCollapsed = wrap.classList.contains('is-collapsed');
+      if (groupId) {
+        localStorage.setItem('shopGroupCollapsed_' + groupId, isCollapsed ? '1' : '0');
+      }
+      // When collapsing a group, also collapse the expanded sub-rows inside it
+      // (Products → Low/Out of stock etc.), otherwise the next time the
+      // group
+      // is expanded they would stay expanded on their own.
+      if (isCollapsed) {
+        wrap.querySelectorAll('tr.sb-row-parent:not(.is-collapsed) .sb-row-toggle').forEach(function(t) {
+          t.click();
+        });
+      }
+    });
+    wrap.appendChild(header);
+    var table = document.createElement('table');
+    table.className = 'sidebar-group-table';
+    var tbody = document.createElement('tbody');
+    rowEls.forEach(function(r) { if (r) tbody.appendChild(r); });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    return wrap;
+  }
+  // All rows in the Inbox get a muted counter in parentheses `(N)`.
+  function makeInboxRow(id, label, href, countId) {
+    var tr = document.createElement('tr');
+    tr.id = id;
+    tr.innerHTML = '<th scope="row"><a href="' + href + '">' + label +
+                   ' <span class="sb-row-count" id="' + countId + '"></span></a></th><td></td>';
+    return tr;
+  }
+  var chatRow = makeInboxRow('sidebar-chat-row', 'Chat',     '/admin/chat/',                    'sb-count-chat');
+  // "Payments" no longer has its own row here — Receipts/Bank
+  // details sit under
+  // "Orders" (below, with its own chevron), like order states.
+
+  // Rewrite the href of the standard StockNotification admin row to point to our page.
+  // The name is our own: the section is broader than the model (subscriptions + likes on
+  // out-of-stock items).
+  function repointRow(row, href, label) {
+    if (!row) return;
+    var a = row.querySelector('th a');
+    if (!a) return;
+    a.href = href;
+    if (label) a.textContent = label;
+  }
+  repointRow(rows.stockNotif, '/admin/notifications/stock/', 'Waiting for stock');
+
+  // A single "Reviews" row — the page has tabs "On products" / "On
+  // site"
+  // that switch to separate URLs.
+  var reviewRow = makeInboxRow('sidebar-reviews-row', 'Reviews',
+                               '/admin/notifications/reviews-products/', 'sb-count-reviews');
+
+  // "Low" / "Out of stock" — sub-rows under "Products" (the state of the
+  // same products,
+  // derived from stock; "Products" stays a regular clickable page,
+  // so the pair simply follows as the next rows beneath it — not a separate page).
+  var stockLowRow = makeInboxRow('sidebar-stock-low-row', 'Low',
+                                 '/admin/notifications/stock_low/', 'sb-count-stock_low');
+  var stockOutRow = makeInboxRow('sidebar-stock-out-row', 'Out of stock',
+                                 '/admin/notifications/stock_out/', 'sb-count-stock_out');
+  stockLowRow.classList.add('sb-row-nested');
+  stockOutRow.classList.add('sb-row-nested');
+
+  // Chevron on a parent row (Products, Orders) — collapses/expands its
+  // sub-rows without interfering with the row's own navigation (separate element, separate
+  // click handler with stopPropagation). The state is remembered per parent.
+  function addRowToggle(row, storageKey, childRows) {
+    if (!row) return;
+    row.classList.add('sb-row-parent');
+    var th = row.querySelector('th');
+    if (!th) return;
+    var toggle = document.createElement('span');
+    toggle.className = 'sb-row-toggle';
+    toggle.innerHTML = CHEVRON_SVG;
+    th.appendChild(toggle);
+    var collapsed = localStorage.getItem(storageKey) === '1';
+    function apply() {
+      row.classList.toggle('is-collapsed', collapsed);
+      childRows.forEach(function(r) { if (r) r.style.display = collapsed ? 'none' : ''; });
+    }
+    apply();
+    toggle.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      collapsed = !collapsed;
+      localStorage.setItem(storageKey, collapsed ? '1' : '0');
+      apply();
+    });
+    // Clicking the row/link itself only navigates, it does NOT expand the sub-rows.
+    // Expanding/collapsing happens only via the chevron (toggle above).
+  }
+  // rows.product is a raw Django row, without a counter. injectRowCount (further down
+  // the file, but function declarations are hoisted) adds the same
+  // <span class="sb-row-count"> that the other rows already have — the sum of
+  // Low + Sold out, just as "Orders" below will show the sum of Receipts + Bank
+  // details.
+  injectRowCount(rows.product, 'sb-count-products');
+  addRowToggle(rows.product, 'shopRowCollapsed_products', [stockLowRow, stockOutRow]);
+
+  // Separate row for the "Supplier changes" section (there is no standard
+  // admin model).
+  // Hidden behind the DROPSYNC_ENABLED feature flag — the section is temporarily disabled in
+  // production.
+  var dropSyncRow = {% if DROPSYNC_ENABLED %}makeInboxRow('sidebar-dropsync-row', 'Supplier changes',
+                                  '/admin/notifications/dropsync/', 'sb-count-dropsync'){% else %}null{% endif %};
+
+  // The Analyst is the daily analyst: its own page /admin/analyst/ (not a notifications.html
+  // section).
+  // Owner only (ANALYST_VISIBLE from context_processors; on the backend everyone else gets 403).
+  var analystRow = {% if ANALYST_VISIBLE %}makeInboxRow('sidebar-analyst-row', 'Analyst', '/admin/analyst/', 'sb-count-analyst'){% else %}null{% endif %};
+
+  var inboxRows = [chatRow, reviewRow, rows.stockNotif];
+  if (dropSyncRow) inboxRows.push(dropSyncRow);
+  if (analystRow) inboxRows.push(analystRow);
+  var inbox  = makeGroup('Inbox',     inboxRows, 'inbox');
+  var sklad  = makeGroup('Stock',      [rows.product, stockLowRow, stockOutRow, rows.drop, rows.bundle, extraRows.invoice], 'sklad');
+  var dovid  = makeGroup('Reference data',  [rows.category, rows.label, rows.attribute, rows.brand, extraRows.blog], 'dovid');
+
+  // A separate "link button" to the log entries — no chevron, does not expand.
+  function makeLinkButton(label, href, iconSvg, target) {
+    var wrap = document.createElement('div');
+    wrap.className = 'module sidebar-link-module';
+    var a = document.createElement('a');
+    a.href = href;
+    a.className = 'sidebar-link-button';
+    if (target) {
+      a.target = target;
+      if (target === '_blank') a.rel = 'noopener noreferrer';
+    }
+    a.innerHTML =
+      '<span class="sidebar-group-icon">' + (iconSvg || '') + '</span>' +
+      '<span class="sidebar-group-title">' + label + '</span>';
+    wrap.appendChild(a);
+    return wrap;
+  }
+  // The "Log entries" button in the sidebar is temporarily hidden (the log is
+  // disabled).
+
+  // "Orders" — the same idea as "Products": a clickable row + a chevron
+  // that collapses 2 sub-rows (Receipts/Bank details — states of THE SAME
+  // orders, not a separate section). No header/chevron group around it — "Orders"
+  // is itself the heading, there is nothing more to expand.
+  function makeFlatGroup(rowEls) {
+    var wrap = document.createElement('div');
+    wrap.className = 'module sidebar-group-module sidebar-group-flat';
+    var table = document.createElement('table');
+    table.className = 'sidebar-group-table';
+    var tbody = document.createElement('tbody');
+    rowEls.forEach(function(r) { if (r) tbody.appendChild(r); });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    return wrap;
+  }
+  var orderRow = makeInboxRow('sidebar-order-row', 'Orders', '/admin/orders/order/', 'sb-count-order');
+  // Visually the same "bold button with an icon" that used to be in
+  // sidebar-link-button, not a muted group row.
+  orderRow.classList.add('sb-row-featured');
+  (function(){
+    var icon = document.createElement('span');
+    icon.className = 'sidebar-group-icon';
+    icon.innerHTML = GROUP_ICONS.orders;
+    var a = orderRow.querySelector('th a');
+    a.insertBefore(icon, a.firstChild);
+  })();
+  var incomingRow = makeInboxRow('sidebar-incoming-row', 'Receipts',
+                                 '/admin/notifications/payments/', 'sb-count-payments');
+  var requisitesRow = makeInboxRow('sidebar-requisites-row', 'Bank details',
+                                   '/admin/notifications/requisites/', 'sb-count-requisites');
+  incomingRow.classList.add('sb-row-nested');
+  requisitesRow.classList.add('sb-row-nested');
+  addRowToggle(orderRow, 'shopRowCollapsed_orders', [incomingRow, requisitesRow]);
+  var orderBtn = makeFlatGroup([orderRow, incomingRow, requisitesRow]);
+  // "Analytics" — financial dashboard, owner only (access is likewise closed on the
+  // backend with 403).
+  var SHOW_ANALYTICS = {% if request.user.is_authenticated and request.user.email|lower == OWNER_EMAIL %}true{% else %}false{% endif %};
+  var analyticsBtn = SHOW_ANALYTICS ? makeLinkButton('Analytics', '/admin/orders/analytics/',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>') : null;
+  var userBtn  = makeLinkButton('Users', '/admin/users/user/', GROUP_ICONS.klient);
+  // "Courses" — flat link button. Visible only to the owner and only when
+  // the COURSES_ENABLED feature is on (access is likewise closed on the backend).
+  var COURSES_ON = {% if COURSES_ENABLED and request.user.is_authenticated and request.user.email|lower == OWNER_EMAIL %}true{% else %}false{% endif %};
+  var coursesBtn = COURSES_ON ? makeLinkButton('Courses', '/admin/courses/course/', GROUP_ICONS.courses) : null;
+  var coursesApp = sidebar.querySelector('.app-courses');
+  // "Open site" — link to the frontend in a new tab.
+  var siteUrl = '{{ SITE_URL|default:"/"|escapejs }}';
+  var siteBtn = makeLinkButton('Open site', siteUrl, GROUP_ICONS.site, '_blank');
+  // "Settings" — owner only (the same email as SiteSettingsAdmin.OWNER_EMAIL).
+  // For other admins the item is hidden (and the direct URL returns 403).
+  var SHOW_SETTINGS = {% if request.user.is_authenticated and request.user.email|lower == OWNER_EMAIL %}true{% else %}false{% endif %};
+  var settingsBtn = SHOW_SETTINGS ? makeLinkButton('Settings', '/admin/catalog/sitesettings/', GROUP_ICONS.settings) : null;
+  // "Log out" — sign out of the account (the standard Django header is hidden via
+  // #header{display:none}).
+  // Logout in Django 6 is POST-only, so we submit a form with CSRF.
+  var logoutBtn = makeLinkButton('Log out', '#',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>');
+  logoutBtn.querySelector('a').addEventListener('click', function(e){
+    e.preventDefault();
+    var f = document.createElement('form');
+    f.method = 'post'; f.action = '/admin/logout/';
+    f.innerHTML = '<input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">';
+    document.body.appendChild(f); f.submit();
+  });
+  // The pair "Open site" + "Settings" is pinned to the bottom of the
+  // sidebar.
+  siteBtn.classList.add('sidebar-pin-bottom');
+
+  // Order: Stock → Inbox → Reference data → Users →
+  // Orders → (spacer) → Open site → Settings
+  catalog.parentNode.insertBefore(sklad,       catalog);
+  catalog.parentNode.insertBefore(inbox,       catalog);
+  catalog.parentNode.insertBefore(dovid,       catalog);
+  if (coursesBtn) catalog.parentNode.insertBefore(coursesBtn, catalog);
+  catalog.parentNode.insertBefore(userBtn,     catalog);
+  catalog.parentNode.insertBefore(orderBtn,    catalog);
+  if (analyticsBtn) catalog.parentNode.insertBefore(analyticsBtn, catalog);
+  catalog.parentNode.insertBefore(siteBtn,     catalog);
+  if (settingsBtn) catalog.parentNode.insertBefore(settingsBtn, catalog);
+  catalog.parentNode.insertBefore(logoutBtn,   catalog);
+  // Hide the original app modules whose rows we moved into groups.
+  catalog.style.display = 'none';
+  if (adminApp)  adminApp.style.display  = 'none';
+  if (ordersApp) ordersApp.style.display = 'none';
+  if (usersApp)  usersApp.style.display  = 'none';
+  if (blogApp)   blogApp.style.display   = 'none';
+  if (tokensApp) tokensApp.style.display = 'none';
+  if (authApp)   authApp.style.display   = 'none';
+  if (coursesApp) coursesApp.style.display = 'none';
+
+  // Counter in parentheses next to the model name: "Reviews (3)".
+  function injectRowCount(row, countId) {
+    if (!row) return;
+    var th = row.querySelector('th a') || row.querySelector('th');
+    if (!th) return;
+    var span = document.createElement('span');
+    span.className = 'sb-row-count';
+    span.id = countId;
+    th.appendChild(document.createTextNode(' '));
+    th.appendChild(span);
+    var td = row.querySelector('td');
+    if (td) td.innerHTML = '';
+  }
+  // reviewProdRow / reviewSiteRow already have their own <span id="sb-count-…"> from makeInboxRow.
+  injectRowCount(rows.stockNotif, 'sb-count-stock');
+  // dropSyncRow already contains <span id="sb-count-dropsync"> — a separate injectRowCount is not
+  // needed.
+
+  // Wrap the row name in a separate span so the ellipsis truncates only it.
+  // Without this, an ellipsis on the whole <a> eats the "(3)" counter at the end of the row.
+  sidebar.querySelectorAll('th a').forEach(function (a) {
+    if (a.querySelector('.sb-row-label')) return;
+    var label = document.createElement('span');
+    label.className = 'sb-row-label';
+    Array.prototype.slice.call(a.childNodes).forEach(function (n) {
+      if (n.nodeType === 3) label.appendChild(n);
+    });
+    label.textContent = label.textContent.trim();
+    if (!label.textContent) return;
+    a.insertBefore(label, a.querySelector('.sb-row-count'));
+  });
+
+  // Split the finished sidebar into two zones: everything up to "Open site"
+  // goes into a scrollable list; "Open site" itself and what follows it
+  // (Settings, Log out) go into a pinned bottom that doesn't disappear on scroll.
+  // The hidden original app modules stay in the list so they don't end up in the bottom.
+  (function () {
+    var scrollZone = document.createElement('div');
+    scrollZone.className = 'sidebar-scroll';
+    var footZone = document.createElement('div');
+    footZone.className = 'sidebar-foot';
+    var inFoot = false;
+    Array.prototype.slice.call(sidebar.children).forEach(function (el) {
+      if (el.id === 'nav-filter') return;
+      var hidden = el.style.display === 'none';
+      if (!hidden && el.classList.contains('sidebar-pin-bottom')) inFoot = true;
+      (inFoot && !hidden ? footZone : scrollZone).appendChild(el);
+    });
+    sidebar.appendChild(scrollZone);
+    sidebar.appendChild(footZone);
+
+    // The shadow above the bottom is enabled only while there is unseen content below.
+    function syncShadow() {
+      var more = scrollZone.scrollHeight - scrollZone.clientHeight - scrollZone.scrollTop > 1;
+      sidebar.classList.toggle('sb-has-more', more);
+    }
+    // Tooltip with the full name — only where it really didn't fit (on the
+    // narrow laptop sidebar that's "Stock subscriptions"). Re-checked
+    // after every resize: on a wide screen the tooltip disappears.
+    function syncTitles() {
+      sidebar.querySelectorAll('.sb-row-label').forEach(function (l) {
+        if (l.scrollWidth > l.clientWidth) l.setAttribute('title', l.textContent);
+        else l.removeAttribute('title');
+      });
+    }
+    function sync() { syncShadow(); syncTitles(); }
+    scrollZone.addEventListener('scroll', syncShadow, { passive: true });
+    window.addEventListener('resize', sync);
+    // Observe the groups themselves, not the zone: expanding a group changes
+    // its height (the zone height stays constant, so a ResizeObserver on it would stay silent).
+    if (window.ResizeObserver) {
+      var ro = new ResizeObserver(sync);
+      scrollZone.querySelectorAll('.module').forEach(function (m) { ro.observe(m); });
+    }
+    sync();
+  })();
+
+  // The sidebar is built — remove the hiding of app modules (our CSS waits for .ready).
+  sidebar.classList.add('ready');
+
+  /* Notification counter: realtime via WebSocket (admin_notifications group).
+     The consumer sends the current state immediately on connect, then on every change.
+     window.applyNtfCounts is global so that the /admin/notifications/ page
+     can override it with a client-side calculation (taking the DEMO state into account).
+   */
+  function setBadge(id, n) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (n > 0) { el.textContent = n; el.classList.add('has-count'); }
+    else       { el.textContent = ''; el.classList.remove('has-count'); }
+  }
+  function setCount(id, n) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (n > 0) { el.textContent = '(' + n + ')'; el.classList.add('has-count'); }
+    else       { el.textContent = '';            el.classList.remove('has-count'); }
+  }
+  window.applyNtfCounts = function(d){
+    // Remember the latest counts — so that a later chat fetch recomputes the inbox
+    // from FRESH values (WS), not from the stale __INITIAL_NTF__ (hence the "+1 tail").
+    window.__LAST_NTF__ = d;
+    var p = d.payments  || 0;
+    var req = d.requisites || 0;       // requests "send the bank details to my phone"
+    var r = d.reviews   || 0;          // reviews on products (Review with product/bundle)
+    var q = d.questions || 0;          // reviews on the site (Review without a product) — the same Review backend
+    var s = d.stock     || 0;
+    var so = d.stock_out || 0;        // packagings whose stock dropped to zero
+    var sl = d.stock_low || 0;        // stock level below the dynamic threshold
+    var x = d.dropsync  || 0;
+    var an = {% if ANALYST_VISIBLE %}(d.analyst || 0){% else %}0{% endif %};   // the Analyst's findings (owner only)
+    // dropsync is included in the inbox only when the section is enabled (otherwise the hidden
+    // section would inflate the counter — badge > visible sections).
+    // so/sl are not counted — they belong to "Stock". p/req are not counted either — they
+    // are under
+    // "Orders", not in the Inbox.
+    var total = r + q + s + an{% if DROPSYNC_ENABLED %} + x{% endif %};
+    setCount('sb-count-payments',   p);
+    setCount('sb-count-requisites', req);
+    setCount('sb-count-reviews',   r + q);
+    setCount('sb-count-stock',     s);
+    setCount('sb-count-stock_out', so);
+    setCount('sb-count-stock_low', sl);
+    setCount('sidebar-group-count-sklad', so + sl);
+    // Parent rows are the sum of their sub-rows (Products = Low + Sold out,
+    // Orders = Receipts + Bank details).
+    setCount('sb-count-products', so + sl);
+    setCount('sb-count-order',    p + req);
+    setCount('sb-count-dropsync',  x);
+    setCount('sb-count-analyst',   an);
+    // Counter in parentheses on the "Inbox" header — everything that needs attention +
+    // chat.
+    // chat NOW arrives in the payload (WS/initial is the single source, counted by
+    // chat_unread_count() on the backend). If the key is present, take it from there and
+    // sync the badge; if absent (old payload), fall back to the current DOM.
+    var chat;
+    if (d && typeof d.chat === 'number') {
+      chat = d.chat;
+      setCount('sb-count-chat', chat);
+    } else {
+      var chatEl = document.getElementById('sb-count-chat');
+      var chatText = chatEl ? chatEl.textContent : '';
+      chat = parseInt((chatText.match(/\d+/) || ['0'])[0], 10) || 0;
+    }
+    setCount('sidebar-group-count-inbox', total + chat);
+  };
+
+  /* First apply the initial counts from the server (synchronously, no flicker),
+     then connect the WebSocket for realtime updates.
+   */
+  if (window.__INITIAL_NTF__) {
+    var _init = window.__INITIAL_NTF__;
+    // Count chat first — applyNtfCounts reads it when computing the inbox sum.
+    setCount('sb-count-chat', _init.chat || 0);
+    window.applyNtfCounts(_init);
+  }
+
+  function connectNtfWs(){
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var ws;
+    try { ws = new WebSocket(proto + '//' + location.host + '/ws/admin/notifications/'); }
+    catch(e){ return; }
+    ws.onmessage = function(e){
+      try {
+        var data = JSON.parse(e.data);
+        if(data && data.type === 'counts') window.applyNtfCounts(data.payload || {});
+      } catch(err){}
+    };
+    ws.onclose = function(){ setTimeout(connectNtfWs, 3000); };
+    ws.onerror = function(){ try { ws.close(); } catch(e){} };
+  }
+  connectNtfWs();
+
+  /* Chat badge = number of ACTIVE (open) conversations. Computed by chat_active_count()
+     on the backend — arrives in initial (context_processor) and in realtime via the WS
+     payload.chat,
+     so a separate AJAX recount is not needed here (it used to filter unread ones).
+   */
+})();
+
+/* Safety net for when the sidebar rebuild above didn't run (early
+   return if the admin has no catalog permissions): there are no zones, and #nav-sidebar is now
+   overflow:hidden — a long menu would stay clipped with no scrolling.
+ */
+(function () {
+  var sidebar = document.getElementById('nav-sidebar');
+  if (!sidebar || sidebar.querySelector('.sidebar-scroll')) return;
+  var scrollZone = document.createElement('div');
+  scrollZone.className = 'sidebar-scroll';
+  Array.prototype.slice.call(sidebar.children).forEach(function (el) {
+    if (el.id !== 'nav-filter') scrollZone.appendChild(el);
+  });
+  sidebar.appendChild(scrollZone);
+})();
+</script>
+<script>
+/* Pad changelist tables with empty zebra rows down to fixed pager (or viewport bottom). */
+window.padChangelistTable = function(tbl, opts){
+  if(!tbl) return;
+  var tbody = tbl.querySelector('tbody'); if(!tbody) return;
+  var rect = tbl.getBoundingClientRect();
+  var pager = (opts && opts.pager) || (tbl.parentElement && tbl.parentElement.querySelector('[id$="-pager"]')) || document.querySelector('[id$="-pager"]');
+  /* A hidden pager (display:none, ≤25 rows) is not counted — padding down to the bottom of the window. */
+  var pagerVisible = pager && getComputedStyle(pager).display !== 'none' && getComputedStyle(pager).position === 'fixed';
+  var bottomY = pagerVisible ? pager.getBoundingClientRect().top : window.innerHeight;
+  var tableBottomY = rect.bottom;
+  var available = bottomY - tableBottomY;
+  var rowH = (opts && opts.rowH) || 56;
+  /* Fill exactly up to the pager / bottom of the window (no rounding down by rows),
+     so the table's bottom outline is always right at the edge, not inset.
+   */
+  var fillH = Math.max(0, available);
+  // figure out parity of next pseudo-row based on visible real rows count
+  var visCount = 0;
+  Array.prototype.forEach.call(tbody.children, function(tr){
+    if(tr.offsetHeight > 0) visCount++;
+  });
+  var startEven = (visCount % 2) === 0; // next row is row1 (white) if even count so far
+  var fill = tbl.__padFill;
+  if(!fill){
+    fill = document.createElement('div');
+    fill.className = 'tbl-pad-fill';
+    tbl.parentNode.insertBefore(fill, tbl.nextSibling);
+    tbl.__padFill = fill;
+  }
+  /* fill is a descendant of body{zoom}: a CSS height is multiplied by zoom at render time,
+     while fillH is computed in visual px (getBoundingClientRect/innerHeight). So we
+     divide by zoom so the zebra reaches exactly the pager (on desktop zoom=1).
+   */
+  var __z = (window.clZoom ? window.clZoom() : 1);
+  fill.style.height = (fillH / __z) + 'px';
+  fill.classList.toggle('parity-odd', !startEven);
+};
+
+/* Auto-pad any visible changelist table (#result_list or custom) on load + resize + content changes. */
+var __padTimer = null;
+function __schedulePad(){ clearTimeout(__padTimer); __padTimer = setTimeout(autoPadAllChangelists, 80); }
+function __isOnlyPadMutation(records){
+  for(var i=0;i<records.length;i++){
+    var r = records[i];
+    var nodes = [].concat(Array.from(r.addedNodes), Array.from(r.removedNodes));
+    for(var j=0;j<nodes.length;j++){
+      var n = nodes[j];
+      if(n.nodeType !== 1 || !n.classList || !n.classList.contains('tbl-pad')) return false;
+    }
+  }
+  return true;
+}
+function autoPadAllChangelists(){
+  if(!document.body.classList.contains('change-list')) return;
+  var tables = document.querySelectorAll('#changelist table, #content-main table, table[id$="-table"]');
+  tables.forEach(function(t){
+    if(t.offsetParent === null) return;
+    var tbody = t.querySelector('tbody');
+    if(!tbody || !tbody.children.length) return;
+    window.padChangelistTable(t);
+    if(!t.__padObserved){
+      t.__padObserved = true;
+      var obs = new MutationObserver(function(records){
+        if(__isOnlyPadMutation(records)) return;
+        __schedulePad();
+      });
+      obs.observe(tbody, {childList: true, subtree: false});
+      if(window.ResizeObserver){
+        var ro = new ResizeObserver(function(){ __schedulePad(); });
+        ro.observe(tbody);
+      }
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', autoPadAllChangelists);
+window.addEventListener('resize', __schedulePad);
+/* Recalculate AFTER the full load: at DOMContentLoaded the top
+   bar (.cl-bar) is still being assembled and fonts may not be ready — the table then
+   shifts, and the first pad is computed from an intermediate layout (hence "sometimes there is no
+   filler"). load + a double rAF give the final geometry.
+ */
+window.addEventListener('load', function(){
+  __schedulePad();
+  requestAnimationFrame(function(){ requestAnimationFrame(__schedulePad); });
+});
+/* Fonts may finish loading AFTER load — rows change height, the table shifts.
+   fonts.ready recomputes the filler in the final geometry (otherwise "white → zebra after a
+   while").
+ */
+if(document.fonts && document.fonts.ready) document.fonts.ready.then(function(){ __schedulePad(); });
+
+/* ── Sticky thead: keep --clbar-h equal to the height of .cl-bar ── */
+(function(){
+  function syncClBarH(){
+    var bar = document.querySelector('.cl-bar');
+    /* offsetHeight (CSS px), not getBoundingClientRect().height (visual px):
+       with body{zoom} the rect is scaled, and sticky top: var(--clbar-h) would slide
+       under the bar. offsetHeight doesn't depend on zoom → the header sticks exactly in place.
+     */
+    var h = bar ? bar.offsetHeight : 0;
+    document.documentElement.style.setProperty('--clbar-h', h + 'px');
+    /* A change in the bar height shifts the table down/up — recompute the filler,
+       otherwise on the first assembly of cl-bar the pad keeps a stale height.
+     */
+    if(typeof __schedulePad === 'function') __schedulePad();
+  }
+  function init(){
+    syncClBarH();
+    var bar = document.querySelector('.cl-bar');
+    if(bar && window.ResizeObserver){
+      new ResizeObserver(syncClBarH).observe(bar);
+    }
+    window.addEventListener('resize', syncClBarH);
+  }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', function(){ setTimeout(init, 0); });
+  } else {
+    setTimeout(init, 0);
+  }
+})();
+</script>
+{% endblock %}

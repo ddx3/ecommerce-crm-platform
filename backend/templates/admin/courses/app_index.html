@@ -1,0 +1,103 @@
+{% extends "admin/app_index.html" %}
+{% load i18n %}
+
+{% block content %}
+<style>
+  /* ── Courses: app dashboard in the neutral CRM style ── */
+  .courses-dashboard { padding: 0 8px; }
+
+  .courses-hero {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 18px;
+  }
+  .courses-hero h1 {
+    margin: 0 0 4px; font-size: 18px; font-weight: 700; color: #1f2937;
+  }
+  .courses-hero p {
+    margin: 0; font-size: 13px; color: #6b7280;
+  }
+
+  .courses-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+  }
+  .courses-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow: hidden;
+    transition: border-color .12s, box-shadow .12s;
+    display: flex; flex-direction: column;
+  }
+  .courses-card:hover {
+    border-color: #9ca3af;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+  }
+  .courses-card-head {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .courses-card-head h2 {
+    margin: 0 0 2px; font-size: 14px; font-weight: 700; color: #1f2937;
+  }
+  .courses-card-head .cnt {
+    font-size: 11px; color: #6b7280;
+  }
+  .courses-card-actions {
+    padding: 10px 16px 14px;
+    display: flex; gap: 8px;
+  }
+  .courses-card-btn {
+    flex: 1;
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 12px; font-weight: 600;
+    text-decoration: none !important;
+    transition: background .12s, border-color .12s, color .12s;
+    border: 1px solid #d1d5db;
+  }
+  .courses-card-btn-add {
+    background: #374151; color: #fff !important; border-color: #374151;
+  }
+  .courses-card-btn-add:hover { background: #1f2937; border-color: #1f2937; }
+  .courses-card-btn-list {
+    background: #fff; color: #374151 !important;
+  }
+  .courses-card-btn-list:hover { background: #f3f4f6; border-color: #9ca3af; }
+
+  /* Hide the default Django app_list */
+  .courses-dashboard ~ .app-courses,
+  #content-main > .app-courses { display: none !important; }
+</style>
+
+<div class="courses-dashboard">
+  <div class="courses-hero">
+    <h1>Courses</h1>
+    <p>Online courses: modules, lessons, covers, timecodes and buyer access — all in one place.</p>
+  </div>
+
+  <div class="courses-grid">
+    {% for app in app_list %}{% if app.app_label == 'courses' %}{% for model in app.models %}{% if model.object_name == 'Course' %}
+      <div class="courses-card">
+        <div class="courses-card-head">
+          <h2>{{ model.name }}</h2>
+          <div class="cnt">all courses, modules, lessons, prices and buyers</div>
+        </div>
+        <div class="courses-card-actions">
+          {% if model.add_url %}
+            <a href="{{ model.add_url }}" class="courses-card-btn courses-card-btn-add">+ Add course</a>
+          {% endif %}
+          {% if model.admin_url %}
+            <a href="{{ model.admin_url }}" class="courses-card-btn courses-card-btn-list">Open list</a>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}{% endfor %}{% endif %}{% endfor %}
+  </div>
+</div>
+{% endblock %}

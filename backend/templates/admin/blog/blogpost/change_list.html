@@ -1,0 +1,678 @@
+{% extends "admin/change_list.html" %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  /* ── Standard Django #result_list table, styled like #pv-table ── */
+  #result_list {
+    table-layout: auto; width: 100%;
+    border-collapse: collapse !important; border-top: none !important;
+    --hairline-color: transparent;
+  }
+  #result_list td, #result_list th { border-top: none !important; }
+  #result_list thead th {
+    background: #f9fafb !important; border-bottom: 1px solid #e5e7eb !important;
+    border-left: 1px solid #e5e7eb !important; padding: 10px 12px !important;
+    font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important;
+    letter-spacing: 0.4px !important; color: #6b7280 !important; white-space: nowrap !important;
+    vertical-align: middle !important; text-align: left !important;
+  }
+  #result_list thead th:first-child { border-left: none !important; }
+  /* Filter headers: cursor pointer + clickability.
+     pointer-events:auto !important — base_site.html sets inline
+     th.style.pointerEvents='none' on all #result_list thead th, which killed the click.
+   */
+  #result_list thead th.bp-th-filter {
+    cursor: pointer !important; pointer-events: auto !important;
+    position: relative; padding-right: 26px !important;
+    transition: background .12s, color .12s;
+  }
+  #result_list thead th.bp-th-filter:hover,
+  #result_list thead th.bp-th-filter.col-open { color: #1f2937 !important; }
+  #result_list thead th.bp-th-filter.col-on { background: #d1d5db !important; color: #1f2937 !important; }
+  #result_list thead th .text a { color: inherit !important; text-decoration: none !important; pointer-events: none; }
+  #result_list thead th .sortoptions,
+  #result_list thead th div.clear { display: none !important; }
+  .bp-th-badge { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: flex; }
+
+  #result_list tbody tr { border-bottom: 1px solid #e5e7eb !important; height: 56px; }
+  /* When the table reaches the pager — remove the last row's border-bottom,
+     otherwise it coincides with the top line of the pad-fill and produces a double outline.
+   */
+  #result_list.tbl-touches-pager tbody tr:last-child { border-bottom: none !important; }
+  #result_list tbody tr.row1 { background: #fff !important; }
+  #result_list tbody tr.row2 { background: #f9fafb !important; }
+  #result_list tbody tr:hover { background: #eef0f3 !important; cursor: pointer; }
+  #result_list tbody td, #result_list tbody th {
+    padding: 8px 12px !important; font-size: 13px !important; vertical-align: middle !important;
+    border-left: 1px solid #e5e7eb !important; border-bottom: none !important;
+    font-weight: 400 !important; color: #374151 !important; text-align: left !important;
+    height: 56px !important; box-sizing: border-box !important;
+  }
+  #result_list tbody td:first-child, #result_list tbody th:first-child { border-left: none !important; }
+  #result_list tbody th a { color: #374151 !important; text-decoration: none !important; font-weight: 400 !important; }
+  #result_list tbody th a:hover { text-decoration: none !important; }
+  #result_list tbody tr.bp-no-results td {
+    text-align: center !important; color: #9ca3af !important; font-size: 13px !important;
+    padding: 28px 12px !important; cursor: default;
+  }
+  #result_list tbody tr.bp-no-results:hover { background: #fff !important; cursor: default; }
+
+  #result_list .action-checkbox-column,
+  #result_list td.action-checkbox { width: 44px !important; text-align: center !important; }
+  /* Fixed width + centering — equal side padding in all rows
+     (with width:1% + table-layout:auto the column stretched → the photo shifted).
+   */
+  #result_list th.column-preview_thumb,
+  #result_list td.field-preview_thumb { width: 90px !important; white-space: nowrap; text-align: center !important; }
+  /* "Display" and "Created" — the same fixed width */
+  #result_list th.column-is_active, #result_list td.field-is_active,
+  #result_list th.column-created_display, #result_list td.field-created_display {
+    width: 350px !important; white-space: nowrap;
+  }
+
+  /* Photo thumbnail (rectangular) + hover preview.
+     display:flex + center on both axes — otherwise inline-block gives a baseline gap
+     at the bottom and the photo shifts up (top spacing smaller than bottom).
+   */
+  .bp-photo-wrap { position: relative; display: flex; align-items: center; justify-content: center; }
+  /* 16:9 — exactly like a YouTube thumbnail. Size 64×36 so that with the standard padding
+     8+8 and border 1+1 the row keeps 56px (36 + 2 + 16 = 54).
+   */
+  .bp-thumb {
+    width: 64px; height: 36px; object-fit: cover;
+    border: 1px solid #d1d5db; border-radius: 4px; background: #f3f4f6;
+    display: block; transition: filter .15s;
+  }
+  .bp-photo-wrap:hover .bp-thumb { filter: brightness(0.82); }
+  .bp-thumb-empty {
+    width: 64px; height: 36px; border: 1px solid #d1d5db;
+    border-radius: 4px; background: #f3f4f6; display: block;
+  }
+  .bp-photo-preview {
+    display: none; position: fixed; z-index: 99999;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 6px;
+    padding: 4px; box-shadow: 0 4px 16px rgba(0,0,0,.12); pointer-events: none;
+  }
+  /* Fixed 16:9 + cover — same-size preview for all covers
+     (YouTube covers come in 16:9 and 4:3 — without a fixed size the spacing differs).
+   */
+  .bp-photo-preview img {
+    width: 360px; height: 202px; object-fit: cover;
+    border-radius: 4px; display: block;
+  }
+  .bp-photo-wrap:hover .bp-photo-preview { display: block; }
+
+  #result_list .field-is_active input[type="checkbox"] {
+    width: 16px; height: 16px; cursor: pointer; accent-color: #374151;
+  }
+
+  /* ════ Filter popup — identical to #pv-table (products page) ════ */
+  #flt-pop {
+    display: none; position: fixed; z-index: 9999; background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0 0 6px 6px;
+    box-shadow: 0 6px 16px rgba(0,0,0,.18);
+    overflow: hidden;
+    width: 200px;
+  }
+  #flt-pop.open { display: block; }
+
+  /* Sort rows */
+  .fp-sort-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px; border-bottom: 1px solid #ececec;
+    background: #fff; color: #374151; font-size: 13px;
+    cursor: pointer; width: 100%; text-align: left;
+    border-left: none; border-right: none; border-top: none;
+  }
+  .fp-sort-row:last-of-type { border-bottom: 1px solid #e5e7eb; }
+  .fp-sort-row:hover { background: #f5f5f5; }
+  .fp-sort-row.on { background: #e5e7eb; color: #374151; }
+  .fp-sort-arr { color: #d1d5db; font-size: 18px; line-height: 1; flex-shrink: 0; display: inline-flex; align-items: center; }
+  .fp-sort-row.on .fp-sort-arr { color: #374151; }
+
+  /* Filter body */
+  .fp-pop-body { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+  .fp-search { width: 100%; box-sizing: border-box; height: 28px; padding: 0 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; outline: none; margin-bottom: 0; }
+  .fp-search:focus { border-color: #9ca3af; }
+  .fp-item { display: flex; align-items: center; gap: 6px; padding: 0; font-size: 13px; line-height: 1; color: #374151; border-radius: 3px; }
+  .fp-item input[type=checkbox],
+  .fp-item input[type=radio] {
+    appearance: none; -webkit-appearance: none;
+    width: 14px; height: 14px; flex-shrink: 0; margin: 0;
+    border: 1.5px solid #d1d5db;
+    background: #fff; cursor: pointer; position: relative;
+    transition: background .12s, border-color .12s;
+  }
+  .fp-item input[type=checkbox] { border-radius: 3px; }
+  .fp-item input[type=radio]    { border-radius: 50%; }
+  .fp-item input[type=checkbox]:hover,
+  .fp-item input[type=radio]:hover { border-color: #9ca3af; }
+  .fp-item input[type=checkbox]:checked,
+  .fp-item input[type=radio]:checked { background: #1f2937; border-color: #1f2937; }
+  .fp-item input[type=checkbox]:checked::after,
+  .fp-item input[type=radio]:checked::after {
+    content: ''; position: absolute;
+    left: 3px; top: 0px; width: 4px; height: 8px;
+    border: 1.5px solid #fff; border-top: none; border-left: none;
+    transform: rotate(45deg);
+  }
+
+  /* ── Calendar ── */
+  .cal-nav { display:flex; align-items:center; justify-content:space-between; padding:8px 10px 4px; }
+  .cal-nav-btn { background:#f9fafb; border:1px solid #d1d5db; border-radius:4px; width:26px; height:26px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; color:#374151; font-size:16px; line-height:1; padding:0; flex-shrink:0; transition:background .1s,border-color .1s; }
+  .cal-nav-btn:hover { background:#e5e7eb; border-color:#9ca3af; color:#111; }
+  .cal-nav-btn:active { background:#d1d5db; }
+  .cal-title { font-size:12px; font-weight:600; color:#374151; text-align:center; flex:1; }
+  .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); padding:0 6px 0; }
+  .cal-dow { font-size:10px; color:#9ca3af; text-align:center; padding:2px 0 5px; font-weight:600; }
+  .cal-day { font-size:12px; text-align:center; padding:5px 0; cursor:pointer; color:#374151; user-select:none; border-radius:4px; transition:background .1s; }
+  .cal-day.empty { cursor:default; pointer-events:none; }
+  .cal-day:not(.empty):not(.sel-start):not(.sel-end):hover { background:#d1d5db; }
+  .cal-day.today { font-weight:700; color:#111; }
+  .cal-day.sel-start, .cal-day.sel-end { background:#1f2937; color:#fff; border-radius:4px; }
+  .cal-day.sel-start:hover, .cal-day.sel-end:hover { background:#374151; }
+  .cal-day.in-range { background:#e5e7eb; border-radius:0; }
+  .cal-day.in-range:hover { background:#d1d5db; }
+  .cal-day.sel-start.has-range { border-radius:4px 0 0 4px; }
+  .cal-day.sel-end.has-range   { border-radius:0 4px 4px 0; }
+  .cal-reset { display:block; text-align:center; padding:0 10px 10px; font-size:11px; color:#9ca3af; cursor:pointer; background:none; border:none; width:100%; }
+  .cal-reset:hover { color:#dc2626; }
+
+  /* Hide the standard Django pager — we use our own #bp-pager */
+  .paginator { display: none !important; }
+
+  /* ── Pager (copy of #pv-pager from product/change_list) ── */
+  #bp-pager {
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    padding: 10px 16px; font-size: 13px; color: #6b7280;
+    border-top: 1px solid #e5e7eb;
+    position: fixed; bottom: 0; right: 0;
+    background: #fff; z-index: 1000;
+  }
+  #bp-pager .pager-info { font-size: 12px; color: #9ca3af; }
+  #bp-pager .pager-nav { display: flex; align-items: center; gap: 4px; justify-self: center; }
+  #bp-pager .pg-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; padding: 0; border: 1px solid #d1d5db;
+    border-radius: 4px; background: #fff; color: #374151;
+    font-size: 13px; cursor: pointer; line-height: 1;
+    user-select: none; text-decoration: none !important; box-sizing: border-box; flex-shrink: 0;
+  }
+  #bp-pager .pg-btn:hover { background: #f3f4f6; border-color: #d1d5db; }
+  #bp-pager .pg-btn.pg-active { background: #1f2937; color: #fff; border-color: #1f2937; }
+  #bp-pager .pg-btn.pg-disabled { opacity: 0.35; pointer-events: none; }
+  #bp-pager .pg-btn.pg-arrow { color: #6b7280; }
+  #bp-pager .pager-nav .pg-dots { padding: 0 2px; color: #9ca3af; font-size: 12px; line-height: 28px; }
+  #bp-pager .pager-right { display: flex; align-items: center; gap: 0; justify-self: end; }
+  #bp-pager .pager-size { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  #bp-pager .pager-size > span:first-child { color: #9ca3af; }
+  #bp-pager .pager-size .pg-btn { width: auto; min-width: 36px; padding: 0 8px; }
+</style>
+{% endblock %}
+
+{% block content %}
+{{ block.super }}
+<div id="flt-pop"></div>
+<div id="bp-pager"></div>
+<script>
+(function(){
+  var SVG_BADGE = '<svg width="9" height="10" viewBox="0 0 10 11" fill="#374151"><path d="M0 0h10L6.5 5v6h-3V5z"/></svg>';
+  var table = document.getElementById('result_list');
+  if (!table) return;
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var pop = document.getElementById('flt-pop');
+  /* Move the popup into <body> — otherwise position:fixed breaks if
+     some parent container has transform/overflow.
+   */
+  if (pop && pop.parentNode !== document.body) document.body.appendChild(pop);
+
+  /* ── Collect row data ── */
+  var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+  rows.forEach(function(tr){
+    var t = tr.querySelector('.field-title');
+    tr._title = t ? t.textContent.trim() : '';
+    var cb = tr.querySelector('.field-is_active input[type=checkbox]');
+    tr._active = cb ? cb.checked : true;
+    tr._hasPhoto = !!tr.querySelector('.bp-thumb');
+    var ds = tr.querySelector('[data-iso]');
+    tr._date = ds ? ds.getAttribute('data-iso') : '';
+  });
+  var colCount = table.querySelectorAll('thead th').length || 4;
+
+  /* ── Filter state ── */
+  var F = { photo:'all', nameQ:'', status:'all', dateMin:null, dateMax:null };
+  var sortField = null, sortDir = 'asc';
+  var currentPage = 1, pageSize = 25;
+  var currentVisible = [];
+  /* ── Persist table state (filters/sorting/page size) ── */
+  var STATE_KEY='blogpost_list_state_v1';
+  function _saveState(){ try{ localStorage.setItem(STATE_KEY, JSON.stringify({F:F, sortField:sortField, sortDir:sortDir, pageSize:pageSize, currentPage:currentPage})); }catch(e){} }
+  function _loadState(){ try{ var s=JSON.parse(localStorage.getItem(STATE_KEY)||'null'); if(!s) return; if(s.F) Object.assign(F, s.F); if(typeof s.sortField!=='undefined') sortField=s.sortField; if(typeof s.sortDir!=='undefined') sortDir=s.sortDir; if(typeof s.pageSize!=='undefined') pageSize=s.pageSize; if(typeof s.currentPage!=='undefined') currentPage=s.currentPage; }catch(e){} }
+  _loadState();
+
+  /* ── Pager (copy of #pv-pager from product/change_list) ── */
+  window._bpSetPage = function(page, size){
+    pageSize = size; currentPage = page;
+    updateTable({preservePage: true});
+  };
+  function renderPager(){
+    _saveState();
+    var total = currentVisible.length;
+    var pager = document.getElementById('bp-pager');
+    if (!pager) return;
+    if (total <= 25){ pager.style.display = 'none'; return; }
+    pager.style.display = '';
+    if (pageSize === 0){
+      pager.innerHTML =
+        '<span class="pager-info">Showing all '+total+' entries</span>'+
+        '<div class="pager-nav"></div>'+
+        '<div class="pager-right"><div class="pager-size"><span>Per page:</span>'+
+          '<span class="pg-btn" onclick="window._bpSetPage(1,25)">25</span>'+
+          '<span class="pg-btn" onclick="window._bpSetPage(1,50)">50</span>'+
+          '<span class="pg-btn pg-active">All</span></div></div>';
+      return;
+    }
+    var pages = Math.ceil(total/pageSize) || 1;
+    var from = total===0 ? 0 : (currentPage-1)*pageSize+1;
+    var to = Math.min(currentPage*pageSize, total);
+    var SVG_PREV = '<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,1 1,5 5,9"/></svg>';
+    var SVG_NEXT = '<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 1,9"/></svg>';
+    function pgBtn(label, page, active, disabled, arrow){
+      var cls = 'pg-btn'+(active?' pg-active':'')+(disabled?' pg-disabled':'')+(arrow?' pg-arrow':'');
+      var handler = (disabled||active) ? '' : 'onclick="window._bpSetPage('+page+','+pageSize+')"';
+      return '<span class="'+cls+'" '+handler+'>'+label+'</span>';
+    }
+    var nav = '';
+    nav += pgBtn(SVG_PREV, currentPage-1, false, currentPage===1, true);
+    var pNums = [];
+    if (pages <= 7){ for (var i=1;i<=pages;i++) pNums.push(i); }
+    else {
+      pNums.push(1);
+      if (currentPage > 3) pNums.push('…');
+      for (var j=Math.max(2,currentPage-1);j<=Math.min(pages-1,currentPage+1);j++) pNums.push(j);
+      if (currentPage < pages-2) pNums.push('…');
+      pNums.push(pages);
+    }
+    pNums.forEach(function(p){
+      if (p === '…') nav += '<span class="pg-dots">…</span>';
+      else nav += pgBtn(p, p, p===currentPage, false);
+    });
+    nav += pgBtn(SVG_NEXT, currentPage+1, false, currentPage===pages, true);
+    pager.innerHTML =
+      '<span class="pager-info">'+from+'–'+to+' of '+total+'</span>'+
+      '<div class="pager-nav">'+nav+'</div>'+
+      '<div class="pager-right"><div class="pager-size"><span>Per page:</span>'+
+        '<span class="pg-btn'+(pageSize===25?' pg-active':'')+'" onclick="window._bpSetPage(1,25)">25</span>'+
+        '<span class="pg-btn'+(pageSize===50?' pg-active':'')+'" onclick="window._bpSetPage(1,50)">50</span>'+
+        '<span class="pg-btn'+(pageSize===0?' pg-active':'')+'" onclick="window._bpSetPage(1,0)">All</span></div></div>';
+  }
+  function positionPager(){
+    var pager = document.getElementById('bp-pager');
+    if (!pager || !table) return;
+    var content = document.querySelector('#content-main') || document.body;
+    pager.style.left = (window.clX ? window.clX(content.getBoundingClientRect().left) : content.getBoundingClientRect().left) + 'px';
+    /* Fill the empty space below the last row with zebra stripes,
+       so the table reaches the pager (as on the products page).
+     */
+    table.style.marginBottom = '0';
+    var lr = table.querySelector('tbody tr:last-child');
+    if (lr){
+      var rb = lr.getBoundingClientRect().bottom;
+      var pt = pager.getBoundingClientRect().top;
+      table.classList.toggle('tbl-touches-pager',
+        getComputedStyle(pager).display !== 'none' && rb >= pt - 1);
+    }
+    if (window.padChangelistTable) window.padChangelistTable(table);
+    if (table.__padFill) table.__padFill.style.marginBottom = pager.offsetHeight + 'px';
+  }
+  window.addEventListener('resize', positionPager);
+  if (window.ResizeObserver){
+    new ResizeObserver(positionPager).observe(document.querySelector('#content-main')||document.body);
+  }
+
+  var COLS = {
+    photos:    table.querySelector('thead th.column-preview_thumb'),
+    name:      table.querySelector('thead th.column-title'),
+    is_active: table.querySelector('thead th.column-is_active'),
+    dates:     table.querySelector('thead th.column-created_display')
+  };
+
+  function colFiltered(col){
+    if (col === 'photos')    return F.photo !== 'all';
+    if (col === 'name')      return !!F.nameQ;
+    if (col === 'is_active') return F.status !== 'all';
+    if (col === 'dates')     return !!(F.dateMin || F.dateMax);
+    return false;
+  }
+  function colSorted(col){
+    if (col === 'name')  return sortField === 'name';
+    if (col === 'dates') return sortField === 'created';
+    return false;
+  }
+
+  function passes(tr){
+    if (F.photo === 'with'    && !tr._hasPhoto) return false;
+    if (F.photo === 'without' &&  tr._hasPhoto) return false;
+    if (F.nameQ && tr._title.toLowerCase().indexOf(F.nameQ.toLowerCase()) === -1) return false;
+    if (F.status === 'active' && !tr._active) return false;
+    if (F.status === 'hidden' &&  tr._active) return false;
+    if (F.dateMin && tr._date && tr._date < F.dateMin) return false;
+    if (F.dateMax && tr._date && tr._date > F.dateMax) return false;
+    return true;
+  }
+
+  var emptyRow = null;
+  function updateTable(opts){
+    /* Any filter/sort change goes to page 1, except an explicit _bpSetPage. */
+    if (!opts || !opts.preservePage) currentPage = 1;
+    var visible = rows.filter(passes);
+    if (sortField){
+      visible.sort(function(a,b){
+        var r = 0;
+        if (sortField === 'name')        r = a._title.localeCompare(b._title, 'uk');
+        else if (sortField === 'created') r = a._date < b._date ? -1 : (a._date > b._date ? 1 : 0);
+        return sortDir === 'asc' ? r : -r;
+      });
+    }
+    currentVisible = visible;
+    var pages = pageSize === 0 ? 1 : (Math.ceil(visible.length / pageSize) || 1);
+    if (currentPage > pages) currentPage = pages;
+    var slice = pageSize === 0 ? visible : visible.slice((currentPage-1)*pageSize, currentPage*pageSize);
+    rows.forEach(function(tr){ tr.style.display = 'none'; });
+    slice.forEach(function(tr, i){
+      tr.style.display = '';
+      tr.classList.remove('row1', 'row2');
+      tr.classList.add(i % 2 === 0 ? 'row1' : 'row2');
+      tbody.appendChild(tr);
+    });
+    /* Empty state */
+    if (!visible.length){
+      if (!emptyRow){
+        emptyRow = document.createElement('tr');
+        emptyRow.className = 'bp-no-results';
+        var td = document.createElement('td');
+        td.colSpan = colCount;
+        td.textContent = 'Nothing found';
+        emptyRow.appendChild(td);
+      }
+      tbody.appendChild(emptyRow);
+    } else if (emptyRow && emptyRow.parentNode){
+      emptyRow.parentNode.removeChild(emptyRow);
+    }
+    /* Badges on the headers */
+    Object.keys(COLS).forEach(function(col){
+      var th = COLS[col]; if (!th) return;
+      var on = colFiltered(col) || colSorted(col);
+      th.classList.toggle('col-on', on);
+      var badge = th.querySelector('.bp-th-badge');
+      if (!badge){
+        badge = document.createElement('span');
+        badge.className = 'bp-th-badge';
+        th.appendChild(badge);
+      }
+      badge.innerHTML = on ? SVG_BADGE : '';
+    });
+    renderResetBtn();
+    renderPager();
+    positionPager();
+  }
+
+  /* ── "Reset filters" button in the top toolbar ── */
+  function anyFilterActive(){
+    return F.photo !== 'all' || !!F.nameQ || F.status !== 'all'
+        || !!F.dateMin || !!F.dateMax || !!sortField;
+  }
+  function resetAll(){
+    F = { photo:'all', nameQ:'', status:'all', dateMin:null, dateMax:null };
+    sortField = null; sortDir = 'asc';
+    closePop();
+    updateTable();
+  }
+  function renderResetBtn(){
+    var bar = document.querySelector('.submit-row.cl-bar') || document.querySelector('.cl-bar');
+    if (!bar) return;
+    var btn = bar.querySelector('#ds-reset-filters');
+    var active = anyFilterActive();
+    if (active && !btn){
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'ds-reset-filters';
+      btn.className = 'cl-top-btn';
+      btn.textContent = 'Reset filters';
+      btn.addEventListener('click', resetAll);
+      var del = bar.querySelector('.cl-top-btn-danger');
+      if (del) bar.insertBefore(btn, del);
+      else bar.appendChild(btn);
+    } else if (!active && btn){
+      btn.remove();
+    }
+  }
+  /* base_site.html builds .cl-bar on DOMContentLoaded — render the button after that. */
+  document.addEventListener('DOMContentLoaded', renderResetBtn);
+
+  /* ── Popup ── */
+  var popOwner = null;
+  var popWidths = { dates: 240, name: 220 };
+  function closePop(){
+    pop.classList.remove('open');
+    if (popOwner){ popOwner.classList.remove('col-open'); popOwner = null; }
+  }
+  function openPop(th, col, buildFn){
+    if (popOwner === th && pop.classList.contains('open')){ closePop(); return; }
+    if (popOwner) popOwner.classList.remove('col-open');
+    popOwner = th;
+    pop.innerHTML = '';
+    buildFn();
+    var resetBar = document.createElement('button'); resetBar.type = 'button';
+    resetBar.textContent = 'Reset filter';
+    resetBar.style.cssText = 'display:block;width:100%;padding:10px;border:none;border-bottom:1px solid #e5e7eb;background:none;color:#dc2626;font-size:13px;font-weight:500;cursor:pointer;text-align:left;';
+    resetBar.addEventListener('click', function(){ resetCol(col); closePop(); });
+    resetBar.addEventListener('mouseenter', function(){ this.style.background = '#fef2f2'; });
+    resetBar.addEventListener('mouseleave', function(){ this.style.background = 'none'; });
+    pop.insertBefore(resetBar, pop.firstChild);
+    pop.classList.add('open');
+    var r = th.getBoundingClientRect();
+    var pw = popWidths[col] || 200;
+    pop.style.width = pw + 'px';
+    pop.style.left = (window.clFlipLeft ? window.clFlipLeft(r, pw, 8) : Math.max(8, Math.min(r.left, window.innerWidth - pw - 8))) + 'px';
+    pop.style.top = (window.clFlipTop ? window.clFlipTop(r, pop.offsetHeight, 0) : r.bottom) + 'px';
+    th.classList.add('col-open');
+  }
+  function resetCol(col){
+    if (col === 'photos')         F.photo = 'all';
+    else if (col === 'name')    { F.nameQ = ''; if (sortField === 'name') sortField = null; }
+    else if (col === 'is_active') F.status = 'all';
+    else if (col === 'dates')   { F.dateMin = null; F.dateMax = null; if (sortField === 'created') sortField = null; }
+    updateTable();
+  }
+
+  /* ── Builder helpers (as on the products page) ── */
+  function popBody(){
+    var d = document.createElement('div'); d.className = 'fp-pop-body';
+    pop.appendChild(d); return d;
+  }
+  function sortRows(field, la, ld){
+    [[la,'asc'],[ld,'desc']].forEach(function(p){
+      var btn = document.createElement('button'); btn.type = 'button';
+      btn.className = 'fp-sort-row' + (sortField === field && sortDir === p[1] ? ' on' : '');
+      var sp = document.createElement('span'); sp.textContent = p[0];
+      var arr = document.createElement('span'); arr.className = 'fp-sort-arr'; arr.textContent = '›';
+      btn.appendChild(sp); btn.appendChild(arr);
+      btn.addEventListener('click', function(){
+        sortField = field; sortDir = p[1];
+        pop.querySelectorAll('.fp-sort-row').forEach(function(b){ b.classList.remove('on'); });
+        btn.classList.add('on');
+        updateTable();
+      });
+      pop.appendChild(btn);
+    });
+  }
+  function radioList(cont, opts, getVal, setVal){
+    var grp = 'fp-rg-' + Date.now();
+    opts.forEach(function(o){
+      var row = document.createElement('div'); row.className = 'fp-item';
+      var lbl = document.createElement('label'); lbl.style.cssText = 'display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+      var rb = document.createElement('input'); rb.type = 'radio'; rb.name = grp; rb.value = o[0];
+      rb.checked = getVal() === o[0];
+      rb.addEventListener('change', function(){ if (rb.checked){ setVal(o[0]); updateTable(); } });
+      lbl.appendChild(rb); lbl.appendChild(document.createTextNode(o[1]));
+      row.appendChild(lbl); cont.appendChild(row);
+    });
+  }
+
+  /* ── Calendar (copy from #pv-table) ── */
+  var CAL_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var CAL_DOWS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  function calParseYMD(s){ if (!s) return null; var p = s.split('-'); return new Date(+p[0], +p[1]-1, +p[2]); }
+  function calToYMD(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+  function calSameDay(a,b){ return a && b && a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate(); }
+
+  function buildCalPop(){
+    var selStart = calParseYMD(F.dateMin), selEnd = calParseYMD(F.dateMax);
+    var pickStep = (selStart && !selEnd) ? 2 : 1;
+    var hovDate = null;
+    var now = new Date();
+    var calYear = (selStart || now).getFullYear(), calMonth = (selStart || now).getMonth();
+
+    var b = popBody(); b.style.padding = '0';
+    var nav = document.createElement('div'); nav.className = 'cal-nav';
+    var prevBtn = document.createElement('button'); prevBtn.type = 'button'; prevBtn.className = 'cal-nav-btn'; prevBtn.innerHTML = '<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,1 1,5 5,9"/></svg>';
+    var title = document.createElement('span'); title.className = 'cal-title';
+    var nextBtn = document.createElement('button'); nextBtn.type = 'button'; nextBtn.className = 'cal-nav-btn'; nextBtn.innerHTML = '<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 1,9"/></svg>';
+    nav.appendChild(prevBtn); nav.appendChild(title); nav.appendChild(nextBtn);
+    b.appendChild(nav);
+    var grid = document.createElement('div'); grid.className = 'cal-grid'; b.appendChild(grid);
+    var calSep = document.createElement('div'); calSep.style.cssText = 'height:1px;background:#e5e7eb;margin:0;';
+    b.appendChild(calSep);
+    var resetBtn = document.createElement('button'); resetBtn.type = 'button'; resetBtn.className = 'cal-reset'; resetBtn.textContent = 'Reset';
+    resetBtn.addEventListener('click', function(){
+      selStart = null; selEnd = null; pickStep = 1;
+      F.dateMin = null; F.dateMax = null; updateTable(); renderFull();
+    });
+    b.appendChild(resetBtn);
+
+    function effRange(){
+      if (pickStep === 2 && hovDate && selStart)
+        return hovDate < selStart ? {s:hovDate,e:selStart} : {s:selStart,e:hovDate};
+      return {s:selStart, e:selEnd};
+    }
+    function applyClasses(){
+      var r = effRange(), today = new Date();
+      grid.querySelectorAll('.cal-day[data-d]').forEach(function(cell){
+        var d = calParseYMD(cell.dataset.d);
+        var isS = calSameDay(d,r.s), isE = calSameDay(d,r.e);
+        var inR = r.s && r.e && d > r.s && d < r.e;
+        cell.className = 'cal-day';
+        if (isS) cell.classList.add('sel-start');
+        if (isE) cell.classList.add('sel-end');
+        if (r.s && r.e && !calSameDay(r.s,r.e) && (isS||isE)) cell.classList.add('has-range');
+        if (inR) cell.classList.add('in-range');
+        if (calSameDay(d,today)) cell.classList.add('today');
+      });
+    }
+    function renderFull(){
+      title.textContent = CAL_MONTHS[calMonth] + ' ' + calYear;
+      grid.innerHTML = '';
+      CAL_DOWS.forEach(function(d){ var c = document.createElement('div'); c.className = 'cal-dow'; c.textContent = d; grid.appendChild(c); });
+      var firstDay = (new Date(calYear,calMonth,1).getDay()+6) % 7;
+      var daysInMonth = new Date(calYear,calMonth+1,0).getDate();
+      for (var i=0;i<firstDay;i++){ var e = document.createElement('div'); e.className = 'cal-day empty'; grid.appendChild(e); }
+      for (var day=1;day<=daysInMonth;day++){
+        var cell = document.createElement('div');
+        cell.className = 'cal-day';
+        cell.dataset.d = calToYMD(new Date(calYear,calMonth,day));
+        cell.textContent = day;
+        cell.addEventListener('click', function(){
+          var date = calParseYMD(this.dataset.d);
+          if (pickStep === 1){
+            selStart = date; selEnd = date; pickStep = 2;
+            F.dateMin = calToYMD(date); F.dateMax = calToYMD(date);
+          } else {
+            if (date < selStart){ selEnd = selStart; selStart = date; } else { selEnd = date; }
+            pickStep = 1; F.dateMin = calToYMD(selStart); F.dateMax = calToYMD(selEnd);
+          }
+          /* Auto-sort when filtering by date: newer → older */
+          sortField = 'created'; sortDir = 'desc';
+          updateTable();
+          applyClasses();
+        });
+        cell.addEventListener('mouseenter', function(){ hovDate = calParseYMD(this.dataset.d); applyClasses(); });
+        cell.addEventListener('mouseleave', function(){ hovDate = null; applyClasses(); });
+        grid.appendChild(cell);
+      }
+      applyClasses();
+    }
+    prevBtn.addEventListener('click', function(){ calMonth--; if (calMonth<0){ calMonth=11; calYear--; } renderFull(); });
+    nextBtn.addEventListener('click', function(){ calMonth++; if (calMonth>11){ calMonth=0; calYear++; } renderFull(); });
+    renderFull();
+  }
+
+  /* ── Popup builders ── */
+  function buildPhotosPop(){
+    var b = popBody();
+    radioList(b, [['all','All'],['with','With photo'],['without','Without photo']],
+      function(){ return F.photo; }, function(v){ F.photo = v; });
+  }
+  function buildNamePop(){
+    sortRows('name', 'A ⟶ Z', 'Z ⟶ A');
+    var b = popBody();
+    var inp = document.createElement('input'); inp.type = 'text'; inp.className = 'fp-search';
+    inp.placeholder = 'Search by name...'; inp.value = F.nameQ;
+    inp.addEventListener('input', function(){ F.nameQ = inp.value; updateTable(); });
+    b.appendChild(inp);
+    setTimeout(function(){ inp.focus(); }, 40);
+  }
+  function buildStatusPop(){
+    var b = popBody();
+    radioList(b, [['all','All'],['active','Active'],['hidden','Inactive']],
+      function(){ return F.status; }, function(v){ F.status = v; });
+  }
+  function buildDatesPop(){
+    sortRows('created', 'Older ⟶ newer', 'Newer ⟶ older');
+    buildCalPop();
+  }
+
+  /* ── Binding the headers ── */
+  function bindTh(th, col, buildFn){
+    if (!th) return;
+    th.classList.add('bp-th-filter');
+    th.addEventListener('click', function(e){
+      e.preventDefault(); e.stopPropagation();
+      openPop(th, col, buildFn);
+    });
+  }
+  bindTh(COLS.photos,    'photos',    buildPhotosPop);
+  bindTh(COLS.name,      'name',      buildNamePop);
+  bindTh(COLS.is_active, 'is_active', buildStatusPop);
+  bindTh(COLS.dates,     'dates',     buildDatesPop);
+
+  document.addEventListener('click', function(e){
+    if (!pop.contains(e.target) && !e.target.closest('th.bp-th-filter')) closePop();
+  });
+  window.addEventListener('scroll', closePop, true);
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closePop(); });
+
+  /* ── Hover preview of the photo ── */
+  table.addEventListener('mouseover', function(e){
+    var wrap = e.target.closest && e.target.closest('.bp-photo-wrap');
+    if (!wrap) return;
+    var pv = wrap.querySelector('.bp-photo-preview');
+    if (!pv) return;
+    var r = wrap.getBoundingClientRect();
+    pv.style.left = (window.clX ? window.clX(r.left) : r.left) + 'px';
+    pv.style.top = (window.clX ? window.clX(r.bottom + 6) : (r.bottom + 6)) + 'px';
+    requestAnimationFrame(function(){
+      var pr = pv.getBoundingClientRect();
+      if (pr.bottom > window.innerHeight - 8) pv.style.top = (window.clX ? window.clX(r.top - pr.height - 6) : (r.top - pr.height - 6)) + 'px';
+      if (pr.right > window.innerWidth - 8) pv.style.left = (window.clFlipLeft ? window.clFlipLeft(r, pv.offsetWidth, 8) : (window.innerWidth - pr.width - 8)) + 'px';
+    });
+  });
+
+  /* preservePage - otherwise updateTable() would reset the page restored from localStorage to 1. */
+  updateTable({preservePage: true});
+})();
+</script>
+{% endblock %}

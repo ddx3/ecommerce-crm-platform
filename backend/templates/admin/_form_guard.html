@@ -1,0 +1,181 @@
+<style>
+  /* Highlight empty required fields when trying to save. */
+  /* Only the border color turns red. Border width/type are NOT changed (no outline,
+     no shadows). The color is also applied inline in JS (guaranteed to override
+     admin styles), so it looks the same everywhere.
+   */
+  .fg-missing { border-color: #dc2626 !important; }
+</style>
+<script>
+(function(){
+  var dirty = false;
+  var leaving = false;
+
+  document.addEventListener('DOMContentLoaded', function(){
+    var form = document.querySelector('#content-main form[method="post"]') ||
+               document.querySelector('form[method="post"]');
+    if (!form) return;
+
+    /* Buttons are inactive while the form is clean */
+    var bar = document.querySelector('.submit-row-top');
+    var hasErrors = form.querySelector('.errorlist') || document.querySelector('p.errornote');
+
+    if (bar && !hasErrors) {
+      bar.querySelectorAll('input[name="_continue"], input[name="_save"], button.cl-top-btn').forEach(function(b) {
+        b.classList.add('cl-btn-idle');
+      });
+    }
+
+    function markDirty() {
+      if (dirty) return;
+      dirty = true;
+      if (bar) bar.querySelectorAll('.cl-btn-idle').forEach(function(b) { b.classList.remove('cl-btn-idle'); });
+    }
+
+    /* If the page loaded with errors — the form is already "dirty" */
+    if (hasErrors) markDirty();
+
+    window.pgMarkDirty = function() {
+      if (typeof markDirty === 'function') markDirty();
+      else window._pgMarkDirtyPending = true;
+    };
+    if (window._pgMarkDirtyPending) { markDirty(); window._pgMarkDirtyPending = false; }
+
+    /* Lets custom buttons like Cancel turn off the beforeunload guard
+       before a forced navigation / reload
+     */
+    window.clMarkLeaving = function(){ leaving = true; dirty = false; };
+
+    // If the page loaded with validation errors:
+    // — replace the POST entry in history with GET so that F5 loads a clean form
+    if (form.querySelector('.errorlist') || document.querySelector('p.errornote')) {
+      history.replaceState(null, document.title, window.location.href);
+    }
+
+    form.addEventListener('input',  markDirty);
+    form.addEventListener('change', markDirty);
+
+    /* Data loss protection: the form has novalidate, so with empty required
+       fields the submit goes to the server, Django re-renders the page — and
+       custom JS fields (attributes, composition, raw text, temp photos) are lost.
+       We block the submit BEFORE sending if required fields are empty: the user
+       stays on the page with all the entered data.
+     */
+    /* Whether an inline row is empty: no pk and no filled field.
+       Django ignores such "extra" forms — we do NOT validate them (otherwise false blocking).
+     */
+    function inlineRowEmpty(inl){
+      var pk = inl.querySelector('input[name$="-id"]');
+      if (pk && pk.value) return false;             /* saved row */
+      var inputs = inl.querySelectorAll('input, textarea, select');
+      for (var i = 0; i < inputs.length; i++){
+        var x = inputs[i];
+        if (!x.name || /-(DELETE|id)$/.test(x.name)) continue;
+        /* We ignore type=color: the browser itself substitutes #000000 for an empty
+           value (sanitizing an invalid value), so such an input is ALWAYS
+           "filled" from the DOM's point of view — it made an empty row falsely non-empty
+           and blocked the submit (catalog/attribute: a new value was not saved).
+         */
+        if (x.type === 'hidden' || x.type === 'checkbox' || x.type === 'color') continue;
+        if ((x.value || '').trim()) return false;   /* there is a filled field — the row is not empty */
+      }
+      return true;
+    }
+    /* Remove the highlight from a field as soon as the user starts filling it in. */
+    /* Set/clear the highlight: we change ONLY the border color (inline !important —
+       guaranteed to override admin styles, border width does not change).
+     */
+    function fgMark(el)   { el.classList.add('fg-missing'); el.style.setProperty('border-color', '#dc2626', 'important'); }
+    function fgUnmark(el) { el.classList.remove('fg-missing'); el.style.removeProperty('border-color'); }
+    form.addEventListener('input', function(ev){
+      if (ev.target && ev.target.classList) fgUnmark(ev.target);
+    });
+    form.addEventListener('submit', function(e){
+      var missing = [];
+      form.querySelectorAll('.fg-missing').forEach(fgUnmark);
+      form.querySelectorAll('label.required[for]').forEach(function(lab){
+        var f = document.getElementById(lab.getAttribute('for'));
+        if (!f || f.disabled) return;
+        if (f.id.indexOf('__prefix__') !== -1 || f.closest('.empty-form')) return;  /* inline template */
+        var inl = f.closest('.inline-related');
+        if (inl) {
+          /* An inline fully replaced by a custom UI (catalog/attribute: the native
+             .inline-group is permanently display:none, data is sent via separate
+             JS-added inputs) — applying the standard "first row is required" check
+             makes no sense here: the user never edits any row directly. We distinguish it
+             from variant-tabs (product), where .inline-group is hidden via visibility,
+             not display, and eventually becomes visible.
+           */
+          var hostGroup = inl.closest('.inline-group');
+          if (hostGroup && getComputedStyle(hostGroup).display === 'none') return;
+          var del = inl.querySelector('input[name$="-DELETE"]');
+          if (del && del.checked) return;           /* row is marked for deletion */
+          if (inlineRowEmpty(inl)) {
+            /* skip an empty row, EXCEPT the first one in the set — it is usually required. */
+            var grp = inl.closest('.inline-group') || inl.parentElement;
+            var firstReal = grp && grp.querySelector('.inline-related:not(.empty-form)');
+            if (inl !== firstReal) return;
+          }
+        }
+        var empty = (f.tagName === 'SELECT') ? (f.value === '' || f.value == null)
+                                             : !((f.value || '').trim());
+        if (empty) missing.push({ f: f, inl: inl });
+      });
+      if (missing.length) {
+        /* We save and delete nothing — we only highlight empty fields. */
+        e.preventDefault();
+        missing.forEach(function(m){
+          if (m.f.offsetParent !== null) { fgMark(m.f); }
+          else if (m.inl) {                          /* field is hidden (inactive variant tab) — highlight the tab */
+            var tab = document.querySelector('.variant-tab[data-row-id="' + m.inl.id + '"]');
+            fgMark(tab || m.f);
+          } else { fgMark(m.f); }
+        });
+        var vis = null;
+        for (var i = 0; i < missing.length; i++) { if (missing[i].f.offsetParent !== null) { vis = missing[i].f; break; } }
+        var target = vis || missing[0].f;
+        try { target.focus(); target.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch(_){}
+        return;
+      }
+      leaving = true;
+    });
+
+    var exitLink = document.querySelector('.cl-bar a.cl-top-btn');
+    if (exitLink) {
+      exitLink.addEventListener('click', function(e){
+        if (!dirty || leaving) return;
+        e.preventDefault();
+        if (confirm('You have unsaved changes. Leave without saving?')) {
+          leaving = true;
+          window.location.href = exitLink.href;
+        }
+      });
+    }
+  });
+
+  window.addEventListener('beforeunload', function(e){
+    if (dirty && !leaving) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  window.clFormCancel = function(){
+    var form = document.querySelector('#content-main form[method="post"]') ||
+               document.querySelector('form[method="post"]');
+    if (!form) return;
+    if (dirty && !confirm('Discard all unsaved changes?')) return;
+    form.reset();
+    if (window.clCancelHook) window.clCancelHook();
+    dirty = false;
+    // Turn off the buttons after reset
+    var bar = document.querySelector('.submit-row-top');
+    if (bar) {
+      bar.querySelectorAll('input[name="_continue"], input[name="_save"], button.cl-top-btn').forEach(function(b) {
+        b.classList.add('cl-btn-idle');
+      });
+    }
+    // If the page has errors — reload to get a clean form
+    if (form.querySelector('.errorlist') || document.querySelector('p.errornote')) {
+      window.location = window.location.pathname;
+    }
+  };
+})();
+</script>

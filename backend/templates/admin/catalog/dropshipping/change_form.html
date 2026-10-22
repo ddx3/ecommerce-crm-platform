@@ -1,0 +1,131 @@
+{% extends "admin/catalog/productvariant/change_form.html" %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+/* Delta wrappers */
+.delta-wrapper { display: inline-flex; align-items: center; gap: 2px; }
+.delta-btn {
+    width: 28px; height: 28px; padding: 0;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 4px;
+    cursor: pointer; font-size: 16px; font-weight: 600; color: #374151;
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.delta-btn:hover { background: #f3f4f6; border-color: #9ca3af; }
+.delta-input {
+    width: 60px; height: 28px; padding: 0 5px;
+    border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;
+    box-sizing: border-box; outline: none;
+}
+.delta-input:focus { border-color: #9ca3af; }
+
+/* Supplier info block */
+.supplier-info {
+    margin-top: 14px; padding: 10px 16px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 6px;
+}
+.supplier-info h3 {
+    font-size: 10px; font-weight: 700; color: #6b7280;
+    margin: 0 0 8px 0; text-transform: uppercase; letter-spacing: 0.7px;
+}
+.supplier-info table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.supplier-info td { padding: 4px 0; vertical-align: top; }
+.supplier-info td:first-child { color: #9ca3af; width: 130px; padding-right: 8px; }
+.supplier-info a { color: #4b5563; word-break: break-all; }
+.supplier-info a:hover { color: #111827; }
+</style>
+{% endblock %}
+
+{% block after_field_sets %}
+{{ block.super }}
+<script>
+(function() {
+    /* ── Delta buttons for price and stock ── */
+    function addDeltaBtn(input, isInteger) {
+        if (!input || input.closest('.delta-wrapper')) return;
+        input.step = '1'; input.min = '0';
+        var wrapper = document.createElement('span');
+        wrapper.className = 'delta-wrapper';
+        input.parentNode.insertBefore(wrapper, input);
+        wrapper.appendChild(input);
+
+        var plus  = document.createElement('button');
+        plus.type = 'button'; plus.className = 'delta-btn is-plus'; plus.textContent = '+'; plus.title = 'Increase';
+        var minus = document.createElement('button');
+        minus.type = 'button'; minus.className = 'delta-btn'; minus.textContent = '−'; minus.title = 'Decrease';
+        var delta = document.createElement('input');
+        delta.type = 'number'; delta.className = 'delta-input';
+        delta.placeholder = '0'; delta.min = '0'; delta.step = '1';
+
+        wrapper.appendChild(plus); wrapper.appendChild(minus); wrapper.appendChild(delta);
+
+        function apply(sign) {
+            var d = parseFloat(delta.value);
+            if (!isNaN(d) && d > 0) {
+                var r = Math.max(0, (parseFloat(input.value) || 0) + sign * d);
+                input.value = isInteger ? String(Math.round(r)) : r.toFixed(2);
+            }
+            delta.value = ''; input.focus();
+            if (window.pgMarkDirty) window.pgMarkDirty();
+        }
+        plus.addEventListener('click', function() { apply(1); });
+        minus.addEventListener('click', function() { apply(-1); });
+        delta.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); apply(1); }
+        });
+    }
+
+    /* ── Supplier info block ── */
+    function buildSupplierInfo() {
+        {% if original %}
+        var supplierSku   = {{ original.supplier_sku|default:'null'|safe }};
+        var supplierPrice = '{{ original.supplier_price|default:"—" }}';
+        var supplierUrl   = '{{ original.supplier_url|default:"" }}';
+        var lastSync      = '{{ original.last_synced_at|date:"d.m.Y H:i"|default:"—" }}';
+        var productName   = '{{ original.product.name|escapejs }}';
+
+        var margin = '—';
+        {% if original.supplier_price and original.price %}
+        var sp = {{ original.supplier_price }}, p = {{ original.price }};
+        if (sp > 0) margin = ((p - sp) / sp * 100).toFixed(1) + ' %';
+        {% endif %}
+
+        var block = document.createElement('div');
+        block.className = 'supplier-info';
+        var rows = [
+            ['Product',    '<a href="/admin/catalog/product/' + {{ original.product_id }} + '/change/">' + productName + '</a>'],
+            ['SKU',        '{{ original.supplier_sku|default:"—" }}'],
+            ['Purchase price', supplierPrice ? supplierPrice + ' UAH' : '—'],
+            ['Margin',      margin],
+            ['Sync',        lastSync],
+        ];
+        if (supplierUrl) {
+            rows.push(['Source', '<a href="' + supplierUrl + '" target="_blank" rel="noopener">bradas.ua ↗</a>']);
+        }
+
+        var html = '<h3>Supplier</h3><table>';
+        rows.forEach(function(r) {
+            html += '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>';
+        });
+        html += '</table>';
+        block.innerHTML = html;
+
+        /* Insert after the last fieldset */
+        var lastFs = document.querySelector('fieldset.module:last-of-type');
+        if (lastFs) lastFs.insertAdjacentElement('afterend', block);
+        else document.querySelector('#content-main form').appendChild(block);
+        {% endif %}
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        addDeltaBtn(document.querySelector('#id_price'), false);
+        addDeltaBtn(document.querySelector('#id_stock'), true);
+        buildSupplierInfo();
+
+        /* Hide the standard supplier fieldset (it's in a collapse) */
+        var collapseFs = document.querySelector('.collapse');
+        if (collapseFs) collapseFs.closest('fieldset') && (collapseFs.closest('fieldset').style.display = 'none');
+    });
+})();
+</script>
+{% endblock %}

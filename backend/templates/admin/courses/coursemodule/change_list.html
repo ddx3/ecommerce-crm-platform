@@ -1,0 +1,422 @@
+{% extends "admin/change_list.html" %}
+{% block content_title %}{% endblock %}
+{% block extrahead %}
+{{ block.super }}
+<style>
+  #content h1, .changelist-footer { display: none !important; }
+  #result_list, .results, #toolbar, .paginator { display: none !important; }
+  #content-main, #content { padding-bottom: 60px !important; }
+
+  #cm-table { width: 100%; border-collapse: collapse; background: #fff; table-layout: fixed; }
+  #cm-table thead th {
+    background: #f9fafb; border-bottom: 1px solid #e5e7eb; border-left: 1px solid #e5e7eb;
+    height: 34px; padding: 0 12px; box-sizing: border-box; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280;
+    white-space: nowrap; vertical-align: middle; text-align: left;
+    cursor: pointer; user-select: none; position: relative;
+  }
+  #cm-table thead th:first-child { border-left: none; }
+  #cm-table .col-cb { width: 44px; text-align: center; padding-left: 14px !important; }
+  #cm-table .col-cb input { cursor: pointer; width: 16px; height: 16px; accent-color: #374151; margin: 0; }
+  #cm-table tbody tr.cm-pinned { background: #eff6ff !important; }
+  #cm-table thead th:hover { background: #f3f4f6; }
+  #cm-table thead th.col-open { background: #eef0f3; }
+  #cm-table thead th .th-badge {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: transparent; margin-left: 6px; vertical-align: middle;
+  }
+  #cm-table thead th.col-active .th-badge { background: #1f2937; }
+  #cm-table tbody tr { border-bottom: 1px solid #e5e7eb; height: 56px; }
+  #cm-table tbody tr.row1 { background: #fff; }
+  #cm-table tbody tr.row2 { background: #f9fafb; }
+  #cm-table tbody tr:hover { background: #eef0f3; cursor: pointer; }
+  #cm-table tbody tr.cm-empty-row, #cm-table tbody tr.cm-empty-row:hover { background: #fff !important; cursor: default !important; }
+  #cm-table tbody td {
+    padding: 8px 12px; font-size: 13px; vertical-align: middle;
+    border-left: 1px solid #e5e7eb; color: #374151; height: 56px; box-sizing: border-box;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #cm-table tbody td:first-child { border-left: none; }
+  .cm-badge { display: inline-block; min-width: 30px; text-align: center; background: #f3f4f6;
+    border: 1px solid #e5e7eb; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; color: #374151; }
+  .cm-badge.empty { color: #9ca3af; }
+  .cm-course-link { color: #374151; text-decoration: none; font-weight: 600; }
+
+  #cm-pager {
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    padding: 10px 16px; font-size: 13px; color: #6b7280;
+    border-top: 1px solid #e5e7eb;
+    position: fixed; bottom: 0; right: 0; background: #fff; z-index: 1000;
+  }
+  #cm-pager .pager-info { font-size: 12px; color: #9ca3af; }
+  #cm-pager .pg-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border: 1px solid #d1d5db; border-radius: 4px;
+    background: #fff; color: #374151; font-size: 13px; cursor: pointer; line-height: 1; user-select: none; box-sizing: border-box;
+  }
+  #cm-pager .pg-btn:hover { background: #f3f4f6; }
+  #cm-pager .pg-btn.pg-active { background: #1f2937; color: #fff; border-color: #1f2937; }
+  #cm-pager .pg-btn.pg-disabled { opacity: 0.35; pointer-events: none; }
+  #cm-pager .pager-nav { display: flex; align-items: center; gap: 4px; justify-self: center; }
+  #cm-pager .pager-right { display: flex; align-items: center; gap: 4px; justify-self: end; }
+  #cm-pager .pager-size { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  #cm-pager .pager-size > span:first-child { color: #9ca3af; }
+  #cm-pager .pager-size .pg-btn { width: auto; min-width: 36px; padding: 0 8px; }
+</style>
+{% endblock %}
+
+{% block result_list %}
+<div id="flt-pop"></div>
+<table id="cm-table"></table>
+<div id="cm-pager"></div>
+
+<script>
+(function(){
+    var allData = {{ modules_json|safe }};
+    var allCourses = {{ courses_json|safe }};
+    var F = {titleQ:'', courses:[], sortMin:null, sortMax:null, lessonsMin:null, lessonsMax:null};
+    var sortField=null, sortDir='asc';
+    var currentPage=1, pageSize=25, currentFiltered=[];
+    /* Row selection (cross-page, as on products): name=_selected_action — so that the
+       "Delete" button in the base_site cl-bar works with the standard delete.
+       Declaration BEFORE _loadState(), otherwise var hoisting wipes the restored SEL.
+     */
+    var SEL = new Set();
+    /* ── Persist table state (filters/sorting/page/size/selection) ── */
+    var STATE_KEY='coursemodule_list_state_v1';
+    function _saveState(){ try{ localStorage.setItem(STATE_KEY, JSON.stringify({F:F, sortField:sortField, sortDir:sortDir, pageSize:pageSize, currentPage:currentPage, SEL:Array.from(SEL)})); }catch(e){} }
+    function _loadState(){ try{ var s=JSON.parse(localStorage.getItem(STATE_KEY)||'null'); if(!s) return; if(s.F) Object.assign(F, s.F); if(typeof s.sortField!=='undefined') sortField=s.sortField; if(typeof s.sortDir!=='undefined') sortDir=s.sortDir; if(typeof s.pageSize!=='undefined') pageSize=s.pageSize; if(typeof s.currentPage!=='undefined') currentPage=s.currentPage; if(Array.isArray(s.SEL)){ var exists={}; allData.forEach(function(m){ exists[String(m.id)]=1; }); s.SEL.forEach(function(id){ if(exists[String(id)]) SEL.add(String(id)); }); } }catch(e){} }
+    _loadState();
+    function _findById(id){ for(var k=0;k<allData.length;k++){ if(String(allData[k].id)===String(id)) return allData[k]; } return null; }
+    var pop = document.getElementById('flt-pop'), popOwner=null;
+    var cmTable = document.getElementById('cm-table');
+    var cmPager = document.getElementById('cm-pager');
+
+    function applyFilters(opts){
+        var q = F.titleQ.trim().toLowerCase();
+        currentFiltered = allData.filter(function(m){
+            if (q && m.title.toLowerCase().indexOf(q) === -1) return false;
+            if (F.courses.length && F.courses.indexOf(m.course_id) === -1) return false;
+            if (F.sortMin!==null && m.sort_order < F.sortMin) return false;
+            if (F.sortMax!==null && m.sort_order > F.sortMax) return false;
+            if (F.lessonsMin!==null && m.lessons_count < F.lessonsMin) return false;
+            if (F.lessonsMax!==null && m.lessons_count > F.lessonsMax) return false;
+            return true;
+        });
+        if (sortField){
+            currentFiltered.sort(function(a,b){
+                var av=a[sortField], bv=b[sortField];
+                if (av==null) av=''; if (bv==null) bv='';
+                if (typeof av==='string') av=av.toLowerCase();
+                if (typeof bv==='string') bv=bv.toLowerCase();
+                return av<bv?(sortDir==='asc'?-1:1):av>bv?(sortDir==='asc'?1:-1):0;
+            });
+        }
+        if (!opts || !opts.preservePage) currentPage=1;
+        renderTable(); renderPager();
+    }
+
+    function isFiltered(col){
+        if (col==='title')   return !!F.titleQ;
+        if (col==='course')  return F.courses.length > 0;
+        if (col==='sort')    return F.sortMin!==null || F.sortMax!==null;
+        if (col==='lessons') return F.lessonsMin!==null || F.lessonsMax!==null;
+        return false;
+    }
+    function resetCol(col){
+        if (col==='title')   F.titleQ='';
+        if (col==='course')  F.courses=[];
+        if (col==='sort')    { F.sortMin=null; F.sortMax=null; }
+        if (col==='lessons') { F.lessonsMin=null; F.lessonsMax=null; }
+        applyFilters();
+    }
+
+    /* ── Global reset of all filters (the single button in the top bar) ── */
+    var CM_COLS = ['title','course','sort','lessons'];
+    function _anyFilterActive(){
+        return CM_COLS.some(isFiltered) || !!sortField;
+    }
+    function _resetFilters(){
+        F.titleQ=''; F.courses=[];
+        F.sortMin=null; F.sortMax=null; F.lessonsMin=null; F.lessonsMax=null;
+        sortField=null; sortDir='asc';
+        currentPage=1; applyFilters();
+    }
+    function _renderResetBtn(){
+        var bar = document.querySelector('.submit-row.cl-bar'); if (!bar) return;
+        var btn = bar.querySelector('#cmod-reset-filters');
+        var active = _anyFilterActive();
+        if (active && !btn) {
+            btn = document.createElement('button');
+            btn.type='button'; btn.id='cmod-reset-filters';
+            btn.className='cl-top-btn'; btn.textContent='Reset filters';
+            btn.addEventListener('click', _resetFilters);
+            var del = bar.querySelector('.cl-top-btn-danger');
+            if (del) bar.insertBefore(btn, del); else bar.appendChild(btn);
+        } else if (!active && btn) { btn.remove(); }
+    }
+
+    function _cmCells(m){
+        var bcls = m.lessons_count ? 'cm-badge' : 'cm-badge empty';
+        var checked = (SEL.has(String(m.id)) || SEL.has(m.id)) ? ' checked' : '';
+        return '<td class="col-cb"><input type="checkbox" class="cm-row-cb" name="_selected_action" value="'+m.id+'"'+checked+'></td>'+
+            '<td><a class="cm-course-link" href="/admin/courses/course/'+m.course_id+'/change/">'+escapeHtml(m.course_name)+'</a></td>'+
+            '<td>'+m.sort_order+'</td>'+
+            '<td>'+escapeHtml(m.title)+'</td>'+
+            '<td><span class="'+bcls+'">'+m.lessons_count+'</span></td>';
+    }
+    function renderTable(){
+        _saveState();
+        _renderResetBtn();
+        var pages = Math.ceil(currentFiltered.length / pageSize) || 1;
+        if (currentPage > pages) currentPage = pages;
+        var from = (currentPage-1)*pageSize, to = Math.min(from+pageSize, currentFiltered.length);
+        var slice = currentFiltered.slice(from, to);
+        /* pinned: selected rows from OTHER pages, shown at the top */
+        var visibleIds={}; slice.forEach(function(m){visibleIds[String(m.id)]=1;});
+        var pinned=[];
+        SEL.forEach(function(id){ if(visibleIds[String(id)]) return; var o=_findById(id); if(o) pinned.push(o); });
+        var thead = '<thead><tr>'+
+            '<th class="col-cb"><input type="checkbox" id="cm-cb-all"></th>'+
+            '<th data-col="course"  style="width:30%">Course<span class="th-badge"></span></th>'+
+            '<th data-col="sort"    style="width:10%">#<span class="th-badge"></span></th>'+
+            '<th data-col="title"   style="width:45%">Module title<span class="th-badge"></span></th>'+
+            '<th data-col="lessons" style="width:15%">Lessons<span class="th-badge"></span></th>'+
+            '</tr></thead>';
+        var tbody = '<tbody>';
+        pinned.forEach(function(m, i){ tbody += '<tr class="'+((i%2===0)?'row1':'row2')+' cm-pinned" data-id="'+m.id+'">'+_cmCells(m)+'</tr>'; });
+        slice.forEach(function(m, idx){
+            tbody += '<tr class="'+((idx%2===0)?'row1':'row2')+'" data-id="'+m.id+'">'+_cmCells(m)+'</tr>';
+        });
+        if(slice.length===0 && (typeof pinned==='undefined' || pinned.length===0)){ tbody += '<tr class="cm-empty-row"><td colspan="5" style="text-align:center;color:#9ca3af;font-size:13px;height:56px;box-sizing:border-box;">No results</td></tr>'; }
+        tbody += '</tbody>';
+        cmTable.innerHTML = thead + tbody;
+        _cmPad();
+        updateHeaderBadges();
+        _syncCbAll();
+        if(typeof _updateCmCounter==='function') _updateCmCounter();
+        cmTable.querySelectorAll('tbody tr:not(.cm-empty-row)').forEach(function(tr){
+            tr.addEventListener('click', function(e){
+                if (e.target.tagName === 'A' || e.target.closest('.col-cb')) return;
+                location.href = '/admin/courses/coursemodule/' + tr.dataset.id + '/change/';
+            });
+        });
+        cmTable.querySelectorAll('thead th[data-col]').forEach(function(th){
+            th.addEventListener('click', function(){
+                if (popOwner === th && pop.classList.contains('open')) { closePop(); return; }
+                openPop(th);
+            });
+        });
+    }
+    function updateHeaderBadges(){
+        cmTable.querySelectorAll('thead th[data-col]').forEach(function(th){
+            th.classList.toggle('col-active', isFiltered(th.dataset.col));
+        });
+    }
+
+    function renderPager(){
+        _saveState();
+        var total = currentFiltered.length;
+        var pages = Math.ceil(total/pageSize) || 1;
+        var from = total===0 ? 0 : (currentPage-1)*pageSize+1;
+        var to = Math.min(currentPage*pageSize, total);
+        var SVG_PREV='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,1 1,5 5,9"/></svg>';
+        var SVG_NEXT='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 1,9"/></svg>';
+        var nav = '';
+        nav += pgBtn(SVG_PREV, currentPage-1, false, currentPage===1);
+        for (var i=1; i<=pages; i++) nav += pgBtn(i, i, i===currentPage, false);
+        nav += pgBtn(SVG_NEXT, currentPage+1, false, currentPage===pages);
+        cmPager.innerHTML =
+            '<span class="pager-info">'+from+'–'+to+' of '+total+'</span>'+
+            '<div class="pager-nav">'+nav+'</div>'+
+            '<div class="pager-right"><div class="pager-size"><span>Per page:</span>'+
+              '<span class="pg-btn '+(pageSize===25?'pg-active':'')+'" data-size="25">25</span>'+
+              '<span class="pg-btn '+(pageSize===50?'pg-active':'')+'" data-size="50">50</span>'+
+              '<span class="pg-btn '+(pageSize===0?'pg-active':'')+'" data-size="0">All</span>'+
+            '</div></div>';
+        cmPager.querySelectorAll('.pg-btn[data-size]').forEach(function(b){
+            b.addEventListener('click', function(){ pageSize = parseInt(b.dataset.size) || 999999; currentPage=1; renderTable(); renderPager(); });
+        });
+        cmPager.querySelectorAll('.pg-btn[data-page]').forEach(function(b){
+            b.addEventListener('click', function(){ currentPage = parseInt(b.dataset.page); renderTable(); renderPager(); });
+        });
+        _cmPad();
+    }
+    function _cmPad(){
+        cmTable.style.marginBottom='0';
+        if(window.padChangelistTable) window.padChangelistTable(cmTable);
+        if(cmTable.__padFill) cmTable.__padFill.style.marginBottom=(cmPager.offsetHeight||0)+'px';
+    }
+    function pgBtn(label, page, active, disabled){
+        var cls = 'pg-btn'+(active?' pg-active':'')+(disabled?' pg-disabled':'');
+        return '<span class="'+cls+'" data-page="'+page+'">'+label+'</span>';
+    }
+
+    function openPop(th){
+        closePop();
+        popOwner = th; th.classList.add('col-open');
+        pop.innerHTML = '';
+        var resetBar = document.createElement('button'); resetBar.type='button';
+        resetBar.style.cssText='display:block;width:100%;padding:10px;border:none;border-bottom:1px solid #e5e7eb;background:none;color:#dc2626;font-size:13px;font-weight:500;cursor:pointer;text-align:left;';
+        resetBar.textContent='Reset filter';
+        resetBar.addEventListener('click', function(){ resetCol(th.dataset.col); closePop(); });
+        pop.appendChild(resetBar);
+
+        if (th.dataset.col === 'title')   buildTitlePop();
+        if (th.dataset.col === 'course')  buildCoursePop();
+        if (th.dataset.col === 'sort')    buildRangePop('sort_order', 'sortMin', 'sortMax', 'Lower ⟶ higher', 'Higher ⟶ lower');
+        if (th.dataset.col === 'lessons') buildRangePop('lessons_count', 'lessonsMin', 'lessonsMax', 'Lower ⟶ higher', 'Higher ⟶ lower');
+
+        var rect = th.getBoundingClientRect();
+        pop.style.left = (window.clX ? window.clX(rect.left) : rect.left) + 'px';
+        pop.style.width = Math.max(rect.width, 220) + 'px';
+        pop.classList.add('open');
+        pop.style.top  = (window.clFlipTop ? window.clFlipTop(rect, pop.offsetHeight, 0) : rect.bottom) + 'px';
+    }
+    function closePop(){
+        pop.classList.remove('open');
+        if (popOwner) { popOwner.classList.remove('col-open'); popOwner=null; }
+    }
+    document.addEventListener('click', function(e){
+        if (!pop.contains(e.target) && !e.target.closest('th[data-col]')) closePop();
+    });
+
+    function buildTitlePop(){
+        sortRows('title', 'A ⟶ Z', 'Z ⟶ A');
+        var b = popBody();
+        var inp = document.createElement('input');
+        inp.type='text'; inp.className='fp-search'; inp.placeholder='Search...';
+        inp.value = F.titleQ;
+        inp.addEventListener('input', function(){ F.titleQ = inp.value; applyFilters(); });
+        b.appendChild(inp);
+    }
+    function buildCoursePop(){
+        sortRows('course_name', 'A ⟶ Z', 'Z ⟶ A');
+        var b = popBody();
+        var inp = document.createElement('input');
+        inp.type='text'; inp.className='fp-search'; inp.placeholder='Search course...';
+        b.appendChild(inp);
+        var list = document.createElement('div'); list.className='fp-list';
+        function renderList(){
+            var q = inp.value.trim().toLowerCase();
+            list.innerHTML='';
+            allCourses.filter(function(c){ return !q || c.name.toLowerCase().indexOf(q) !== -1; }).forEach(function(c){
+                var row = document.createElement('div'); row.className='fp-item';
+                var lbl = document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+                var cb = document.createElement('input'); cb.type='checkbox';
+                cb.checked = F.courses.indexOf(c.id) !== -1;
+                cb.addEventListener('change', function(){
+                    var i = F.courses.indexOf(c.id);
+                    if (cb.checked && i===-1) F.courses.push(c.id);
+                    else if (!cb.checked && i!==-1) F.courses.splice(i,1);
+                    applyFilters();
+                });
+                lbl.appendChild(cb); lbl.appendChild(document.createTextNode(c.name));
+                row.appendChild(lbl); list.appendChild(row);
+            });
+        }
+        inp.addEventListener('input', renderList);
+        renderList();
+        b.appendChild(list);
+    }
+    function buildRangePop(sortKey, minKey, maxKey, asc, desc){
+        sortRows(sortKey, asc, desc);
+        var b = popBody();
+        var range = document.createElement('div'); range.className='fp-range';
+        var inMin = document.createElement('input'); inMin.type='number'; inMin.placeholder='from';
+        if (F[minKey]!==null) inMin.value=F[minKey];
+        inMin.addEventListener('input', function(){ F[minKey] = inMin.value === '' ? null : parseInt(inMin.value); applyFilters(); });
+        var sep = document.createElement('span'); sep.className='fp-range-sep'; sep.textContent='—';
+        var inMax = document.createElement('input'); inMax.type='number'; inMax.placeholder='to';
+        if (F[maxKey]!==null) inMax.value=F[maxKey];
+        inMax.addEventListener('input', function(){ F[maxKey] = inMax.value === '' ? null : parseInt(inMax.value); applyFilters(); });
+        range.appendChild(inMin); range.appendChild(sep); range.appendChild(inMax);
+        b.appendChild(range);
+    }
+    function popBody(){ var d=document.createElement('div'); d.className='fp-pop-body'; pop.appendChild(d); return d; }
+    function sortRows(field, asc, desc){
+        [[asc,'asc'],[desc,'desc']].forEach(function(p){
+            var btn = document.createElement('button'); btn.type='button';
+            btn.className='fp-sort-row'+(sortField===field&&sortDir===p[1]?' on':'');
+            btn.innerHTML='<span>'+p[0]+'</span><span class="fp-sort-arr">›</span>';
+            btn.addEventListener('click', function(){
+                if (sortField===field && sortDir===p[1]) { sortField=null; sortDir='asc'; }
+                else { sortField=field; sortDir=p[1]; }
+                applyFilters(); closePop();
+            });
+            pop.appendChild(btn);
+        });
+    }
+    function escapeHtml(s){
+        return String(s).replace(/[&<>"']/g, function(c){
+            return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+        });
+    }
+
+    /* ── Row selection: per-page select-all + cross-page + counter + "Clear selection" ── */
+    function _pageCmIds(){
+        var from=(currentPage-1)*pageSize, to=Math.min(from+pageSize,currentFiltered.length);
+        return currentFiltered.slice(from,to).map(function(m){ return String(m.id); });
+    }
+    function _syncCbAll(){
+        var box=document.getElementById('cm-cb-all'); if(!box) return;
+        var ids=_pageCmIds();
+        var picked=ids.filter(function(id){ return SEL.has(id); }).length;
+        box.indeterminate=(picked>0 && picked<ids.length);
+        box.checked=(ids.length>0 && picked===ids.length);
+    }
+    function _updateCmCounter(){
+        var counter=document.querySelector('.cl-counter'); if(!counter) return;
+        var total=Math.max(currentFiltered.length, SEL.size);
+        counter.textContent='Selected: '+SEL.size+' of '+total;
+        var ids=_pageCmIds();
+        var onPage=ids.filter(function(id){ return SEL.has(id); }).length;
+        var cb=document.getElementById('cl-clear-sel');
+        if(cb){ if(SEL.size-onPage>0) cb.style.removeProperty('display'); else cb.style.setProperty('display','none','important'); }
+    }
+    cmTable.addEventListener('change', function(e){
+        var t=e.target;
+        if(t.id==='cm-cb-all'){
+            var ids=_pageCmIds();
+            var allOn=ids.length>0 && ids.every(function(id){ return SEL.has(id); });
+            ids.forEach(function(id){ if(allOn) SEL.delete(id); else SEL.add(id); });
+            renderTable(); _updateCmCounter();
+            return;
+        }
+        if(t.classList && t.classList.contains('cm-row-cb')){
+            if(t.checked) SEL.add(String(t.value)); else SEL.delete(String(t.value));
+            renderTable(); _updateCmCounter();
+        }
+    });
+    function _installCmCounter(){
+        var counter=document.querySelector('.cl-counter'); if(!counter) return;
+        if(!document.getElementById('cl-clear-sel')){
+            var clearBtn=document.createElement('a');
+            clearBtn.href='#'; clearBtn.id='cl-clear-sel'; clearBtn.className='cl-top-btn';
+            clearBtn.textContent='Clear selection'; clearBtn.style.marginLeft='10px';
+            clearBtn.style.setProperty('display','none','important');
+            clearBtn.addEventListener('click',function(e){ e.preventDefault();
+                var ids=new Set(_pageCmIds());
+                Array.from(SEL).forEach(function(id){ if(!ids.has(String(id))) SEL.delete(id); });
+                renderTable(); _updateCmCounter();
+            });
+            counter.insertAdjacentElement('afterend', clearBtn);
+        }
+        window._updateCounter=_updateCmCounter; _updateCmCounter();
+        /* cl-bar is assembled in base_site.html on DOMContentLoaded; only here
+           is .submit-row.cl-bar guaranteed to exist, so we (re)draw the "Reset
+           filters" button taking the restored filter state into account.
+         */
+        _renderResetBtn();
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _installCmCounter);
+    else _installCmCounter();
+
+    applyFilters({preservePage:true});
+    window.addEventListener('resize', _cmPad);
+    if(window.ResizeObserver) new ResizeObserver(_cmPad).observe(document.querySelector('#content-main')||document.body);
+    var _cmNav=document.getElementById('nav-sidebar');
+    if(_cmNav) _cmNav.addEventListener('transitionend', _cmPad);
+})();
+</script>
+{% endblock %}

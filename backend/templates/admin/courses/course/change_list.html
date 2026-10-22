@@ -1,0 +1,740 @@
+{% extends "admin/change_list.html" %}
+
+{% block extrahead %}{{ block.super }}
+<style>
+/* Hide the standard Django changelist BEFORE our JS renders #cs-table
+   (otherwise the raw table flashes briefly). Same as in products.
+ */
+#result_list, .results, #toolbar, #changelist-form .actions, #changelist-search { display: none !important; }
+</style>
+{% endblock %}
+
+{% block content_title %}{% endblock %}
+{% block result_list %}
+{{ block.super }}
+<style>
+#result_list { display: none !important; }
+#toolbar { display: none !important; }
+.results { display: none !important; }
+#content h1, .changelist-footer { display: none !important; }
+/* Removes the container's padding, which creates a gap above the pager */
+#content-main, #content { padding-bottom: 0 !important; }
+
+/* ── Table ── */
+#cs-table { table-layout: fixed; width: 100%; border-collapse: collapse !important; border-top: none !important; --hairline-color: transparent; }
+#cs-table td, #cs-table th { border-top: none !important; }
+#cs-table thead th { border-bottom: 1px solid #e5e7eb !important; }
+#cs-table thead tr th {
+    background: #f9fafb !important; border-bottom: 1px solid #e5e7eb !important;
+    border-left: 1px solid #e5e7eb !important; padding: 10px 12px !important;
+    font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important;
+    letter-spacing: 0.4px !important; color: #6b7280 !important; white-space: nowrap !important;
+    vertical-align: middle !important; text-align: left !important;
+}
+#cs-table thead tr th:first-child { border-left: none !important; }
+#cs-table thead tr th.col-cb { padding: 0 0 0 14px !important; width: 44px !important; }
+
+th[data-col] { cursor: pointer !important; user-select: none !important; position: relative !important; }
+#cs-table thead tr th[data-col] { padding-right: 26px !important; }
+#cs-table thead tr th[data-col]:hover, #cs-table thead tr th[data-col].col-open { color: #1f2937 !important; }
+/* Active sort/filter — subtle tint */
+#cs-table thead tr th[data-col].col-on { background: #d1d5db !important; color: #1f2937 !important; }
+/* The cover is not filterable, so the cursor doesn't lie */
+#cs-table thead tr th[data-col="cover"] { padding-right: 26px !important; }
+/* Badge — absolute right */
+.th-badge { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; pointer-events: none; }
+
+/* ── Rows ── */
+#cs-table tbody tr { border-bottom: 1px solid #e5e7eb !important; height: 56px; cursor: pointer; }
+#cs-table.tbl-touches-pager tbody tr:last-child { border-bottom: none !important; }
+#cs-table tbody tr.row1 { background: #fff !important; }
+#cs-table tbody tr.row2 { background: #f9fafb !important; }
+#cs-table tbody tr:hover { background: #eef0f3 !important; }
+#cs-table tbody tr.cs-pinned, #cs-table tbody tr.cs-pinned:hover { background: #eff6ff !important; }
+#cs-table tbody tr.cs-pinned-first td { border-top: 2px solid #d1d5db !important; }
+#cs-table tbody tr.cs-pinned-last td { border-bottom: 2px solid #d1d5db !important; }
+#cs-table tbody tr.cs-empty-row, #cs-table tbody tr.cs-empty-row:hover { background: #fff !important; cursor: default !important; border-bottom: 1px solid #e5e7eb !important; }
+#cs-table tbody tr.cs-empty-row td { border-bottom: 1px solid #e5e7eb !important; vertical-align: middle !important; text-align: center !important; padding: 0 !important; color: #9ca3af !important; font-size: 13px !important; }
+table.tbl-touches-pager tbody tr.cs-empty-row, table.tbl-touches-pager tbody tr.cs-empty-row td { border-bottom: 1px solid #e5e7eb !important; }
+
+/* ── Cells ── */
+#cs-table tbody td {
+    padding: 8px 12px !important; font-size: 13px !important; vertical-align: middle !important;
+    border-left: 1px solid #e5e7eb !important; border-bottom: none !important;
+    font-weight: 400 !important; color: #374151 !important; text-align: left !important;
+    overflow: hidden !important; height: 56px !important; box-sizing: border-box !important;
+    white-space: nowrap;
+}
+#cs-table tbody td:first-child { border-left: none !important; }
+#cs-table .col-cb { width: 44px !important; min-width: 44px !important; max-width: 44px !important; padding: 0 0 0 14px !important; }
+#cs-table .col-cb input[type=checkbox] { cursor: pointer; width: 16px; height: 16px; accent-color: #374151; margin: 0; vertical-align: middle; }
+#cs-table .col-active { padding: 6px 12px !important; }
+#cs-table .col-price { padding: 6px 10px !important; }
+#cs-table thead tr th[data-col="cover"], #cs-table td.col-cover { padding-left: 12px !important; }
+.cs-active-cb { cursor: pointer; width: 16px; height: 16px; accent-color: #374151; }
+
+/* The price field is the same input as in products */
+.pv-edit-cell { display: flex; align-items: center; gap: 4px; }
+#cs-table .pv-edit-input { width: 76px; padding: 0 6px !important; height: 28px !important; border: 1px solid #d1d5db !important; border-radius: 4px !important; font-size: 13px !important; background: #fff !important; color: #374151 !important; box-shadow: none !important; }
+#cs-table .pv-edit-input:focus { border-color: #9ca3af !important; }
+#cs-table .pv-edit-input.saved  { border-color: #16a34a !important; background: #f0fdf4 !important; }
+#cs-table .pv-edit-input.error  { border-color: #dc2626 !important; background: #fef2f2 !important; }
+
+/* The cover is the same object as a product photo.
+   .cs-photos (flex) is required: an inline-block wrapper sits on the baseline and
+   adds ~1.5px under the image, so the row becomes 57.5px instead of 56px.
+ */
+.cs-photos { display: flex; gap: 3px; }
+.cs-photo-wrap { position: relative; display: inline-block; flex-shrink: 0; }
+/* Course covers are all one format: 16:9 (1280×720). So NOT a square and NOT
+   object-fit:cover (it cropped the frame): height like the product thumbnail (38px), width
+   by aspect ratio. A 66×38 box = 64×36 content, exactly 16:9, so no margins are left;
+   contain is a safeguard in case a different aspect ratio is ever uploaded: there will be a margin,
+   not a crop.
+ */
+.cs-photo-wrap img.cs-cover { width: 66px; height: 38px; object-fit: contain; border-radius: 4px; border: 1px solid #d1d5db; background: #f3f4f6; display: block; transition: filter .15s; }
+.cs-photo-wrap:hover img.cs-cover { filter: brightness(0.82); }
+/* .pv-photo-preview is styled by base_site; the hover trigger there is defined only for
+   .pv-photo-wrap, so we open the preview with our own selector.
+ */
+.cs-photo-wrap:hover .pv-photo-preview { display: block; }
+/* The shared preview is a 180×180 square with object-fit:cover; for a 16:9 cover that
+   would crop the edges, so we set our own box with the same aspect ratio.
+ */
+.cs-photo-wrap .pv-photo-preview img { width: 320px; height: 180px; object-fit: contain; }
+.cs-cover.empty { width: 66px; height: 38px; border-radius: 4px; border: 1px solid #d1d5db; background: #f3f4f6; }
+
+/* The title is plain text, as in products (13px / 400 / #374151 inherited from td) */
+.cs-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Lightbox */
+#cs-lightbox { display: none; position: fixed; inset: 0; z-index: 999999; background: rgba(0,0,0,0.82); align-items: center; justify-content: center; cursor: zoom-out; }
+#cs-lightbox.open { display: flex; }
+#cs-lightbox img { max-width: 90vw; max-height: 90vh; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+
+/* ── Column widths (table-layout:fixed) ──
+   All px (no %), measured in JS (_fitCourseCols) into CSS variables on the table itself.
+   Checkbox: a hard 44px. Title is the only flexible one: it takes all the remainder.
+ */
+#cs-table thead th[data-col="cover"]  { width: var(--cw-cover, 91px) !important; }
+#cs-table thead th[data-col="price"]  { width: var(--cw-price, 200px) !important; }
+#cs-table thead th[data-col="active"] { width: var(--cw-active, 200px) !important; }
+#cs-table thead th[data-col="name"]   { width: var(--cw-name, 420px) !important; }
+
+/* ── Pager ── */
+#cs-pager {
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    padding: 10px 16px; font-size: 13px; color: #6b7280;
+    border-top: 1px solid #e5e7eb;
+    position: fixed; bottom: 0; right: 0;
+    background: #fff; z-index: 1000;
+}
+#cs-pager .pager-info { font-size: 12px; color: #9ca3af; }
+#cs-pager .pager-nav { display: flex; align-items: center; gap: 4px; justify-self: center; }
+#cs-pager .pg-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; padding: 0; border: 1px solid #d1d5db;
+    border-radius: 4px; background: #fff; color: #374151;
+    font-size: 13px; cursor: pointer; line-height: 1;
+    user-select: none; text-decoration: none !important; box-sizing: border-box; flex-shrink: 0;
+}
+#cs-pager .pg-btn:hover { background: #f3f4f6; border-color: #d1d5db; }
+#cs-pager .pg-btn.pg-active { background: #1f2937; color: #fff; border-color: #1f2937; }
+#cs-pager .pg-btn.pg-disabled { opacity: 0.35; pointer-events: none; }
+#cs-pager .pg-btn.pg-arrow { color: #6b7280; }
+#cs-pager .pager-nav .pg-dots { padding: 0 2px; color: #9ca3af; font-size: 12px; line-height: 28px; }
+#cs-pager .pager-right { display: flex; align-items: center; gap: 0; justify-self: end; }
+#cs-pager .pager-size { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+#cs-pager .pager-size > span:first-child { color: #9ca3af; }
+#cs-pager .pager-size .pg-btn { width: auto; min-width: 36px; padding: 0 8px; }
+</style>
+
+<div id="cs-lightbox"><img id="cs-lightbox-img" src="" alt=""></div>
+<div id="flt-pop"></div>
+<table id="cs-table"></table>
+<div id="cs-pager"></div>
+
+<script>
+(function(){
+    var allData = {{ courses_json|safe }};
+    var allCats = {{ categories_json|safe }};
+    var F = {nameQ:'', cats:[], priceMin:null, priceMax:null, active:'all', cover:'all'};
+    var sortField=null, sortDir='asc';
+    var currentPage=1, pageSize=25, currentFiltered=[];
+    /* Row selection (cross-page, as on products): name=_selected_action — so that the
+       "Delete" button in the base_site cl-bar works with the standard delete.
+       Declared BEFORE _loadState() — otherwise var hoisting below would overwrite
+       the restored selection with an empty Set.
+     */
+    var SEL = new Set();
+    /* ── Persist table state (filters/sorting/pagination/selection) ── */
+    var STATE_KEY='course_list_state_v1';
+    function _saveState(){ try{ localStorage.setItem(STATE_KEY, JSON.stringify({F:F, sortField:sortField, sortDir:sortDir, currentPage:currentPage, pageSize:pageSize, SEL:Array.from(SEL)})); }catch(e){} }
+    function _loadState(){ try{ var s=JSON.parse(localStorage.getItem(STATE_KEY)||'null'); if(!s) return; if(s.F) Object.assign(F, s.F); if(typeof s.sortField!=='undefined') sortField=s.sortField; if(typeof s.sortDir!=='undefined') sortDir=s.sortDir; if(typeof s.currentPage!=='undefined') currentPage=s.currentPage; if(typeof s.pageSize!=='undefined') pageSize=s.pageSize; if(Array.isArray(s.SEL)){ var exists={}; allData.forEach(function(v){ exists[String(v.id)]=1; }); s.SEL.forEach(function(id){ if(exists[String(id)]) SEL.add(String(id)); }); } }catch(e){} }
+    _loadState();
+    function _findById(id){ for(var k=0;k<allData.length;k++){ if(String(allData[k].id)===String(id)) return allData[k]; } return null; }
+    var pop = document.getElementById('flt-pop'), popOwner=null;
+    var csTable = document.getElementById('cs-table');
+    var csPager = document.getElementById('cs-pager');
+    var lightbox = document.getElementById('cs-lightbox');
+    var lightboxImg = document.getElementById('cs-lightbox-img');
+    lightbox.addEventListener('click', function(){ lightbox.classList.remove('open'); });
+    function getCsrf(){ var el=document.querySelector('[name=csrfmiddlewaretoken]'); return el?el.value:''; }
+
+    /* Instant-save course fields (like saveField in products) */
+    function saveField(id, field, value, inputEl, cb){
+        if(inputEl) inputEl.classList.remove('saved','error');
+        return fetch('/admin/courses/save-course-field/',{
+            method:'POST',
+            headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+            body:JSON.stringify({id:id, field:field, value:value}),
+        }).then(function(r){ return r.json(); }).then(function(data){
+            if(data && data.ok){
+                if(inputEl){ inputEl.classList.add('saved'); setTimeout(function(){ inputEl.classList.remove('saved'); }, 1500); }
+                if(cb) cb(data);
+            } else if(inputEl){ inputEl.classList.add('error'); }
+            return data;
+        }).catch(function(){ if(inputEl) inputEl.classList.add('error'); });
+    }
+
+    function applyFilters(){
+        var q = F.nameQ.trim().toLowerCase();
+        currentFiltered = allData.filter(function(c){
+            if (q && c.name.toLowerCase().indexOf(q) === -1) return false;
+            if (F.cats.length && !c.category_ids.some(function(id){ return F.cats.indexOf(id) !== -1; })) return false;
+            if (F.priceMin!==null && c.price < F.priceMin) return false;
+            if (F.priceMax!==null && c.price > F.priceMax) return false;
+            if (F.cover === 'yes' && !c.cover) return false;
+            if (F.cover === 'no'  &&  c.cover) return false;
+            if (F.active === 'yes' && !c.is_active) return false;
+            if (F.active === 'no'  && c.is_active)  return false;
+            return true;
+        });
+        if (sortField){
+            currentFiltered.sort(function(a,b){
+                var av=a[sortField], bv=b[sortField];
+                if (av==null) av=''; if (bv==null) bv='';
+                if (typeof av==='string') av=av.toLowerCase();
+                if (typeof bv==='string') bv=bv.toLowerCase();
+                return av<bv?(sortDir==='asc'?-1:1):av>bv?(sortDir==='asc'?1:-1):0;
+            });
+        }
+        currentPage=1; renderTable(); renderPager();
+    }
+    /* Redraw WITHOUT resetting the page (after instant-save). */
+    function updateTable(){
+        var page=currentPage;
+        applyFilters();
+        currentPage=page; renderTable(); renderPager();
+    }
+
+    function isFiltered(col){
+        if (col==='name')   return !!F.nameQ || F.cats.length > 0;
+        if (col==='price')  return F.priceMin!==null || F.priceMax!==null;
+        if (col==='cover')  return F.cover !== 'all';
+        if (col==='active') return F.active !== 'all';
+        return false;
+    }
+    function resetCol(col){
+        if (col==='name')   { F.nameQ=''; F.cats=[]; }
+        if (col==='price')  { F.priceMin=null; F.priceMax=null; }
+        if (col==='cover')  F.cover='all';
+        if (col==='active') F.active='all';
+        applyFilters();
+    }
+
+    function _csCells(c){
+        var cover = '<div class="cs-photos">' + (c.cover
+            ? '<div class="cs-photo-wrap" data-src="'+escapeHtml(c.cover)+'">'+
+                '<img class="cs-cover" src="'+escapeHtml(c.cover)+'" alt="">'+
+                '<div class="pv-photo-preview"><img src="'+escapeHtml(c.cover)+'" alt=""></div>'+
+              '</div>'
+            : '<div class="cs-cover empty"></div>') + '</div>';
+        /* action-checkbox, so that the shared base_site rule applies (44px, padding 0,
+           centered), as in the product selection cell.
+         */
+        return '<td class="col-cb action-checkbox"><input type="checkbox" class="cs-row-cb" name="_selected_action" value="'+c.id+'"'+(SEL.has(String(c.id))?' checked':'')+'></td>'+
+            '<td class="col-cover">'+cover+'</td>'+
+            '<td class="col-name"><div class="cs-name">'+escapeHtml(c.name)+'</div></td>'+
+            '<td class="col-price"><div class="pv-edit-cell"><input class="pv-edit-input cs-price-input" type="text" data-id="'+c.id+'" value="'+c.price.toFixed(2)+'"></div></td>'+
+            '<td class="col-active"><input type="checkbox" class="cs-active-cb" data-id="'+c.id+'"'+(c.is_active?' checked':'')+'></td>';
+    }
+    var CS_COLS = ['name','price','active'];
+    function _anyFilterActive(){
+        return CS_COLS.some(isFiltered) || !!sortField;
+    }
+    function _resetFilters(){
+        F.nameQ=''; F.cats=[];
+        F.priceMin=null; F.priceMax=null;
+        F.active='all';
+        sortField=null; sortDir='asc';
+        currentPage=1; applyFilters();
+    }
+    function _renderResetBtn(){
+        var bar = document.querySelector('.submit-row.cl-bar'); if (!bar) return;
+        var btn = bar.querySelector('#crs-reset-filters');
+        var active = _anyFilterActive();
+        if (active && !btn) {
+            btn = document.createElement('button');
+            btn.type='button'; btn.id='crs-reset-filters';
+            btn.className='cl-top-btn'; btn.textContent='Reset filters';
+            btn.addEventListener('click', _resetFilters);
+            var del = bar.querySelector('.cl-top-btn-danger');
+            if (del) bar.insertBefore(btn, del); else bar.appendChild(btn);
+        } else if (!active && btn) { btn.remove(); }
+    }
+
+    /* ── Pagination: single source of truth for rendering, select-all and the counter ── */
+    function _pageBounds(){
+        var n=currentFiltered.length;
+        if(pageSize===0) return [{start:0, end:n}];
+        var out=[]; for(var s=0; s<n; s+=pageSize) out.push({start:s, end:Math.min(s+pageSize,n)});
+        return out.length?out:[{start:0,end:0}];
+    }
+    function _pageSlice(){
+        if(pageSize===0) return currentFiltered.slice(0);
+        var b=_pageBounds();
+        if(currentPage>b.length) currentPage=b.length;
+        if(currentPage<1) currentPage=1;
+        return currentFiltered.slice(b[currentPage-1].start, b[currentPage-1].end);
+    }
+    function _pageCsIds(){ return _pageSlice().map(function(c){ return String(c.id); }); }
+
+    function renderTable(){
+        _saveState();
+        _renderResetBtn();
+        var slice = _pageSlice();
+        /* pinned: selected rows from OTHER pages, shown at the top */
+        var visibleIds={}; slice.forEach(function(c){visibleIds[String(c.id)]=1;});
+        var pinned=[];
+        SEL.forEach(function(id){ if(visibleIds[String(id)]) return; var o=_findById(id); if(o) pinned.push(o); });
+        function sc(lbl,col){ return '<th data-col="'+col+'">'+lbl+'<span class="th-badge"></span></th>'; }
+        var thead = '<thead><tr>'+
+            '<th class="col-cb"><input type="checkbox" id="cs-cb-all"></th>'+
+            sc('Photo','cover')+
+            sc('Name','name')+sc('Price','price')+sc('Visible','active')+
+            '</tr></thead>';
+        var tbody = '<tbody>';
+        pinned.forEach(function(c,i){
+            var cls = ((i%2===0)?'row1':'row2') + ' cs-pinned'
+                + (i===0 ? ' cs-pinned-first' : '')
+                + (i===pinned.length-1 ? ' cs-pinned-last' : '');
+            tbody += '<tr class="'+cls+'" data-id="'+c.id+'">'+_csCells(c)+'</tr>';
+        });
+        slice.forEach(function(c, idx){
+            tbody += '<tr class="'+((idx%2===0)?'row1':'row2')+'" data-id="'+c.id+'">'+_csCells(c)+'</tr>';
+        });
+        if(slice.length===0 && pinned.length===0){ tbody += '<tr class="cs-empty-row"><td colspan="5" style="height:56px;box-sizing:border-box">No results</td></tr>'; }
+        tbody += '</tbody>';
+        csTable.innerHTML = thead + tbody;
+        updateHeaderBadges();
+        _syncCbAll();
+        if(typeof _updateCsCounter==='function') _updateCsCounter();
+        csTable.querySelectorAll('tbody tr:not(.cs-empty-row)').forEach(function(tr){
+            tr.addEventListener('click', function(e){
+                if (e.target.closest('.col-cb')) return;
+                if (e.target.tagName === 'INPUT') return;
+                if (e.target.closest('.cs-photo-wrap')) return;
+                if (window._hadSelection) return;
+                location.href = '/admin/courses/course/' + tr.dataset.id + '/change/';
+            });
+        });
+        /* Cover: the preview is positioned by the shared base_site script, click opens a lightbox */
+        csTable.querySelectorAll('.cs-photo-wrap').forEach(function(wrap){
+            wrap.addEventListener('click', function(e){
+                e.stopPropagation();
+                lightboxImg.src = wrap.dataset.src;
+                lightbox.classList.add('open');
+            });
+        });
+        /* Price: instant-save on Enter/blur, Escape reverts (as in products) */
+        csTable.querySelectorAll('.cs-price-input').forEach(function(inp){
+            var id=parseInt(inp.dataset.id,10), orig=inp.value;
+            function doSave(){
+                var val=inp.value.trim();
+                if(val===String(orig)) return;
+                saveField(id, 'price', val, inp, function(data){
+                    orig=val;
+                    var c=_findById(id);
+                    if(c && data && data.value!=null) c.price=parseFloat(data.value);
+                    if(isFiltered('price') || sortField==='price') updateTable();
+                });
+            }
+            inp.addEventListener('keydown', function(e){
+                if(e.key==='Enter'){ e.preventDefault(); doSave(); inp.blur(); }
+                if(e.key==='Escape'){ inp.value=orig; inp.blur(); }
+                e.stopPropagation();
+            });
+            inp.addEventListener('blur', doSave);
+            inp.addEventListener('click', function(e){ e.stopPropagation(); });
+        });
+        /* "Visible": instant-save (as for products/brands) */
+        csTable.querySelectorAll('.cs-active-cb').forEach(function(cb){
+            cb.addEventListener('click', function(e){ e.stopPropagation(); });
+            cb.addEventListener('change', function(){
+                var id=parseInt(cb.dataset.id,10), checked=cb.checked;
+                saveField(id, 'is_active', checked, null, function(){
+                    var c=_findById(id); if(c) c.is_active=checked;
+                    /* Active filter/sort by status: redraw so that the
+                       row immediately disappears/moves to match the filter.
+                     */
+                    if(F.active!=='all') updateTable();
+                }).then(function(data){ if(!data || !data.ok) cb.checked=!checked; });
+            });
+        });
+        csTable.querySelectorAll('thead th[data-col]').forEach(function(th){
+            /* A second click on the same header closes it; the check is inside
+               openPop (as in products).
+             */
+            th.addEventListener('click', function(){ openPop(th); });
+        });
+        _fitCourseCols();
+        positionPager();
+    }
+    var COL_SORT = {name:'name', price:'price'};
+    function updateHeaderBadges(){
+        csTable.querySelectorAll('thead th[data-col]').forEach(function(th){
+            var col=th.dataset.col;
+            var filtered_col=isFiltered(col);
+            var sorted_col=!!(COL_SORT[col] && sortField===COL_SORT[col]);
+            th.classList.toggle('col-on', filtered_col || sorted_col);
+            var badge=th.querySelector('.th-badge');
+            if(badge) badge.innerHTML=(filtered_col||sorted_col)
+                ? '<svg width="9" height="10" viewBox="0 0 10 11" fill="#374151"><path d="M0 0h10L6.5 5v6h-3V5z"/></svg>'
+                : '';
+        });
+    }
+
+    /* ── Column widths: measurements → px in CSS variables (like _fitProductCols in products) ── */
+    var _csHdr=null, _csFontFam=null;
+    function _csFam(){ if(!_csFontFam) _csFontFam=getComputedStyle(document.body).fontFamily||'sans-serif'; return _csFontFam; }
+    function _csMeasureHdr(){
+        if(_csHdr) return _csHdr;
+        var sp=document.createElement('span');
+        sp.style.cssText='position:absolute;left:-99999px;top:0;visibility:hidden;white-space:nowrap;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;font-size:10px;';
+        sp.style.fontFamily=_csFam();
+        document.body.appendChild(sp);
+        /* text + left padding (12) + reserve for the filter icon (26) */
+        function h(t){ sp.textContent=t; return Math.ceil(sp.offsetWidth)+12+26; }
+        /* "Photo" is not filterable: no reserve for the icon, only 12+12 paddings */
+        function hPlain(t){ sp.textContent=t; return Math.ceil(sp.offsetWidth)+12+12; }
+        _csHdr={ cover:hPlain('Photo'), price:h('Price'), active:h('Visible') };
+        document.body.removeChild(sp);
+        return _csHdr;
+    }
+    function _fitCourseCols(){
+        if(!csTable.tBodies.length) return;
+        var fx=_csMeasureHdr(), st=csTable.style;
+        var host=document.querySelector('#content-main')||csTable.parentElement;
+        var avail=host?host.clientWidth:csTable.getBoundingClientRect().width;
+        /* rect gives visual px (smaller than layout px under body{zoom}), clientWidth/style.width are layout px */
+        var zoom=parseFloat(getComputedStyle(document.body).zoom)||1;
+        /* Floors = filter popup width (200px, as in products). A column narrower than the
+           popup pushes it to the left (clFlipLeft), and the popup visually hangs under the
+           neighboring column; at 200px it sits on the left edge of its own column,
+           flush, like "Price"/"Stock" in products.
+         */
+        var PRICE_MIN=200, ACTIVE_MIN=200;
+        var priceInp=csTable.querySelector('tbody .pv-edit-input');
+        var wPrice=Math.max(fx.price, PRICE_MIN);
+        if(priceInp){ var w=Math.ceil(priceInp.getBoundingClientRect().width/zoom)+20; if(w>wPrice) wPrice=w; }
+        var wAct=Math.max(fx.active, ACTIVE_MIN);
+        var thumb=csTable.querySelector('tbody .cs-cover');
+        var tw=thumb?thumb.getBoundingClientRect().width/zoom:66;
+        var wCover=Math.max(fx.cover, Math.ceil(tw)+24+1);   /* 24 = paddings, +1 = spare */
+        var nameMin=200;                                      /* floor, as in products */
+
+        var fixed = 44 + wCover + Math.ceil(wPrice) + Math.ceil(wAct);
+        st.setProperty('--cw-cover',  wCover+'px');
+        st.setProperty('--cw-price',  Math.ceil(wPrice)+'px');
+        st.setProperty('--cw-active', Math.ceil(wAct)+'px');
+        /* Title is the only flexible column: it takes all the remainder */
+        st.setProperty('--cw-name',   Math.max(nameMin, avail-fixed)+'px');
+    }
+
+    function renderPager(){
+        _saveState();
+        csPager.style.display='';
+        var total = currentFiltered.length;
+        var sizeBlock='<div class="pager-right"><div class="pager-size"><span>Per page:</span>'+
+            '<span class="pg-btn'+(pageSize===25?' pg-active':'')+'" data-size="25">25</span>'+
+            '<span class="pg-btn'+(pageSize===50?' pg-active':'')+'" data-size="50">50</span>'+
+            '<span class="pg-btn'+(pageSize===0 ?' pg-active':'')+'" data-size="0">All</span>'+
+            '</div></div>';
+        /* Few rows: keep the bar visible ("Per page" is always needed),
+           hide ONLY the page navigation (as in products/bundles).
+         */
+        if (total<=25 && pageSize!==0){
+            csPager.innerHTML='<span class="pager-info">'+(total===0?'No records':('1–'+total+' of '+total))+'</span>'+
+                '<div class="pager-nav"></div>'+sizeBlock;
+            _bindPager(); positionPager(); return;
+        }
+        if (pageSize===0){
+            csPager.innerHTML='<span class="pager-info">Showing all '+total+' records</span>'+
+                '<div class="pager-nav"></div>'+sizeBlock;
+            _bindPager(); positionPager(); return;
+        }
+        var bounds=_pageBounds(), pages=bounds.length||1;
+        if (currentPage>pages) currentPage=pages;
+        if (currentPage<1) currentPage=1;
+        var cur=bounds[currentPage-1]||{start:0,end:0};
+        var from=total===0?0:cur.start+1, to=cur.end;
+        var SVG_PREV='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,1 1,5 5,9"/></svg>';
+        var SVG_NEXT='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 1,9"/></svg>';
+        var nav = pgBtn(SVG_PREV, currentPage-1, false, currentPage===1, true);
+        var pNums=[];
+        if (pages<=7){ for(var i=1;i<=pages;i++) pNums.push(i); }
+        else {
+            pNums.push(1);
+            if (currentPage>3) pNums.push('…');
+            for(var j=Math.max(2,currentPage-1); j<=Math.min(pages-1,currentPage+1); j++) pNums.push(j);
+            if (currentPage<pages-2) pNums.push('…');
+            pNums.push(pages);
+        }
+        pNums.forEach(function(p){
+            if (p==='…') nav += '<span class="pg-dots">…</span>';
+            else nav += pgBtn(p, p, p===currentPage, false, false);
+        });
+        nav += pgBtn(SVG_NEXT, currentPage+1, false, currentPage===pages, true);
+        csPager.innerHTML =
+            '<span class="pager-info">'+from+'–'+to+' of '+total+'</span>'+
+            '<div class="pager-nav">'+nav+'</div>'+sizeBlock;
+        _bindPager(); positionPager();
+    }
+    function _bindPager(){
+        csPager.querySelectorAll('.pg-btn[data-size]').forEach(function(b){
+            b.addEventListener('click', function(){ pageSize=parseInt(b.dataset.size,10); if(isNaN(pageSize)) pageSize=25; currentPage=1; renderTable(); renderPager(); });
+        });
+        csPager.querySelectorAll('.pg-btn[data-page]').forEach(function(b){
+            b.addEventListener('click', function(){ currentPage=parseInt(b.dataset.page,10); renderTable(); renderPager(); });
+        });
+    }
+    function pgBtn(label, page, active, disabled, arrow){
+        var cls = 'pg-btn'+(active?' pg-active':'')+(disabled?' pg-disabled':'')+(arrow?' pg-arrow':'');
+        return '<span class="'+cls+'" data-page="'+page+'">'+label+'</span>';
+    }
+
+    function positionPager(){
+        if(!csPager || !csTable) return;
+        /* Stretch the pager from the content edge (after the sidebar) to right:0, as in products. */
+        var content=document.querySelector('#content-main')||document.body;
+        var l=content.getBoundingClientRect().left;
+        csPager.style.left=(window.clX ? window.clX(l) : l)+'px';
+        csTable.style.marginBottom='0';
+        /* Remove the last row's bottom border ONLY when the row is physically flush
+           with the pager, otherwise the line doubles with the pager's border.
+         */
+        var lr=csTable.querySelector('tbody tr:last-child');
+        if(lr){
+            var rb=lr.getBoundingClientRect().bottom, pt=csPager.getBoundingClientRect().top;
+            csTable.classList.toggle('tbl-touches-pager',
+                getComputedStyle(csPager).display !== 'none' && rb >= pt - 1);
+        }
+        if(window.padChangelistTable) window.padChangelistTable(csTable);
+        if(csTable.__padFill) csTable.__padFill.style.marginBottom=(csPager.offsetHeight||0)+'px';
+    }
+
+    /* The filter popup is identical to products (product/change_list openPop):
+       width fixed per column (in products popWidths={dates:240,cat:320}; there are no such
+       columns here, so all are 200), position via the shared clFlipLeft/clFlipTop,
+       which also keep the window within the screen.
+     */
+    var POP_WIDTHS = {};
+    function openPop(th){
+        if(popOwner===th && pop.classList.contains('open')){ closePop(); return; }
+        if(popOwner) popOwner.classList.remove('col-open');
+        popOwner = th;
+        pop.innerHTML = '';
+
+        if (th.dataset.col === 'name')   buildNamePop();
+        if (th.dataset.col === 'price')  buildRangePop('price', 'priceMin', 'priceMax', 'Cheaper ⟶ pricier', 'Pricier ⟶ cheaper', true);
+        if (th.dataset.col === 'cover')  buildCoverPop();
+        if (th.dataset.col === 'active') buildActivePop();
+
+        var resetBar = document.createElement('button'); resetBar.type='button';
+        resetBar.textContent='Reset filter';
+        resetBar.style.cssText='display:block;width:100%;padding:10px;border:none;border-bottom:1px solid #e5e7eb;background:none;color:#dc2626;font-size:13px;font-weight:500;cursor:pointer;text-align:left;';
+        resetBar.addEventListener('click', function(){ resetCol(th.dataset.col); closePop(); });
+        resetBar.addEventListener('mouseenter', function(){ this.style.background='#fef2f2'; });
+        resetBar.addEventListener('mouseleave', function(){ this.style.background='none'; });
+        pop.insertBefore(resetBar, pop.firstChild);
+
+        pop.classList.add('open');
+        var r = th.getBoundingClientRect();
+        var pw = POP_WIDTHS[th.dataset.col] || 200;
+        pop.style.width = pw + 'px';
+        pop.style.left = (window.clFlipLeft ? window.clFlipLeft(r, pw, 8) : Math.max(8, Math.min(r.left, window.innerWidth - pw - 8))) + 'px';
+        pop.style.top  = (window.clFlipTop ? window.clFlipTop(r, pop.offsetHeight, 0) : (r.bottom)) + 'px';
+        th.classList.add('col-open');
+    }
+    function closePop(){
+        pop.classList.remove('open');
+        if (popOwner) { popOwner.classList.remove('col-open'); popOwner=null; }
+    }
+    document.addEventListener('click', function(e){
+        if (!pop.contains(e.target) && !e.target.closest('th[data-col]')) closePop();
+    });
+    document.addEventListener('keydown', function(e){
+        if (e.key === 'Escape') { lightbox.classList.remove('open'); closePop(); }
+    });
+
+    function buildNamePop(){
+        sortRows('name', 'A ⟶ Z', 'Z ⟶ A');
+        var b = popBody();
+        var inp = document.createElement('input');
+        inp.type='text'; inp.className='fp-search'; inp.placeholder='Search...';
+        inp.value = F.nameQ;
+        inp.addEventListener('input', function(){ F.nameQ = inp.value; applyFilters(); });
+        /* CRM search boxes: on focus, show the results again if the text remained. */
+        inp.addEventListener('focus', function(){ if(inp.value) applyFilters(); });
+        b.appendChild(inp);
+        return;   /* below was a list of categories as checkboxes (removed) */
+        /* Categories */
+        var divider = document.createElement('div'); divider.className='fp-divider'; divider.style.margin='0 -10px';
+        b.appendChild(divider);
+        var list = document.createElement('div'); list.className='fp-list';
+        allCats.forEach(function(c){
+            var row = document.createElement('div'); row.className='fp-item';
+            var lbl = document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+            var cb = document.createElement('input'); cb.type='checkbox';
+            cb.checked = F.cats.indexOf(c.id) !== -1;
+            cb.addEventListener('change', function(){
+                var i = F.cats.indexOf(c.id);
+                if (cb.checked && i===-1) F.cats.push(c.id);
+                else if (!cb.checked && i!==-1) F.cats.splice(i,1);
+                applyFilters();
+            });
+            lbl.appendChild(cb); lbl.appendChild(document.createTextNode(c.name));
+            row.appendChild(lbl); list.appendChild(row);
+        });
+        b.appendChild(list);
+    }
+    function buildRangePop(sortKey, minKey, maxKey, asc, desc, isFloat){
+        sortRows(sortKey, asc, desc);
+        var b = popBody();
+        var range = document.createElement('div'); range.className='fp-range';
+        var inMin = document.createElement('input'); inMin.type='number'; inMin.placeholder='from';
+        if (isFloat) inMin.step = '0.01';
+        if (F[minKey]!==null) inMin.value=F[minKey];
+        inMin.addEventListener('input', function(){
+            F[minKey] = inMin.value === '' ? null : (isFloat ? parseFloat(inMin.value) : parseInt(inMin.value));
+            applyFilters();
+        });
+        var sep = document.createElement('span'); sep.className='fp-range-sep'; sep.textContent='—';
+        var inMax = document.createElement('input'); inMax.type='number'; inMax.placeholder='to';
+        if (isFloat) inMax.step = '0.01';
+        if (F[maxKey]!==null) inMax.value=F[maxKey];
+        inMax.addEventListener('input', function(){
+            F[maxKey] = inMax.value === '' ? null : (isFloat ? parseFloat(inMax.value) : parseInt(inMax.value));
+            applyFilters();
+        });
+        range.appendChild(inMin); range.appendChild(sep); range.appendChild(inMax);
+        b.appendChild(range);
+    }
+    function buildCoverPop(){
+        var b = popBody();
+        [['all','All'],['yes','With photo'],['no','No photo']].forEach(function(o){
+            var row = document.createElement('div'); row.className='fp-item';
+            var lbl = document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+            var rb = document.createElement('input'); rb.type='radio'; rb.name='cs-cover'; rb.value=o[0];
+            rb.checked = (F.cover === o[0]);
+            rb.addEventListener('change', function(){ F.cover=rb.value; applyFilters(); });
+            lbl.appendChild(rb); lbl.appendChild(document.createTextNode(o[1]));
+            row.appendChild(lbl); b.appendChild(row);
+        });
+    }
+    function buildActivePop(){
+        var b = popBody();
+        [['all','All'],['yes','Active'],['no','Inactive']].forEach(function(o){
+            var row = document.createElement('div'); row.className='fp-item';
+            var lbl = document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+            var rb = document.createElement('input'); rb.type='radio'; rb.name='cs-act'; rb.value=o[0];
+            rb.checked = (F.active === o[0]);
+            rb.addEventListener('change', function(){ F.active=rb.value; applyFilters(); });
+            lbl.appendChild(rb); lbl.appendChild(document.createTextNode(o[1]));
+            row.appendChild(lbl); b.appendChild(row);
+        });
+    }
+    function popBody(){ var d=document.createElement('div'); d.className='fp-pop-body'; pop.appendChild(d); return d; }
+    function sortRows(field, asc, desc){
+        [[asc,'asc'],[desc,'desc']].forEach(function(p){
+            var btn = document.createElement('button'); btn.type='button';
+            btn.className='fp-sort-row'+(sortField===field&&sortDir===p[1]?' on':'');
+            btn.innerHTML='<span>'+p[0]+'</span><span class="fp-sort-arr">›</span>';
+            btn.addEventListener('click', function(){
+                if (sortField===field && sortDir===p[1]) { sortField=null; sortDir='asc'; }
+                else { sortField=field; sortDir=p[1]; }
+                applyFilters(); closePop();
+            });
+            pop.appendChild(btn);
+        });
+    }
+    function escapeHtml(s){
+        return String(s).replace(/[&<>"']/g, function(c){
+            return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+        });
+    }
+
+    /* ── Row selection: per-page select-all + cross-page + counter + "Clear selection" ── */
+    function _syncCbAll(){
+        var box=document.getElementById('cs-cb-all'); if(!box) return;
+        var ids=_pageCsIds();
+        var picked=ids.filter(function(id){ return SEL.has(id); }).length;
+        box.indeterminate=(picked>0 && picked<ids.length);
+        box.checked=(ids.length>0 && picked===ids.length);
+    }
+    function _updateCsCounter(){
+        var counter=document.querySelector('.cl-counter'); if(!counter) return;
+        var total=Math.max(currentFiltered.length, SEL.size);
+        counter.textContent='Selected: '+SEL.size+' of '+total;
+        var ids=_pageCsIds();
+        var onPage=ids.filter(function(id){ return SEL.has(id); }).length;
+        var cb=document.getElementById('cl-clear-sel');
+        if(cb){ if(SEL.size-onPage>0) cb.style.removeProperty('display'); else cb.style.setProperty('display','none','important'); }
+    }
+    csTable.addEventListener('change', function(e){
+        var t=e.target;
+        if(t.id==='cs-cb-all'){
+            var ids=_pageCsIds();
+            var allOn=ids.length>0 && ids.every(function(id){ return SEL.has(id); });
+            ids.forEach(function(id){ if(allOn) SEL.delete(id); else SEL.add(id); });
+            renderTable(); _updateCsCounter();
+            return;
+        }
+        if(t.classList && t.classList.contains('cs-row-cb')){
+            if(t.checked) SEL.add(String(t.value)); else SEL.delete(String(t.value));
+            renderTable(); _updateCsCounter();
+        }
+    });
+    function _installCsCounter(){
+        var counter=document.querySelector('.cl-counter'); if(!counter) return;
+        if(!document.getElementById('cl-clear-sel')){
+            var clearBtn=document.createElement('a');
+            clearBtn.href='#'; clearBtn.id='cl-clear-sel'; clearBtn.className='cl-top-btn';
+            clearBtn.textContent='Clear selection'; clearBtn.style.marginLeft='10px';
+            clearBtn.style.setProperty('display','none','important');
+            clearBtn.addEventListener('click',function(e){ e.preventDefault();
+                var ids=new Set(_pageCsIds());
+                Array.from(SEL).forEach(function(id){ if(!ids.has(String(id))) SEL.delete(id); });
+                renderTable(); _updateCsCounter();
+            });
+            counter.insertAdjacentElement('afterend', clearBtn);
+        }
+        window._updateCounter=_updateCsCounter; _updateCsCounter();
+        /* cl-bar is assembled in base_site.html on DOMContentLoaded; only here
+           is .submit-row.cl-bar guaranteed to exist, so we (re)draw the "Reset
+           filters" button taking the restored filter state into account.
+         */
+        _renderResetBtn();
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _installCsCounter);
+    else _installCsCounter();
+
+    updateTable();
+    window.addEventListener('resize', function(){ _fitCourseCols(); positionPager(); });
+    if(window.ResizeObserver) new ResizeObserver(function(){ _fitCourseCols(); positionPager(); }).observe(document.querySelector('#content-main')||document.body);
+    var _csNav=document.getElementById('nav-sidebar');
+    if(_csNav) _csNav.addEventListener('transitionend', positionPager);
+})();
+</script>
+{% endblock %}

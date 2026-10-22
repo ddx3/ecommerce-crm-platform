@@ -1,0 +1,1478 @@
+{% extends "admin/change_list.html" %}
+{% load i18n %}
+
+{% block extrahead %}{{ block.super }}
+<script>document.documentElement.classList.add('ds-loading');</script>
+<style>
+/* Hide the standard Django changelist + our content until JS builds the table + cl-bar. */
+#result_list, .results, #toolbar, #changelist-form .actions, #changelist-search { display: none !important; }
+html.ds-loading #content-main { visibility: hidden; }
+</style>
+<script>
+/* After DOMContentLoaded (when base_site.html has already created .cl-bar) and one paint,
+   clear the flag and the content appears all at once.
+ */
+document.addEventListener('DOMContentLoaded', function(){
+  requestAnimationFrame(function(){
+    document.documentElement.classList.remove('ds-loading');
+  });
+});
+</script>
+{% endblock %}
+
+{% block object-tools %}
+<ul class="object-tools">
+  <li>
+    <form method="post" action="import/" style="display:inline">
+      {% csrf_token %}
+      <button type="submit"
+        style="height:28px;padding:0 14px;background:#1f2937;color:#fff;border:none;border-radius:4px;font-size:13px;font-weight:500;cursor:pointer;">
+        Import from bradas.ua
+      </button>
+    </form>
+  </li>
+</ul>
+{% endblock %}
+
+{% block result_list %}
+{{ block.super }}
+<style>
+#result_list { display: none !important; }
+#toolbar { display: none !important; }
+.results { display: none !important; }
+
+/* ── Table ── */
+#ds-table { table-layout: fixed; width: 100%; border-collapse: collapse !important; border-top: none !important; }
+#ds-table td, #ds-table th { border-top: none !important; }
+#ds-table thead th { border-bottom: 1px solid #e5e7eb !important; }
+#ds-table thead tr th {
+    background: #f9fafb !important; border-bottom: 1px solid #e5e7eb !important;
+    border-left: 1px solid #e5e7eb !important; padding: 10px 12px !important;
+    font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important;
+    letter-spacing: 0.4px !important; color: #6b7280 !important; white-space: nowrap !important;
+    vertical-align: middle !important; text-align: left !important;
+}
+#ds-table thead tr th:first-child { border-left: none !important; }
+#ds-table thead tr th.col-cb { padding: 0 0 0 14px !important; width: 44px !important; }
+
+th[data-col] { cursor: pointer !important; user-select: none !important; position: relative !important; }
+#ds-table thead tr th[data-col] { padding-right: 26px !important; }
+#ds-table thead tr th[data-col]:hover, #ds-table thead tr th[data-col].col-open { color: #1f2937 !important; }
+#ds-table thead tr th[data-col].col-on { background: #d1d5db !important; color: #1f2937 !important; }
+.th-badge { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; pointer-events: none; }
+
+#ds-table tbody tr { border-bottom: 1px solid #e5e7eb !important; height: 56px; }
+#ds-table.tbl-touches-pager tbody tr:last-child { border-bottom: none !important; }
+#ds-table tbody tr.row1 { background: #fff !important; }
+#ds-table tbody tr.row2 { background: #f9fafb !important; }
+#ds-table tbody tr:hover { background: #eef0f3 !important; }
+#ds-table tbody tr.ds-empty-row, #ds-table tbody tr.ds-empty-row:hover { background: #fff !important; cursor: default !important; border-bottom: 1px solid #e5e7eb !important; }
+#ds-table tbody tr.ds-empty-row td { border-bottom: 1px solid #e5e7eb !important; vertical-align: middle !important; text-align: center !important; padding: 0 !important; color: #9ca3af !important; font-size: 13px !important; }
+table.tbl-touches-pager tbody tr.ds-empty-row, table.tbl-touches-pager tbody tr.ds-empty-row td { border-bottom: 1px solid #e5e7eb !important; }
+#ds-table tbody td, #ds-table tbody th {
+    padding: 8px 12px !important; font-size: 13px !important; vertical-align: middle !important;
+    border-left: 1px solid #e5e7eb !important; border-bottom: none !important;
+    font-weight: 400 !important; color: #374151 !important; text-align: left !important;
+    overflow: hidden !important; height: 56px !important; box-sizing: border-box !important;
+}
+#ds-table tbody td:first-child, #ds-table tbody th:first-child { border-left: none !important; }
+#ds-table td, #ds-table th { white-space: nowrap; }
+#ds-table .col-name { min-width: 0; }
+/* Name - up to 3 lines; the cell grows with its content (the row is taller if needed). */
+/* width:fit-content - the span is as wide as the text (not the whole cell), so the hover underline
+   (.copy-on-click) appears only on the text itself, not across the whole cell.
+ */
+#ds-table .col-name a, #ds-table .col-name .col-name-val { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; word-break: break-word; line-height: 1.35; width: fit-content; max-width: 100%; }
+#ds-table tbody th.col-name { height: auto !important; overflow: visible !important; }
+#ds-table .col-cb { width: 44px !important; min-width: 44px !important; max-width: 44px !important; padding: 0 0 0 14px !important; }
+#ds-table .col-active { padding: 6px 12px !important; }
+#ds-table .col-cat { min-width: 0; }
+#ds-table .col-cat .cat-wrap { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; max-height: 38px; white-space: normal; }
+/* Dates column — as wide as the dates themselves (does not stretch). */
+#ds-table .col-dates { width: 1%; white-space: nowrap; }
+#ds-table .col-labels { min-width: 110px; max-width: 200px; }
+#ds-table .col-labels .app-label { margin: 1px 2px 1px 0; }
+.pv-cat-tag { display: inline-block; font-size: 13px; background: transparent; border: 1px solid #e5e7eb; border-radius: 3px; padding: 1px 5px; margin: 1px 1px 0 0; color: #6b7280; white-space: nowrap; cursor: default; }
+.pv-active-cb { cursor: pointer; width: 16px; height: 16px; accent-color: #374151; }
+
+/* Lightbox */
+#pv-lightbox { display: none; position: fixed; inset: 0; z-index: 999999; background: rgba(0,0,0,0.82); align-items: center; justify-content: center; cursor: zoom-out; }
+#pv-lightbox.open { display: flex; }
+#pv-lightbox img { max-width: 90vw; max-height: 90vh; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+
+/* Photos */
+#ds-table .col-photos { width: 1%; }
+#ds-table thead tr th[data-col="photos"] { padding-right: 12px !important; }
+
+/* ── Column widths (table-layout:fixed) - px via JS (Safari-safe, no calc%) ── */
+#ds-table thead th[data-col="photos"]    { width: var(--dw-photos, 70px) !important; }
+#ds-table thead th[data-col="sku"]       { width: var(--dw-sku, 90px) !important; }
+#ds-table thead th[data-col="dates"]     { width: var(--dw-dates, 175px) !important; }
+#ds-table thead th[data-col="is_active"] { width: var(--dw-active, 76px) !important; }
+#ds-table thead th[data-col="price"]     { width: var(--dw-price, 90px) !important; }
+#ds-table thead th[data-col="stock"]     { width: var(--dw-stock, 90px) !important; }
+#ds-table thead th[data-col="labels"]    { width: var(--dw-labels, 130px) !important; }
+#ds-table td.col-dates > div > div { white-space: nowrap !important; }
+/* Name + Category - flexible (name 2/3, category 1/3), JS computes px. */
+#ds-table thead th[data-col="cat"]  { width: var(--dw-cat, 200px) !important; }
+#ds-table thead th[data-col="name"] { width: var(--dw-name, 300px) !important; }
+/* Compact (narrow screen): only 1 photo. */
+#ds-table.ds-compact td.col-photos .pv-photo-wrap:not(:first-child) { display: none !important; }
+/* Hiding secondary columns on narrow screens (class set by JS): date → labels. */
+#ds-table.ds-hide-dates  th[data-col="dates"],  #ds-table.ds-hide-dates  td.col-dates  { display: none !important; }
+#ds-table.ds-hide-labels th[data-col="labels"], #ds-table.ds-hide-labels td.col-labels { display: none !important; }
+.pv-photos { display: flex; gap: 3px; }
+.pv-photo-wrap { position: relative; display: inline-block; flex-shrink: 0; }
+.pv-photo-wrap img.pv-thumb { width: 38px; height: 38px; object-fit: cover; border-radius: 4px; border: 1px solid #d1d5db; background: #f3f4f6; display: block; transition: filter .15s; }
+.pv-photo-wrap:hover img.pv-thumb { filter: brightness(0.82); }
+/* .pv-photo-preview — styles moved to base_site.html */
+
+/* ── Popover ── */
+#flt-pop {
+    display: none; position: fixed; z-index: 9999; background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0 0 6px 6px;
+    box-shadow: 0 6px 16px rgba(0,0,0,.18);
+    overflow: hidden;
+    width: 200px;
+}
+#flt-pop.open { display: block; }
+
+.fp-sort-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px; border-bottom: 1px solid #ececec;
+    background: #fff; color: #374151; font-size: 13px;
+    cursor: pointer; width: 100%; text-align: left;
+    border-left: none; border-right: none; border-top: none;
+}
+.fp-sort-row:last-of-type { border-bottom: 1px solid #e5e7eb; }
+.fp-sort-row:hover { background: #f5f5f5; }
+.fp-sort-row.on { background: #e5e7eb; color: #374151; }
+.fp-sort-arr { color: #d1d5db; font-size: 18px; line-height: 1; flex-shrink: 0; display: inline-flex; align-items: center; }
+.fp-sort-row.on .fp-sort-arr { color: #374151; }
+
+.fp-pop-body { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+.fp-filter-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #9ca3af; margin-bottom: 6px; }
+.fp-pills { display: flex; gap: 3px; flex-wrap: wrap; }
+.fp-pill { padding: 3px 8px; border: 1px solid #d1d5db; border-radius: 20px; font-size: 11px; color: #6b7280; cursor: pointer; background: #fff; user-select: none; }
+.fp-pill:hover { background: #f9fafb; color: #374151; }
+.fp-pill.on { background: #1f2937; border-color: #1f2937; color: #fff; }
+.fp-search { width: 100%; box-sizing: border-box; height: 28px; padding: 0 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; outline: none; margin-bottom: 0; }
+.fp-search:focus { border-color: #9ca3af; }
+.fp-list { display: flex; flex-direction: column; gap: 10px; max-height: 140px; overflow-y: auto; margin: 0 -10px -10px -10px; padding: 10px; border-radius: 0 0 6px 6px; border-top: 1px solid #e5e7eb; }
+.fp-pop-body > .fp-list:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+.fp-item { display: flex; align-items: center; gap: 6px; padding: 0; font-size: 13px; line-height: 1; color: #374151; border-radius: 3px; position: relative; }
+/* 2px lines, same color as the checkbox (#d1d5db). */
+.fp-item .pick-vline { position: absolute; top: -5px; bottom: -5px; width: 2px; background: #d1d5db; pointer-events: none; z-index: 0; }
+.fp-item .pick-vline.is-first { top: -10px; }
+.fp-item .pick-vline.is-last  { bottom: 50%; }
+.fp-item .pick-hline { position: absolute; top: 50%; height: 2px; background: #d1d5db; pointer-events: none; z-index: 0; transform: translateY(-1px); }
+.fp-item .pick-elbow {
+    position: absolute;
+    border-left: 2px solid #d1d5db;
+    border-bottom: 2px solid #d1d5db;
+    border-bottom-left-radius: 5px;
+    pointer-events: none; z-index: 0;
+}
+.fp-item > label { position: relative; z-index: 1; }
+.fp-item input[type=checkbox],
+.fp-item input[type=radio] {
+    appearance: none; -webkit-appearance: none;
+    width: 14px; height: 14px; flex-shrink: 0;
+    border: 1.5px solid #d1d5db;
+    background: #fff; cursor: pointer; position: relative;
+    margin: 0;
+    transition: background .12s, border-color .12s;
+}
+.fp-item input[type=checkbox] { border-radius: 3px; }
+.fp-item input[type=radio]    { border-radius: 50%; }
+.fp-item input[type=checkbox]:hover,
+.fp-item input[type=radio]:hover { border-color: #9ca3af; }
+.fp-item input[type=checkbox]:checked,
+.fp-item input[type=radio]:checked { background: #1f2937; border-color: #1f2937; }
+.fp-item input[type=checkbox]:checked::after,
+.fp-item input[type=radio]:checked::after {
+    content: ''; position: absolute;
+    left: 3px; top: 0px; width: 4px; height: 8px;
+    border: 1.5px solid #fff; border-top: none; border-left: none;
+    transform: rotate(45deg);
+}
+.fp-range { display: flex; align-items: center; gap: 4px; }
+.fp-pop-body:has(> .fp-range:last-child) { padding-bottom: 8px; }
+.fp-range input { flex: 1; min-width: 0; width: 0; height: 28px; padding: 0 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; outline: none; box-sizing: border-box; }
+.fp-range input:focus { border-color: #9ca3af; }
+.fp-range-sep { font-size: 0; color: transparent; width: 8px; height: 1px; background: #9ca3af; align-self: center; flex-shrink: 0; margin-top: -1px; }
+.fp-divider { height: 1px; background: #e5e7eb; margin: 8px 0; }
+.fp-clear { display: block; margin-top: 8px; padding: 0; border: none; background: none; font-size: 11px; color: #9ca3af; cursor: pointer; text-align: left; }
+.fp-clear:hover { color: #dc2626; }
+
+/* ── Calendar ── */
+.cal-nav { display:flex; align-items:center; justify-content:space-between; padding:8px 10px 4px; }
+.cal-nav-btn { background:#f9fafb; border:1px solid #d1d5db; border-radius:4px; width:26px; height:26px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; color:#374151; font-size:16px; line-height:1; padding:0; flex-shrink:0; transition:background .1s,border-color .1s; }
+.cal-nav-btn:hover { background:#e5e7eb; border-color:#9ca3af; color:#111; }
+.cal-nav-btn:active { background:#d1d5db; }
+.cal-title { font-size:12px; font-weight:600; color:#374151; text-align:center; flex:1; }
+.cal-grid { display:grid; grid-template-columns:repeat(7,1fr); padding:0 6px 0; }
+.cal-dow { font-size:10px; color:#9ca3af; text-align:center; padding:2px 0 5px; font-weight:600; }
+.cal-day { font-size:12px; text-align:center; padding:5px 0; cursor:pointer; color:#374151; user-select:none; border-radius:4px; transition:background .1s; }
+.cal-day.empty { cursor:default; pointer-events:none; }
+.cal-day:not(.empty):not(.sel-start):not(.sel-end):hover { background:#d1d5db; }
+.cal-day.today { font-weight:700; color:#111; }
+.cal-day.sel-start, .cal-day.sel-end { background:#1f2937; color:#fff; border-radius:4px; }
+.cal-day.sel-start:hover, .cal-day.sel-end:hover { background:#374151; }
+.cal-day.in-range { background:#e5e7eb; border-radius:0; }
+.cal-day.in-range:hover { background:#d1d5db; }
+.cal-day.sel-start.has-range { border-radius:4px 0 0 4px; }
+.cal-day.sel-end.has-range   { border-radius:0 4px 4px 0; }
+.cal-reset { display:block; text-align:center; padding:0 10px 10px; font-size:11px; color:#9ca3af; cursor:pointer; background:none; border:none; width:100%; }
+.cal-reset:hover { color:#dc2626; }
+
+/* ── Pager ── */
+#ds-pager {
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    padding: 10px 16px; font-size: 13px; color: #6b7280;
+    border-top: 1px solid #e5e7eb;
+    position: fixed; bottom: 0; right: 0;
+    background: #fff; z-index: 1000;
+}
+#ds-pager .pager-info { font-size: 12px; color: #9ca3af; }
+#ds-pager .pager-nav { display: flex; align-items: center; gap: 4px; justify-self: center; }
+#ds-pager .pg-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; padding: 0; border: 1px solid #d1d5db;
+    border-radius: 4px; background: #fff; color: #374151;
+    font-size: 13px; cursor: pointer; line-height: 1;
+    user-select: none; text-decoration: none !important; box-sizing: border-box; flex-shrink: 0;
+}
+#ds-pager .pg-btn:hover { background: #f3f4f6; border-color: #d1d5db; }
+#ds-pager .pg-btn.pg-active { background: #1f2937; color: #fff; border-color: #1f2937; }
+#ds-pager .pg-btn.pg-disabled { opacity: 0.35; pointer-events: none; }
+#ds-pager .pg-btn.pg-arrow { color: #6b7280; }
+#ds-pager .pager-nav .pg-dots { padding: 0 2px; color: #9ca3af; font-size: 12px; line-height: 28px; }
+#ds-pager .pager-right { display: flex; align-items: center; gap: 0; justify-self: end; }
+#ds-pager .pager-size { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+#ds-pager .pager-size > span:first-child { color: #9ca3af; }
+#ds-pager .pager-size .pg-btn { width: auto; min-width: 36px; padding: 0 8px; }
+#ds-pager .pager-group { margin-left: 12px; padding-left: 12px; border-left: 1px solid #e5e7eb; }
+#ds-pager .pager-group .pg-btn { width: auto; padding: 0 10px; }
+#ds-table tbody tr.ds-pinned, #ds-table tbody tr.ds-pinned:hover { background: #eff6ff !important; }
+#ds-table tbody tr.ds-pinned-first td, #ds-table tbody tr.ds-pinned-first th { border-top: 2px solid #d1d5db !important; }
+#ds-table tbody tr.ds-pinned-last td, #ds-table tbody tr.ds-pinned-last th { border-bottom: 2px solid #d1d5db !important; }
+#content-main, #content { padding-bottom: 0 !important; }
+
+/* ── Group header row (group with ≥2 variants) ── */
+/* Variants of a grouped product (≥2) - gray stripe on the left (the photo isn't shifted).
+   We don't touch the header row, only remove the bold outline above it.
+ */
+#ds-table tbody tr.pv-group-header td, #ds-table tbody tr.pv-group-header th { border-top: none !important; }
+#ds-table tbody tr.pv-group-child > td:first-child,
+#ds-table tbody tr.pv-group-child > th:first-child { box-shadow: inset 3px 0 0 #9ca3af; }
+
+#ds-table tbody tr.pv-group-header,
+#ds-table tbody tr.pv-group-header:hover { background: #f3f4f6 !important; cursor: pointer !important; height: 30px !important; }
+#ds-table tbody tr.pv-group-header:hover { background: #eceef1 !important; }
+#ds-table tbody tr.pv-group-header td {
+    height: 30px !important; padding: 4px 12px !important;
+    border-bottom: 1px solid #e5e7eb !important; vertical-align: middle !important;
+}
+#ds-table tbody tr.pv-group-header td.col-cb { padding: 0 0 0 14px !important; }
+#ds-table tbody tr.pv-group-collapsed .pv-group-toggle { transform: rotate(-90deg); }
+.pv-group-name-inner { display: flex; align-items: center; min-width: 0; }
+.pv-group-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    margin-right: 8px; flex-shrink: 0; transition: transform .12s;
+}
+.pv-group-toggle svg { display: block; }
+.pv-group-title {
+    font-weight: 600; font-size: 13px; color: #1f2937;
+    flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The counter = "Display" toggle: a click enables/disables is_active for all variants. */
+.pv-group-count {
+    flex-shrink: 0; margin-left: 6px; color: #9ca3af; font-size: 13px; font-weight: 500;
+    cursor: pointer; user-select: none;
+}
+.pv-group-count:hover { color: #4b5563; }
+.pv-group-count.pv-group-count--off { color: #9ca3af; text-decoration: line-through; }
+.pv-group-count.pv-group-count--off:hover { color: #6b7280; }
+</style>
+
+<div id="pv-lightbox"><img id="pv-lightbox-img" alt=""></div>
+<div id="flt-pop"></div>
+<table id="ds-table"></table>
+<div id="ds-pager"></div>
+
+<script>
+(function() {
+    var allData = {{ ds_variants_json|safe }};
+    var catsTree = {{ ds_cats_tree_json|safe }};
+    var allLabels = {{ ds_labels_json|safe }};
+
+    var F = {nameQ:'',skuQ:'',photos:'all',cats:[],labels:[],priceMin:null,priceMax:null,stockOnly:false,stockNone:false,stockMode:'all',stockMin:null,stockMax:null,dateMin:null,dateMax:null,dateMinU:null,dateMaxU:null,status:'all',kinds:[]};
+    function toCmpDate(str){ var m=str&&str.match(/^(\d{2})\.(\d{2})\.(\d{4})/); return m?m[3]+'-'+m[2]+'-'+m[1]:null; }
+    var sortField=null, sortDir='asc';
+    var currentPage=1, pageSize=25, currentFiltered=[];
+    var groupByProduct=false;
+    /* Collapsed groups (keys = product_id) - variant rows are hidden. */
+    var collapsedGroups=new Set();
+    /* Persistent selection across client-side pagination (row ids as strings). */
+    var SEL = new Set();
+
+    /* ── Persist filter / sort / pagination state across page loads ──
+       Lives in localStorage so when the user returns from a product change-form
+       (Save / Exit / browser-back), the same view is restored.
+     */
+    var STATE_KEY = 'dropshipping_list_state_v1';
+    function _saveState(){
+        try {
+            localStorage.setItem(STATE_KEY, JSON.stringify({
+                F: F, sortField: sortField, sortDir: sortDir,
+                groupByProduct: groupByProduct,
+                collapsedGroups: Array.from(collapsedGroups),
+                currentPage: currentPage, pageSize: pageSize, SEL: Array.from(SEL),
+            }));
+        } catch (e) {}
+    }
+    function _loadState(){
+        try {
+            var raw = localStorage.getItem(STATE_KEY);
+            if (!raw) return;
+            var s = JSON.parse(raw);
+            if (s.F) Object.assign(F, s.F);
+            if (typeof s.sortField    !== 'undefined') sortField    = s.sortField;
+            if (typeof s.sortDir      !== 'undefined') sortDir      = s.sortDir;
+            if (typeof s.groupByProduct !== 'undefined') groupByProduct = !!s.groupByProduct;
+            if (Array.isArray(s.collapsedGroups)) collapsedGroups = new Set(s.collapsedGroups);
+            if (typeof s.currentPage  !== 'undefined') currentPage  = s.currentPage;
+            if (typeof s.pageSize     !== 'undefined') pageSize     = s.pageSize;
+            /* Restore the cross-page selection, dropping ids that are no longer in the data. */
+            if (Array.isArray(s.SEL)) {
+                var exists={}; allData.forEach(function(v){ exists[String(v.id)]=1; });
+                s.SEL.forEach(function(id){ if(exists[String(id)]) SEL.add(String(id)); });
+            }
+        } catch (e) {}
+    }
+    _loadState();
+
+    function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+    function getCsrf(){var el=document.querySelector('[name=csrfmiddlewaretoken]');return el?el.value:'';}
+
+    function expandCats(names){
+        var nameSet={}, idSet={};
+        names.forEach(function(n){ nameSet[n]=1; });
+        catsTree.forEach(function(c){ if(nameSet[c.name]) idSet[c.id]=1; });
+        var changed=true;
+        while(changed){
+            changed=false;
+            catsTree.forEach(function(c){
+                if(!nameSet[c.name]&&c.parent_id&&idSet[c.parent_id]){
+                    nameSet[c.name]=1; idSet[c.id]=1; changed=true;
+                }
+            });
+        }
+        return Object.keys(nameSet);
+    }
+    function applyFilters(data){
+        var expandedCats=F.cats.length?expandCats(F.cats):[];
+        return data.filter(function(v){
+            if(F.nameQ && (v.name||'').toLowerCase().indexOf(F.nameQ.toLowerCase())===-1) return false;
+            if(F.skuQ  && (v.sku||'').indexOf(F.skuQ)===-1) return false;
+            if(F.photos==='with'    && !(v.photos&&v.photos.length)) return false;
+            if(F.photos==='without' &&  (v.photos&&v.photos.length)) return false;
+            if(F.cats.length && !(v.categories||[]).some(function(c){return expandedCats.indexOf(c)!==-1;})) return false;
+            if(F.labels.length && !(v.labels||[]).some(function(l){return F.labels.indexOf(l.name)!==-1;})) return false;
+            var price=parseFloat(v.price)||0;
+            if(F.priceMin!==null && price<F.priceMin) return false;
+            if(F.priceMax!==null && price>F.priceMax) return false;
+            var stock=v.stock!=null?parseInt(v.stock):0;
+            if(F.stockOnly && stock<=0) return false;
+            if(F.stockNone && stock>0) return false;
+            if(F.stockMode==='manual' && !v.stock_manual) return false;
+            if(F.stockMode==='auto'   &&  v.stock_manual) return false;
+            if(F.stockMin!==null && stock<F.stockMin) return false;
+            if(F.stockMax!==null && stock>F.stockMax) return false;
+            if(F.dateMin||F.dateMax){ var cd=toCmpDate(v.created_at); if(F.dateMin&&(!cd||cd<F.dateMin)) return false; if(F.dateMax&&(!cd||cd>F.dateMax)) return false; }
+            if(F.dateMinU||F.dateMaxU){ var cu=toCmpDate(v.updated_at); if(F.dateMinU&&(!cu||cu<F.dateMinU)) return false; if(F.dateMaxU&&(!cu||cu>F.dateMaxU)) return false; }
+            if(F.status==='active' && !v.is_active) return false;
+            if(F.status==='hidden' &&  v.is_active) return false;
+            if(F.kinds.length){
+                var kOk = (F.kinds.indexOf('drop')!==-1 && v.is_dropshipping)
+                       || (F.kinds.indexOf('hybrid')!==-1 && v.is_hybrid);
+                if(!kOk) return false;
+            }
+            return true;
+        });
+    }
+    function applySort(data){
+        if(!sortField) return data;
+        return data.slice().sort(function(a,b){
+            var va,vb;
+            if     (sortField==='name')      {va=(a.name||'').toLowerCase();vb=(b.name||'').toLowerCase();}
+            else if(sortField==='sku')       {va=a.sku||'';vb=b.sku||'';}
+            else if(sortField==='price')     {va=parseFloat(a.price)||0;vb=parseFloat(b.price)||0;}
+            else if(sortField==='stock')     {va=a.stock!=null?parseInt(a.stock):0;vb=b.stock!=null?parseInt(b.stock):0;}
+            else if(sortField==='created_at'){va=a.created_at||'';vb=b.created_at||'';}
+            else if(sortField==='updated_at'){va=a.updated_at||'';vb=b.updated_at||'';}
+            else if(sortField==='is_active') {va=a.is_active?0:1;vb=b.is_active?0:1;}
+            else return 0;
+            return va<vb?(sortDir==='asc'?-1:1):va>vb?(sortDir==='asc'?1:-1):0;
+        });
+    }
+    function isColFiltered(col){
+        if(col==='photos')     return F.photos!=='all';
+        if(col==='name')       return !!F.nameQ;
+        if(col==='sku')        return !!F.skuQ;
+        if(col==='cat')        return F.cats.length>0;
+        if(col==='labels')     return F.labels.length>0;
+        if(col==='price')      return F.priceMin!==null||F.priceMax!==null;
+        if(col==='stock')      return F.stockOnly||F.stockNone||F.stockMode!=='all'||F.stockMin!==null||F.stockMax!==null||F.kinds.length>0;
+        if(col==='dates') return !!(F.dateMin||F.dateMax||F.dateMinU||F.dateMaxU);
+        if(col==='is_active')  return F.status!=='all';
+        return false;
+    }
+
+    var dsTable=document.getElementById('ds-table');
+
+    function applyGroup(data){
+        if(!groupByProduct) return data;
+        var indexed=data.map(function(v,i){return{v:v,i:i};});
+        indexed.sort(function(a,b){
+            if(a.v.product_id!==b.v.product_id) return a.v.product_id<b.v.product_id?-1:1;
+            return a.i-b.i;
+        });
+        return indexed.map(function(x){return x.v;});
+    }
+    function updateTable(opts){
+        // Reset to page 1 only when the filter/sort actually CHANGES — not on
+        // first load when we just restored the page from localStorage.
+        if (!opts || !opts.preservePage) currentPage=1;
+        var filtered=applyGroup(applySort(applyFilters(allData)));
+        dsTable.querySelectorAll('th[data-col]').forEach(function(th){
+            var col=th.dataset.col;
+            var fc=isColFiltered(col), sc=(sortField===col) || (col==='dates' && (sortField==='created_at'||sortField==='updated_at'));
+            th.classList.toggle('col-on', fc||sc);
+            var badge=th.querySelector('.th-badge');
+            if(badge) badge.innerHTML=(fc||sc)?'<svg width="9" height="10" viewBox="0 0 10 11" fill="#374151"><path d="M0 0h10L6.5 5v6h-3V5z"/></svg>':'';
+        });
+        renderRows(filtered);
+    }
+    function resetCol(col){
+        if(col==='name')       F.nameQ='';
+        else if(col==='sku')   F.skuQ='';
+        else if(col==='photos') F.photos='all';
+        else if(col==='cat')   F.cats=[];
+        else if(col==='labels') F.labels=[];
+        else if(col==='price') { F.priceMin=null; F.priceMax=null; }
+        else if(col==='stock') { F.stockOnly=false; F.stockNone=false; F.stockMode='all'; F.stockMin=null; F.stockMax=null; F.kinds=[]; }
+        else if(col==='dates') { F.dateMin=null; F.dateMax=null; F.dateMinU=null; F.dateMaxU=null; if(sortField==='created_at'||sortField==='updated_at'){ sortField=null; sortDir='asc'; } }
+        else if(col==='is_active') F.status='all';
+        if(sortField===col){ sortField=null; sortDir='asc'; }
+        updateTable();
+    }
+
+    /* ── Popover ── */
+    var pop=document.getElementById('flt-pop'), popOwner=null;
+    var popWidths={dates:240,cat:260};
+    function openPop(th, buildFn){
+        if(popOwner===th && pop.classList.contains('open')){ closePop(); return; }
+        if(popOwner) popOwner.classList.remove('col-open');
+        popOwner=th;
+        pop.innerHTML='';
+        buildFn();
+        var resetBar=document.createElement('button'); resetBar.type='button';
+        resetBar.textContent='Reset filter';
+        resetBar.style.cssText='display:block;width:100%;padding:10px;border:none;border-bottom:1px solid #e5e7eb;background:none;color:#dc2626;font-size:13px;font-weight:500;cursor:pointer;text-align:left;';
+        resetBar.addEventListener('click',function(){resetCol(th.dataset.col);closePop();});
+        resetBar.addEventListener('mouseenter',function(){this.style.background='#fef2f2';});
+        resetBar.addEventListener('mouseleave',function(){this.style.background='none';});
+        pop.insertBefore(resetBar,pop.firstChild);
+        pop.classList.add('open');
+        var r=th.getBoundingClientRect();
+        var pw=popWidths[th.dataset.col]||200;
+        pop.style.width=pw+'px';
+        pop.style.left=(window.clFlipLeft?window.clFlipLeft(r,pw,8):Math.max(8,Math.min(r.left,window.innerWidth-pw-8)))+'px';
+        pop.style.top=(window.clFlipTop?window.clFlipTop(r,pop.offsetHeight,0):(r.bottom))+'px';
+        th.classList.add('col-open');
+    }
+    function closePop(){
+        pop.classList.remove('open');
+        if(popOwner){ popOwner.classList.remove('col-open'); popOwner=null; }
+    }
+    document.addEventListener('click',function(e){
+        if(e.button!==0) return;
+        if(!pop.contains(e.target)&&!e.target.closest('th[data-col]')) closePop();
+    });
+    function popHasFocus(){ return !!pop.querySelector('input:focus,textarea:focus'); }
+    /* pop.addEventListener('mouseleave', ...) -- disabled: keep popup open on mouseleave */
+    pop.addEventListener('wheel',function(e){
+        var scrollable=e.target.closest('.fp-list,.cal-grid');
+        if(scrollable&&scrollable.scrollHeight>scrollable.clientHeight){
+            var atTop=scrollable.scrollTop===0&&e.deltaY<0;
+            var atBot=scrollable.scrollTop+scrollable.clientHeight>=scrollable.scrollHeight&&e.deltaY>0;
+            if(!atTop&&!atBot) return;
+        }
+        e.preventDefault();
+    },{passive:false});
+
+    function popBody(){
+        var d=document.createElement('div'); d.className='fp-pop-body';
+        pop.appendChild(d); return d;
+    }
+    function sortRows(field, la, ld){
+        [[la,'asc'],[ld,'desc']].forEach(function(p){
+            var btn=document.createElement('button'); btn.type='button';
+            btn.className='fp-sort-row'+(sortField===field&&sortDir===p[1]?' on':'');
+            var sp=document.createElement('span'); sp.textContent=p[0];
+            var arr=document.createElement('span'); arr.className='fp-sort-arr'; arr.textContent='›';
+            btn.appendChild(sp); btn.appendChild(arr);
+            btn.addEventListener('click',function(){
+                sortField=field;sortDir=p[1];
+                pop.querySelectorAll('.fp-sort-row').forEach(function(b){b.classList.remove('on');});
+                btn.classList.add('on');
+                updateTable();
+            });
+            pop.appendChild(btn);
+        });
+    }
+    function radioList(cont, opts, getVal, setVal){
+        var grp='fp-rg-'+Date.now();
+        opts.forEach(function(o){
+            var row=document.createElement('div'); row.className='fp-item';
+            var lbl=document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+            var rb=document.createElement('input'); rb.type='radio'; rb.name=grp; rb.value=o[0]; rb.checked=getVal()===o[0];
+            rb.addEventListener('change',function(){ if(rb.checked){setVal(o[0]);updateTable();} });
+            lbl.appendChild(rb); lbl.appendChild(document.createTextNode(o[1]));
+            row.appendChild(lbl); cont.appendChild(row);
+        });
+    }
+    function rangeRow(cont, minV, maxV, onMin, onMax, unit){
+        var wrap=document.createElement('div'); wrap.className='fp-range';
+        var i1=document.createElement('input'); i1.type='number'; i1.placeholder='from'; i1.value=minV!==null?minV:'';
+        var sep=document.createElement('span'); sep.className='fp-range-sep'; sep.textContent='—';
+        var i2=document.createElement('input'); i2.type='number'; i2.placeholder='to'; i2.value=maxV!==null?maxV:'';
+        i1.addEventListener('input',function(){onMin(i1.value!==''?parseFloat(i1.value):null);updateTable();});
+        i2.addEventListener('input',function(){onMax(i2.value!==''?parseFloat(i2.value):null);updateTable();});
+        wrap.appendChild(i1); wrap.appendChild(sep); wrap.appendChild(i2);
+        cont.appendChild(wrap);
+    }
+
+    /* ── Calendar ── */
+    var CAL_MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+    var CAL_DOWS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    function calParseYMD(s){ if(!s) return null; var p=s.split('-'); return new Date(+p[0],+p[1]-1,+p[2]); }
+    function calToYMD(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+    function calSameDay(a,b){ return a&&b&&a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate(); }
+
+    function buildCalPop(getMin, setMin, getMax, setMax){
+        var selStart=calParseYMD(getMin()), selEnd=calParseYMD(getMax());
+        var pickStep=(selStart&&!selEnd)?2:1;
+        var hovDate=null;
+        var now=new Date();
+        var calYear=(selStart||now).getFullYear(), calMonth=(selStart||now).getMonth();
+        var b=popBody(); b.style.padding='0';
+        var nav=document.createElement('div'); nav.className='cal-nav';
+        var prevBtn=document.createElement('button'); prevBtn.type='button'; prevBtn.className='cal-nav-btn'; prevBtn.innerHTML='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,1 1,5 5,9"/></svg>';
+        var title=document.createElement('span'); title.className='cal-title';
+        var nextBtn=document.createElement('button'); nextBtn.type='button'; nextBtn.className='cal-nav-btn'; nextBtn.innerHTML='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 1,9"/></svg>';
+        nav.appendChild(prevBtn); nav.appendChild(title); nav.appendChild(nextBtn);
+        b.appendChild(nav);
+        var grid=document.createElement('div'); grid.className='cal-grid'; b.appendChild(grid);
+        var calSep=document.createElement('div'); calSep.style.cssText='height:1px;background:#e5e7eb;margin:0;';
+        b.appendChild(calSep);
+        var resetBtn=document.createElement('button'); resetBtn.type='button'; resetBtn.className='cal-reset'; resetBtn.textContent='Reset';
+        resetBtn.addEventListener('click',function(){ selStart=null; selEnd=null; pickStep=1; setMin(null); setMax(null); updateTable(); renderFull(); });
+        b.appendChild(resetBtn);
+        function effRange(){
+            if(pickStep===2&&hovDate&&selStart) return hovDate<selStart?{s:hovDate,e:selStart}:{s:selStart,e:hovDate};
+            return {s:selStart,e:selEnd};
+        }
+        function applyClasses(){
+            var r=effRange(), today=new Date();
+            grid.querySelectorAll('.cal-day[data-d]').forEach(function(cell){
+                var d=calParseYMD(cell.dataset.d);
+                var isS=calSameDay(d,r.s), isE=calSameDay(d,r.e);
+                var inR=r.s&&r.e&&d>r.s&&d<r.e;
+                cell.className='cal-day';
+                if(isS) cell.classList.add('sel-start');
+                if(isE) cell.classList.add('sel-end');
+                if(r.s&&r.e&&!calSameDay(r.s,r.e)&&(isS||isE)) cell.classList.add('has-range');
+                if(inR) cell.classList.add('in-range');
+                if(calSameDay(d,today)) cell.classList.add('today');
+            });
+        }
+        function renderFull(){
+            title.textContent=CAL_MONTHS[calMonth]+' '+calYear;
+            grid.innerHTML='';
+            CAL_DOWS.forEach(function(d){ var c=document.createElement('div'); c.className='cal-dow'; c.textContent=d; grid.appendChild(c); });
+            var firstDay=(new Date(calYear,calMonth,1).getDay()+6)%7;
+            var daysInMonth=new Date(calYear,calMonth+1,0).getDate();
+            for(var i=0;i<firstDay;i++){ var e=document.createElement('div'); e.className='cal-day empty'; grid.appendChild(e); }
+            for(var day=1;day<=daysInMonth;day++){
+                var cell=document.createElement('div'); cell.className='cal-day';
+                cell.dataset.d=calToYMD(new Date(calYear,calMonth,day));
+                cell.textContent=day;
+                cell.addEventListener('click',function(){
+                    var date=calParseYMD(this.dataset.d);
+                    if(pickStep===1){ selStart=date; selEnd=null; pickStep=2; }
+                    else { if(date<selStart){selEnd=selStart;selStart=date;}else{selEnd=date;} pickStep=1; setMin(calToYMD(selStart)); setMax(calToYMD(selEnd)); updateTable(); }
+                    applyClasses();
+                });
+                cell.addEventListener('mouseenter',function(){ hovDate=calParseYMD(this.dataset.d); applyClasses(); });
+                cell.addEventListener('mouseleave',function(){ hovDate=null; applyClasses(); });
+                grid.appendChild(cell);
+            }
+            applyClasses();
+        }
+        prevBtn.addEventListener('click',function(){ calMonth--; if(calMonth<0){calMonth=11;calYear--;} renderFull(); });
+        nextBtn.addEventListener('click',function(){ calMonth++; if(calMonth>11){calMonth=0;calYear++;} renderFull(); });
+        renderFull();
+    }
+
+    /* ── Column builders ── */
+    function buildPhotosPop(){
+        var b=popBody();
+        radioList(b,[['all','All'],['with','With photo'],['without','Without photo']],function(){return F.photos;},function(v){F.photos=v;});
+    }
+    function buildNamePop(){
+        sortRows('name','A ⟶ Z','Z ⟶ A');
+        var b=popBody();
+        var inp=document.createElement('input'); inp.type='text'; inp.className='fp-search';
+        inp.placeholder='Search by name...'; inp.value=F.nameQ;
+        inp.addEventListener('input',function(){F.nameQ=inp.value;updateTable();});
+        b.appendChild(inp);
+        setTimeout(function(){inp.focus();},40);
+    }
+    function buildSkuPop(){
+        var b=popBody();
+        var inp=document.createElement('input'); inp.type='text'; inp.className='fp-search';
+        inp.placeholder='SKU...'; inp.value=F.skuQ;
+        inp.addEventListener('input',function(){F.skuQ=inp.value;updateTable();});
+        b.appendChild(inp);
+        setTimeout(function(){inp.focus();},40);
+    }
+    function buildPricePop(){
+        sortRows('price','Cheaper ⟶ pricier','Pricier ⟶ cheaper');
+        var b=popBody();
+        rangeRow(b,F.priceMin,F.priceMax,function(v){F.priceMin=v;},function(v){F.priceMax=v;},'');
+    }
+    function buildStockPop(){
+        sortRows('stock','Lower ⟶ higher','Higher ⟶ lower');
+        var b=popBody();
+        var stockVal=F.stockOnly?'only':F.stockNone?'none':'all';
+        radioList(b,[['all','All'],['only','In stock'],['none','Out of stock']],
+            function(){return stockVal;},
+            function(v){stockVal=v;F.stockOnly=(v==='only');F.stockNone=(v==='none');updateTable();});
+        var sep1=document.createElement('div'); sep1.style.cssText='height:1px;background:#e5e7eb;margin:0 -10px;';
+        b.appendChild(sep1);
+        radioList(b,[['all','All'],['auto','Auto'],['manual','Manual']],
+            function(){return F.stockMode;},
+            function(v){F.stockMode=v;updateTable();});
+        var sepKind=document.createElement('div'); sepKind.style.cssText='height:1px;background:#e5e7eb;margin:0 -10px;';
+        b.appendChild(sepKind);
+        var kindCap=document.createElement('div'); kindCap.style.cssText='font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:#9ca3af;margin:2px 0 4px;'; kindCap.textContent='Type'; b.appendChild(kindCap);
+        [['drop','Full dropshipping'],['hybrid','50/50']].forEach(function(o){
+            var row=document.createElement('div'); row.className='fp-item';
+            var lbl=document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+            var cb=document.createElement('input'); cb.type='checkbox'; cb.checked=F.kinds.indexOf(o[0])!==-1;
+            cb.addEventListener('change',function(){
+                var i=F.kinds.indexOf(o[0]);
+                if(cb.checked && i===-1) F.kinds.push(o[0]);
+                else if(!cb.checked && i!==-1) F.kinds.splice(i,1);
+                updateTable();
+            });
+            lbl.appendChild(cb); lbl.appendChild(document.createTextNode(o[1]));
+            row.appendChild(lbl); b.appendChild(row);
+        });
+        var sep2=document.createElement('div'); sep2.style.cssText='height:1px;background:#e5e7eb;margin:0 -10px;';
+        b.appendChild(sep2);
+        rangeRow(b,F.stockMin,F.stockMax,
+            function(v){F.stockMin=v!==null?Math.round(v):null;},
+            function(v){F.stockMax=v!==null?Math.round(v):null;},'pcs');
+    }
+    function buildStatusPop(){
+        var b=popBody();
+        radioList(b,[['all','All'],['active','Active'],['hidden','Inactive']],function(){return F.status;},function(v){F.status=v;});
+    }
+    function buildDatesPop(){
+        var activeTab=(F.dateMinU||F.dateMaxU||sortField==='updated_at')?'updated':'created';
+        var tabsBar=document.createElement('div');
+        tabsBar.style.cssText='display:flex;border-bottom:1px solid #e5e7eb;';
+        var tCreated=document.createElement('button'); tCreated.type='button'; tCreated.className='fp-date-tab';
+        var tUpdated=document.createElement('button'); tUpdated.type='button'; tUpdated.className='fp-date-tab';
+        var tabBtnCss='flex:1;padding:9px 0;border:none;background:none;cursor:pointer;font-size:13px;color:#6b7280;border-bottom:2px solid transparent;';
+        tCreated.style.cssText=tabBtnCss; tCreated.textContent='Created';
+        tUpdated.style.cssText=tabBtnCss; tUpdated.textContent='Updated';
+        tabsBar.appendChild(tCreated); tabsBar.appendChild(tUpdated);
+        pop.appendChild(tabsBar);
+        var marker=document.createElement('div');
+        pop.appendChild(marker);
+        function clearAfterMarker(){
+            var n=marker.nextSibling;
+            while(n){ var rm=n; n=n.nextSibling; pop.removeChild(rm); }
+        }
+        function dot(active, hasFilter){ return ''; }
+        function paintTabs(which){
+            [tCreated,tUpdated].forEach(function(t){ t.style.color='#6b7280'; t.style.borderBottomColor='transparent'; });
+            var act=which==='created'?tCreated:tUpdated;
+            act.style.color='#1f2937'; act.style.borderBottomColor='#1f2937';
+            var cFilt=!!(F.dateMin||F.dateMax), uFilt=!!(F.dateMinU||F.dateMaxU);
+            tCreated.innerHTML='Created'+dot(which==='created',cFilt);
+            tUpdated.innerHTML='Updated'+dot(which==='updated',uFilt);
+        }
+        function setActive(which){
+            activeTab=which;
+            paintTabs(which);
+            clearAfterMarker();
+            if(which==='created'){
+                sortRows('created_at','Older ⟶ newer','Newer ⟶ older');
+                buildCalPop(function(){return F.dateMin;},function(v){F.dateMin=v;},function(){return F.dateMax;},function(v){F.dateMax=v;});
+            } else {
+                sortRows('updated_at','Older ⟶ newer','Newer ⟶ older');
+                buildCalPop(function(){return F.dateMinU;},function(v){F.dateMinU=v;},function(){return F.dateMaxU;},function(v){F.dateMaxU=v;});
+            }
+        }
+        tCreated.addEventListener('click',function(){setActive('created');});
+        tUpdated.addEventListener('click',function(){setActive('updated');});
+        setActive(activeTab);
+    }
+
+    function buildCatPop(){
+        var b=popBody();
+        var catById={};
+        catsTree.forEach(function(c){ catById[c.id]=c; });
+        function catDepth(c){ var d=0,pid=c.parent_id; while(pid&&catById[pid]){d++;pid=catById[pid].parent_id;} return d; }
+        var kidsByParent={};
+        catsTree.forEach(function(c){
+            if(c.parent_id){ (kidsByParent[c.parent_id]=kidsByParent[c.parent_id]||[]).push(c); }
+        });
+        function descendantsOf(c){
+            var out=[]; var stack=(kidsByParent[c.id]||[]).slice();
+            while(stack.length){ var n=stack.shift(); out.push(n); (kidsByParent[n.id]||[]).forEach(function(k){ stack.push(k); }); }
+            return out;
+        }
+        /* Show only categories actually present in at least one dropshipping variant.
+           We promote ancestors so the hierarchy doesn't break.
+         */
+        var usedNames={};
+        (allData||[]).forEach(function(v){
+            (v.categories||[]).forEach(function(c){ usedNames[c]=1; });
+        });
+        var usedIds={};
+        catsTree.forEach(function(c){ if(usedNames[c.name]) usedIds[c.id]=1; });
+        catsTree.forEach(function(c){
+            if(!usedIds[c.id]) return;
+            var pid=c.parent_id;
+            while(pid && catById[pid]){
+                if(usedIds[pid]) break;
+                usedIds[pid]=1;
+                pid=catById[pid].parent_id;
+            }
+        });
+        var visibleTree=catsTree.filter(function(c){ return usedIds[c.id]; });
+        var inp=document.createElement('input'); inp.type='text'; inp.className='fp-search'; inp.placeholder='Search...';
+        var ld=document.createElement('div'); ld.className='fp-list'; ld.style.maxHeight='260px';
+        b.appendChild(inp); b.appendChild(ld);
+        function renderCatList(q){
+            ld.innerHTML='';
+            var shown=q?visibleTree.filter(function(c){return c.name.toLowerCase().indexOf(q.toLowerCase())!==-1;}):visibleTree;
+            var parsed=shown.map(function(c){ return {c:c, depth: q?0:catDepth(c)}; });
+            function isLastAtDepth(i,d){
+                for(var j=i+1;j<parsed.length;j++){
+                    if(parsed[j].depth<d) return true;
+                    if(parsed[j].depth===d) return false;
+                }
+                return true;
+            }
+            /* LINE_OFFSET = visual center of the checkbox at depth 0.
+               STEP = checkbox indent per level. The lines sit exactly under the checkboxes above.
+             */
+            var STEP=18, BASE_PAD=0, LINE_OFFSET=6;
+            parsed.forEach(function(o,i){
+                var c=o.c, depth=o.depth;
+                var row=document.createElement('div'); row.className='fp-item';
+                if(depth>0){
+                    for(var lvl=1;lvl<depth;lvl++){
+                        if(isLastAtDepth(i,lvl)) continue;
+                        var v=document.createElement('span');
+                        v.className='pick-vline';
+                        v.style.left=(LINE_OFFSET+(lvl-1)*STEP)+'px';
+                        row.appendChild(v);
+                    }
+                    var isFirst = (i===0 || parsed[i-1].depth<depth);
+                    var isLast  = isLastAtDepth(i,depth);
+                    var ownX    = LINE_OFFSET+(depth-1)*STEP;
+                    if (isLast) {
+                        var el=document.createElement('span');
+                        el.className='pick-elbow';
+                        el.style.left = ownX+'px';
+                        el.style.top  = (isFirst ? '-10px' : '-5px');
+                        el.style.height = isFirst ? 'calc(50% + 11px)' : 'calc(50% + 6px)';
+                        el.style.width  = (STEP-6)+'px';
+                        row.appendChild(el);
+                    } else {
+                        var v=document.createElement('span');
+                        v.className='pick-vline';
+                        v.style.left = ownX+'px';
+                        if (isFirst) v.classList.add('is-first');
+                        row.appendChild(v);
+                        var hl=document.createElement('span');
+                        hl.className='pick-hline';
+                        hl.style.left=ownX+'px';
+                        hl.style.width=(STEP-6)+'px';
+                        row.appendChild(hl);
+                    }
+                    row.style.paddingLeft=(BASE_PAD+depth*STEP)+'px';
+                }
+                var lbl=document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+                var cb=document.createElement('input'); cb.type='checkbox'; cb.checked=F.cats.indexOf(c.name)!==-1;
+                cb.addEventListener('change',function(){
+                    var names=[c.name].concat(descendantsOf(c).map(function(d){return d.name;}));
+                    if(cb.checked){
+                        names.forEach(function(n){ if(F.cats.indexOf(n)===-1) F.cats.push(n); });
+                    } else {
+                        F.cats=F.cats.filter(function(x){ return names.indexOf(x)===-1; });
+                    }
+                    renderCatList(inp.value);
+                    updateTable();
+                });
+                lbl.appendChild(cb);
+                lbl.appendChild(document.createTextNode(c.name));
+                row.appendChild(lbl); ld.appendChild(row);
+            });
+        }
+        inp.addEventListener('input',function(){renderCatList(inp.value);});
+        renderCatList('');
+        setTimeout(function(){inp.focus();},40);
+    }
+    function buildLabelsPop(){
+        var b=popBody();
+        var list=document.createElement('div'); list.className='fp-list';
+        allLabels.forEach(function(l){
+            var row=document.createElement('div'); row.className='fp-item';
+            var lbl=document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+            var cb=document.createElement('input'); cb.type='checkbox'; cb.checked=F.labels.indexOf(l.name)!==-1;
+            var sp=document.createElement('span'); sp.textContent=l.name;
+            cb.addEventListener('change',function(){
+                var idx=F.labels.indexOf(l.name);
+                if(cb.checked){if(idx===-1) F.labels.push(l.name);}
+                else{if(idx!==-1) F.labels.splice(idx,1);}
+                updateTable();
+            });
+            lbl.appendChild(cb); lbl.appendChild(sp);
+            row.appendChild(lbl);
+            list.appendChild(row);
+        });
+        b.appendChild(list);
+    }
+    var colBuilders={photos:buildPhotosPop,name:buildNamePop,sku:buildSkuPop,cat:buildCatPop,labels:buildLabelsPop,price:buildPricePop,stock:buildStockPop,is_active:buildStatusPop,dates:buildDatesPop};
+
+    /* ── Lightbox ── */
+    var lightbox=document.getElementById('pv-lightbox'), lightboxImg=document.getElementById('pv-lightbox-img');
+    lightbox.addEventListener('click',function(){lightbox.classList.remove('open');});
+    document.addEventListener('keydown',function(e){if(e.key==='Escape'){lightbox.classList.remove('open');closePop();}});
+
+    /* ── Thead ── */
+    var thead=document.createElement('thead');
+    function sc(lbl,col){return '<th data-col="'+col+'">'+lbl+'<span class="th-badge"></span></th>';}
+    thead.innerHTML='<tr>'+
+        '<th class="col-cb"><input type="checkbox" id="ds-sel-all"></th>'+
+        sc('Photo','photos')+sc('SKU','sku')+sc('Name','name')+sc('Categories','cat')+
+        sc('Labels','labels')+sc('Dates','dates')+
+        sc('Display','is_active')+sc('Price','price')+sc('Stock','stock')+
+    '</tr>';
+    dsTable.appendChild(thead);
+
+    /* thead.addEventListener('mouseleave', ...) -- disabled: keep popup open on mouseleave */
+    dsTable.querySelector('thead').addEventListener('click',function(e){
+        var th=e.target.closest('th[data-col]'); if(!th) return;
+        e.stopPropagation();
+        var fn=colBuilders[th.dataset.col]; if(fn) openPop(th,fn);
+    });
+    function _grpKey(v){ return v.product_id; }
+    /* Page boundaries. When grouping, we pack by whole groups: a page holds
+       ~pageSize rows but does NOT split a group — the tail of a group doesn't go to the next
+       page. A group larger than pageSize takes a whole page of its own.
+     */
+    function _pageBounds(){
+        var data=currentFiltered||[];
+        var n=data.length;
+        if(pageSize===0 || n===0) return [{start:0,end:n}];
+        if(!groupByProduct){
+            var b=[];
+            for(var s=0;s<n;s+=pageSize) b.push({start:s,end:Math.min(s+pageSize,n)});
+            return b;
+        }
+        var bounds=[], pageStart=0, count=0, i=0;
+        while(i<n){
+            var key=_grpKey(data[i]), j=i;
+            while(j<n && _grpKey(data[j])===key) j++;
+            var groupLen=j-i;
+            if(count>0 && count+groupLen>pageSize){ bounds.push({start:pageStart,end:i}); pageStart=i; count=0; }
+            count+=groupLen; i=j;
+        }
+        bounds.push({start:pageStart,end:n});
+        return bounds;
+    }
+    function _pageSlice(){
+        var data=currentFiltered||[];
+        if(pageSize===0) return data;
+        var b=_pageBounds();
+        if(currentPage>b.length) currentPage=b.length;
+        if(currentPage<1) currentPage=1;
+        var pg=b[currentPage-1]||{start:0,end:0};
+        return data.slice(pg.start,pg.end);
+    }
+    document.getElementById('ds-sel-all').addEventListener('change',function(){
+        // Per-page toggle: the selection accumulates across pages. If the whole current
+        // page is selected → deselect it; otherwise → add it to the selection.
+        var pageIds = _pageSlice().map(function(v){ return String(v.id); });
+        var allOn = pageIds.length > 0 && pageIds.every(function(id){ return SEL.has(id); });
+        pageIds.forEach(function(id){ if(allOn) SEL.delete(id); else SEL.add(id); });
+        renderRows(currentFiltered);
+        if(window._updateCounter) window._updateCounter();
+    });
+    /* Header checkbox reflects ONLY the current page. */
+    function _syncSelAll(){
+        var box=document.getElementById('ds-sel-all'); if(!box) return;
+        var pageIds = _pageSlice().map(function(v){ return String(v.id); });
+        var picked = pageIds.filter(function(id){ return SEL.has(id); }).length;
+        box.indeterminate = (picked > 0 && picked < pageIds.length);
+        box.checked       = (pageIds.length > 0 && picked === pageIds.length);
+    }
+
+    /* ── Save field ── */
+    function saveField(variantId,field,value,inputEl){
+        return fetch('/admin/catalog/save-variant-field/',{
+            method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+            body:JSON.stringify({id:variantId,field:field,value:value}),
+        }).then(function(r){return r.json();}).catch(function(){});
+    }
+
+    /* ── Pager ── */
+    function renderPager(){
+        var total=currentFiltered.length;
+        var pager=document.getElementById('ds-pager');
+        if(!pager) return;
+        /* Paginator — only when there are more than 25 rows. */
+        if(total<=25){ pager.style.display='none'; positionPager(); return; }
+        pager.style.display='';
+        var groupBtn='<div class="pager-group"><span class="pg-btn'+(groupByProduct?' pg-active':'')+'" onclick="window._dsToggleGroup()">Group</span></div>';
+        if(pageSize===0){
+            pager.innerHTML=
+                '<span class="pager-info">Showing all '+total+' entries</span>'+
+                '<div class="pager-nav"></div>'+
+                '<div class="pager-right"><div class="pager-size"><span>Per page:</span>'+
+                '<span class="pg-btn" onclick="window._dsSetPage(1,25)">25</span>'+
+                '<span class="pg-btn" onclick="window._dsSetPage(1,50)">50</span>'+
+                '<span class="pg-btn pg-active">All</span></div>'+groupBtn+'</div>';
+            return;
+        }
+        var bounds=_pageBounds();
+        var pages=bounds.length||1;
+        if(currentPage>pages) currentPage=pages;
+        if(currentPage<1) currentPage=1;
+        var cur=bounds[currentPage-1]||{start:0,end:0};
+        var from=total===0?0:cur.start+1;
+        var to=cur.end;
+        var SVG_PREV='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,1 1,5 5,9"/></svg>';
+        var SVG_NEXT='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 1,9"/></svg>';
+        function pgBtn(label,page,active,disabled,arrow){
+            var cls='pg-btn'+(active?' pg-active':'')+(disabled?' pg-disabled':'')+(arrow?' pg-arrow':'');
+            var handler=disabled||active?'':'onclick="window._dsSetPage('+page+','+pageSize+')"';
+            return '<span class="'+cls+'" '+handler+'>'+label+'</span>';
+        }
+        var nav='';
+        nav+=pgBtn(SVG_PREV,currentPage-1,false,currentPage===1,true);
+        var pNums=[];
+        if(pages<=7){for(var i=1;i<=pages;i++) pNums.push(i);}
+        else {
+            pNums.push(1);
+            if(currentPage>3) pNums.push('…');
+            for(var i=Math.max(2,currentPage-1);i<=Math.min(pages-1,currentPage+1);i++) pNums.push(i);
+            if(currentPage<pages-2) pNums.push('…');
+            pNums.push(pages);
+        }
+        pNums.forEach(function(p){
+            if(p==='…'){ nav+='<span class="pg-dots">…</span>'; }
+            else { nav+=pgBtn(p,p,p===currentPage,false); }
+        });
+        nav+=pgBtn(SVG_NEXT,currentPage+1,false,currentPage===pages,true);
+        pager.innerHTML=
+            '<span class="pager-info">'+from+'–'+to+' of '+total+'</span>'+
+            '<div class="pager-nav">'+nav+'</div>'+
+            '<div class="pager-right"><div class="pager-size"><span>Per page:</span>'+
+            '<span class="pg-btn'+(pageSize===25?' pg-active':'')+'" onclick="window._dsSetPage(1,25)">25</span>'+
+            '<span class="pg-btn'+(pageSize===50?' pg-active':'')+'" onclick="window._dsSetPage(1,50)">50</span>'+
+            '<span class="pg-btn" onclick="window._dsSetPage(1,0)">All</span></div>'+groupBtn+'</div>';
+    }
+
+    /* ── Dynamic column widths (ported from products): px (Safari-safe), name 3 lines,
+       name+category share the remainder (2/3 + 1/3), compact (1 photo), hiding ──
+     */
+    var _dsFam=null;
+    function _dsFamily(){ if(!_dsFam) _dsFam=getComputedStyle(document.body).fontFamily||'sans-serif'; return _dsFam; }
+    var _dsCtx=document.createElement('canvas').getContext('2d');
+    function _dsTextW(t,f){ _dsCtx.font=f; return _dsCtx.measureText(String(t||'')).width; }
+
+    var _dsHdr=null;
+    function _dsMeasureHdr(){
+        if(_dsHdr) return _dsHdr;
+        var fam=_dsFamily();
+        var sp=document.createElement('span');
+        sp.style.cssText='position:absolute;left:-99999px;top:0;visibility:hidden;white-space:nowrap;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;font-size:10px;';
+        sp.style.fontFamily=fam; document.body.appendChild(sp);
+        function h(t){ sp.textContent=t; return Math.ceil(sp.offsetWidth)+12+26; }
+        var skuMax=0; (allData||[]).forEach(function(v){ if(v.sku){ var w=_dsTextW(v.sku,'12px '+fam); if(w>skuMax)skuMax=w; } });
+        var r={ photosHdr:h('Photo'), datesHdr:h('Dates'), catHdr:h('Categories'), labHdr:h('Labels'),
+                sku:Math.max(h('SKU'), Math.ceil(skuMax)+24), active:Math.max(h('Display'),40),
+                priceHdr:h('Price'), stockHdr:h('Stock') };
+        document.body.removeChild(sp); _dsHdr=r; return r;
+    }
+    var _dsNameW=null;
+    function _dsMeasureName(){
+        if(_dsNameW!=null) return _dsNameW;
+        var fam=_dsFamily(), cands=[];
+        (allData||[]).forEach(function(v){ var n=v.name||''; if(n) cands.push({n:n,w:_dsTextW(n,'13px '+fam)}); });
+        cands.sort(function(a,b){return b.w-a.w;}); cands=cands.slice(0,40);
+        var td=document.createElement('div');
+        td.style.cssText='position:absolute;left:-99999px;top:0;visibility:hidden;box-sizing:border-box;border-left:1px solid #e5e7eb;padding:8px 12px;font-size:13px;line-height:1.35;';
+        td.style.fontFamily=fam; document.body.appendChild(td);
+        var val=document.createElement('span');
+        val.style.cssText='display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;word-break:break-word;line-height:1.35;min-width:0;max-width:100%;';
+        td.appendChild(val);
+        var need=200;
+        cands.forEach(function(c){
+            val.textContent=c.n;
+            var lo=80, hi=Math.max(160,Math.ceil(c.w)+120), best=hi;
+            for(var it=0;it<12;it++){ var mid=Math.floor((lo+hi)/2); td.style.width=mid+'px';
+                if(val.scrollHeight<=val.clientHeight){ best=mid; hi=mid-1; } else { lo=mid+1; } }
+            if(best>need) need=best;
+        });
+        document.body.removeChild(td); _dsNameW=need+2; return _dsNameW;
+    }
+    function _fitDsCatTags(){
+        dsTable.querySelectorAll('tbody td.col-cat .cat-wrap').forEach(function(wrap){
+            var prev=wrap.querySelector('.pv-cat-more'); if(prev) prev.remove();
+            var tags=Array.prototype.slice.call(wrap.querySelectorAll('.pv-cat-tag:not(.pv-cat-more)'));
+            tags.forEach(function(t){ t.style.display=''; });
+            if(wrap.scrollHeight<=wrap.clientHeight+1) return;
+            var more=document.createElement('span'); more.className='pv-cat-tag pv-cat-more'; more.style.color='#9ca3af';
+            wrap.appendChild(more);
+            var hidden=0;
+            for(var i=tags.length-1;i>0;i--){ tags[i].style.display='none'; hidden++; more.textContent='+'+hidden;
+                if(wrap.scrollHeight<=wrap.clientHeight+1) break; }
+            if(hidden===0) more.remove();
+        });
+    }
+    function _fitDsCols(){
+        if(!dsTable || !dsTable.querySelector('tbody tr')) return;
+        var fx=_dsMeasureHdr(), st=dsTable.style, rng=document.createRange();
+        dsTable.querySelectorAll('tbody td.col-cat .cat-wrap').forEach(function(w){
+            var m=w.querySelector('.pv-cat-more'); if(m) m.remove();
+            w.querySelectorAll('.pv-cat-tag').forEach(function(t){ t.style.display=''; });
+        });
+        ['dates','labels'].forEach(function(k){ dsTable.classList.remove('ds-hide-'+k); });
+        dsTable.classList.remove('ds-compact');
+        var host=document.querySelector('#content-main')||dsTable.parentElement;
+        var avail=host?host.clientWidth:dsTable.getBoundingClientRect().width;
+        /* getBoundingClientRect/Range give visual px (under Mac zoom they are smaller than layout
+           px by the zoom factor),
+           while avail (clientWidth) and style.width are layout px. So we divide measurements by
+           zoom.
+         */
+        var zoom=parseFloat(getComputedStyle(document.body).zoom)||1;
+        function contentMax(sel, base){ var m=base;
+            dsTable.querySelectorAll('tbody '+sel).forEach(function(el){ rng.selectNodeContents(el); var w=Math.ceil(rng.getBoundingClientRect().width/zoom)+24; if(w>m)m=w; });
+            return m; }
+        var wDates=fx.datesHdr;
+        dsTable.querySelectorAll('tbody td.col-dates > div > div').forEach(function(el){ rng.selectNodeContents(el); var w=Math.ceil(rng.getBoundingClientRect().width/zoom)+24; if(w>wDates)wDates=w; });
+        var wPrice=contentMax('td.col-price', fx.priceHdr);
+        var wStock=contentMax('td.col-stock', fx.stockHdr);
+        var wLab=Math.min(contentMax('td.col-labels', fx.labHdr), 220);
+        var catMin=Math.min(contentMax('td.col-cat .cat-wrap', fx.catHdr), 300);
+        var thumb=dsTable.querySelector('tbody .pv-thumb');
+        var tw=thumb?thumb.getBoundingClientRect().width/zoom:38;
+        function measurePhotos(){ var maxN=0; dsTable.querySelectorAll('tbody td.col-photos .pv-photos').forEach(function(ph){ var n=0; ph.querySelectorAll('.pv-photo-wrap').forEach(function(x){ if(getComputedStyle(x).display!=='none') n++; }); if(n>maxN)maxN=n; }); var wp=fx.photosHdr; if(maxN>0) wp=Math.max(wp, Math.ceil(maxN*tw + (maxN-1)*3) + 24 + 1); return wp; }
+        var wPhotos=measurePhotos();
+        var nameMin=_dsMeasureName();
+        function fixedSumOf(p){ return 44 + p + fx.sku + fx.active + Math.ceil(wPrice) + Math.ceil(wStock) + Math.ceil(wLab) + Math.ceil(wDates); }
+        if(fixedSumOf(wPhotos) + nameMin + catMin > avail){
+            dsTable.classList.add('ds-compact');
+            wPhotos=Math.max(fx.photosHdr, Math.ceil(tw)+24+1);
+        }
+        var _wmap={dates:Math.ceil(wDates), labels:Math.ceil(wLab)};
+        var fixedSum=fixedSumOf(wPhotos);
+        var drop=['dates','labels'];
+        for(var i=0;i<drop.length && (fixedSum+nameMin+catMin)>avail;i++){
+            dsTable.classList.add('ds-hide-'+drop[i]);
+            fixedSum-=_wmap[drop[i]];
+        }
+        st.setProperty('--dw-photos', wPhotos+'px');
+        st.setProperty('--dw-sku',    fx.sku+'px');
+        st.setProperty('--dw-dates',  Math.ceil(wDates)+'px');
+        st.setProperty('--dw-active', fx.active+'px');
+        st.setProperty('--dw-price',  Math.ceil(wPrice)+'px');
+        st.setProperty('--dw-stock',  Math.ceil(wStock)+'px');
+        st.setProperty('--dw-labels', Math.ceil(wLab)+'px');
+        var catFloor=catMin, rem=avail-fixedSum-nameMin;
+        if(rem<catFloor) catFloor=Math.max(60, rem);
+        var extra=Math.max(0, Math.floor(avail-fixedSum-nameMin-catFloor));
+        var nameExtra=Math.floor(extra*2/3);
+        st.setProperty('--dw-name', (nameMin+nameExtra)+'px');
+        st.setProperty('--dw-cat',  (catFloor+(extra-nameExtra))+'px');
+        _fitDsCatTags();
+    }
+    function positionPager(){
+        _fitDsCols();
+        var pager=document.getElementById('ds-pager');
+        if(!pager) return;
+        var content=document.querySelector('#content-main')||document.body;
+        pager.style.left=(window.clX?window.clX(content.getBoundingClientRect().left):content.getBoundingClientRect().left)+'px';
+        dsTable.style.marginBottom='0'; var __lr=dsTable.querySelector("tbody tr:last-child"); if(__lr){var __rb=__lr.getBoundingClientRect().bottom, __pt=pager.getBoundingClientRect().top; dsTable.classList.toggle("tbl-touches-pager", getComputedStyle(pager).display !== 'none' && __rb >= __pt - 1);} if(window.padChangelistTable) window.padChangelistTable(dsTable); if(dsTable.__padFill) dsTable.__padFill.style.marginBottom=pager.offsetHeight+'px';
+    }
+    positionPager();
+    window.addEventListener('resize',positionPager);
+    if(window.ResizeObserver){
+        new ResizeObserver(positionPager).observe(document.querySelector('#content-main')||document.body);
+    }
+    var navSidebar=document.getElementById('nav-sidebar');
+    if(navSidebar) navSidebar.addEventListener('transitionend',positionPager);
+
+    window._dsSetPage=function(page,size){
+        pageSize=size; currentPage=page;
+        renderRows(currentFiltered);
+    };
+    window._dsToggleGroup=function(){
+        groupByProduct=!groupByProduct;
+        currentPage=1;
+        renderRows(applyGroup(applySort(applyFilters(allData))));
+    };
+
+    /* ── Render rows ── */
+    function _anyFilterActive(){
+        return !!(
+            F.nameQ || F.skuQ ||
+            (F.photos && F.photos !== 'all') ||
+            (F.cats && F.cats.length) ||
+            (F.labels && F.labels.length) ||
+            F.priceMin !== null || F.priceMax !== null ||
+            F.stockOnly || F.stockNone || (F.stockMode && F.stockMode!=='all') ||
+            F.stockMin !== null || F.stockMax !== null ||
+            (F.kinds && F.kinds.length) ||
+            F.dateMin || F.dateMax || F.dateMinU || F.dateMaxU ||
+            (F.status && F.status !== 'all') ||
+            sortField || groupByProduct
+        );
+    }
+    function _resetFilters(){
+        F.nameQ=''; F.skuQ=''; F.photos='all'; F.cats=[]; F.labels=[];
+        F.priceMin=null; F.priceMax=null;
+        F.stockOnly=false; F.stockNone=false; F.stockMode='all'; F.stockMin=null; F.stockMax=null;
+        F.kinds=[];
+        F.dateMin=null; F.dateMax=null; F.dateMinU=null; F.dateMaxU=null;
+        F.status='all';
+        sortField=null; sortDir='asc';
+        currentPage=1;
+        groupByProduct=false;
+        updateTable();
+    }
+    function _renderResetBtn(){
+        var bar = document.querySelector('.submit-row.cl-bar');
+        if (!bar) return;
+        var btn = bar.querySelector('#ds-reset-filters');
+        var active = _anyFilterActive();
+        if (active && !btn) {
+            btn = document.createElement('button');
+            btn.type = 'button';
+            btn.id   = 'ds-reset-filters';
+            btn.className = 'cl-top-btn';
+            btn.textContent = 'Reset filters';
+            btn.addEventListener('click', _resetFilters);
+            // Insert just before the "Delete" button (the last danger btn).
+            var del = bar.querySelector('.cl-top-btn-danger');
+            if (del) bar.insertBefore(btn, del);
+            else bar.appendChild(btn);
+        } else if (!active && btn) {
+            btn.remove();
+        }
+    }
+
+    /* Group header row: arrow + product name + counter toggle.
+       Click on the row collapses/expands; click on the counter - show all variants.
+     */
+    function buildGroupHeader(items,key,collapsed){
+        var tr=document.createElement('tr');
+        tr.className='pv-group-header group-start'+(collapsed?' pv-group-collapsed':'');
+        var cbTd=document.createElement('td'); cbTd.className='col-cb';
+        var nameTd=document.createElement('td'); nameTd.colSpan=9;
+        var label=items[0].product_name||items[0].name||'—';
+        var allActive=items.every(function(v){return !!v.is_active;});
+        var someActive=items.some(function(v){return !!v.is_active;});
+        nameTd.innerHTML='<div class="pv-group-name-inner">'+
+            '<span class="pv-group-toggle">'+
+            '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 4.5L6 8L9.5 4.5" stroke="#6b7280" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>'+
+            '<span class="pv-group-title">'+esc(label)+'</span>'+
+            /* Struck through only when ALL variants are hidden (partially hidden — normal). */
+            '<span class="pv-group-count'+(someActive?'':' pv-group-count--off')+'" title="Click — show / hide all variants of the group">('+items.length+')</span>'+
+        '</div>';
+        var countEl=nameTd.querySelector('.pv-group-count');
+        countEl.addEventListener('click',function(e){
+            e.stopPropagation();
+            var val=!allActive;
+            items.forEach(function(v){
+                v.is_active=val;
+                saveField(v.id,'is_active',val,countEl);
+            });
+            renderRows(currentFiltered);
+        });
+        tr.appendChild(cbTd); tr.appendChild(nameTd);
+        tr.addEventListener('click',function(e){
+            if(e.target.closest('input,.pv-group-count')) return;
+            if(collapsedGroups.has(key)) collapsedGroups.delete(key);
+            else collapsedGroups.add(key);
+            renderRows(currentFiltered);
+        });
+        return tr;
+    }
+
+    function renderRows(data){
+        currentFiltered=data;
+        _saveState();  // remember filters/sort/page for next visit
+        _renderResetBtn();
+        var slice=_pageSlice();
+        var oldTbody=dsTable.querySelector('tbody'); if(oldTbody) oldTbody.remove();
+        var tbody=document.createElement('tbody'), rowNum=1;
+        /* pinned: selected rows from other pages, rendered on top */
+        var visibleIds={}; slice.forEach(function(v){visibleIds[String(v.id)]=1;});
+        var pinned=[];
+        SEL.forEach(function(id){
+            if(visibleIds[id]) return;
+            for(var i=0;i<allData.length;i++){ if(String(allData[i].id)===id){ pinned.push(allData[i]); break; } }
+        });
+        pinned.forEach(function(v,idx){
+            var tr=buildRow(v,rowNum++,false,true);
+            if(idx===0) tr.classList.add('ds-pinned-first');
+            if(idx===pinned.length-1) tr.classList.add('ds-pinned-last');
+            tbody.appendChild(tr);
+        });
+        rowNum=1;
+        if(groupByProduct){
+            /* Collect consecutive rows into groups by product_id. */
+            var groups=[];
+            slice.forEach(function(v){
+                var last=groups[groups.length-1];
+                if(last&&last.key===v.product_id) last.items.push(v);
+                else groups.push({key:v.product_id,items:[v]});
+            });
+            groups.forEach(function(g,gi){
+                if(g.items.length>=2){
+                    var collapsed=collapsedGroups.has(g.key);
+                    tbody.appendChild(buildGroupHeader(g.items,g.key,collapsed));
+                    g.items.forEach(function(v){
+                        var row=buildRow(v,rowNum++,false,false);
+                        row.classList.add('pv-group-child');
+                        if(collapsed) row.style.display='none';
+                        tbody.appendChild(row);
+                    });
+                } else {
+                    g.items.forEach(function(v){ tbody.appendChild(buildRow(v,rowNum++,gi>0,false)); });
+                }
+            });
+        } else {
+            slice.forEach(function(v){ tbody.appendChild(buildRow(v,rowNum++,false,false)); });
+        }
+        if (slice.length === 0) {
+            var emptyTr = document.createElement('tr');
+            emptyTr.className = 'ds-empty-row';
+            var emptyTd = document.createElement('td');
+            emptyTd.colSpan = 10;
+            emptyTd.style.cssText = 'height:56px;box-sizing:border-box;';
+            emptyTd.textContent = 'No results';
+            emptyTr.appendChild(emptyTd);
+            tbody.appendChild(emptyTr);
+        }
+        dsTable.appendChild(tbody);
+        _syncSelAll();
+        renderPager();
+        positionPager();
+        if(window._updateCounter) window._updateCounter();
+    }
+
+    function buildRow(v,rowNum,isGroupStart,pinned){
+        {
+            var tr=document.createElement('tr');
+            tr.className=(rowNum%2===0?'row2':'row1')+(isGroupStart?' group-start':'')+(pinned?' ds-pinned':'');
+            tr.style.cursor='pointer';
+            // Anchor #v<variant_id> tells the product change_form's JS to
+            // activate the tab for *this* variant (not the first one).
+            var editUrl=(v.is_hybrid && !v.is_dropshipping)
+                ? '/admin/catalog/product/'+v.product_id+'/change/#v'+v.id
+                : '/admin/catalog/dropshippingproduct/'+v.product_id+'/change/#v'+v.id;
+
+            /* checkbox */
+            var cbTd=document.createElement('td'); cbTd.className='col-cb action-checkbox';
+            cbTd.innerHTML='<input type="checkbox" class="ds-cb" value="'+v.id+'">';
+            cbTd.querySelector('.ds-cb').checked=SEL.has(String(v.id));
+
+            /* photos */
+            var photosTd=document.createElement('td'); photosTd.className='col-photos';
+            if(v.photos&&v.photos.length){
+                var photosDiv=document.createElement('div'); photosDiv.className='pv-photos';
+                v.photos.forEach(function(url){
+                    var wrap=document.createElement('div'); wrap.className='pv-photo-wrap';
+                    var thumb=document.createElement('img'); thumb.className='pv-thumb'; thumb.src=url; thumb.onerror=function(){wrap.style.display='none';};
+                    var preview=document.createElement('div'); preview.className='pv-photo-preview';
+                    var pi=document.createElement('img'); pi.src=url; preview.appendChild(pi);
+                    wrap.appendChild(thumb); wrap.appendChild(preview);
+                    wrap.addEventListener('mouseenter',function(){var r=wrap.getBoundingClientRect();preview.style.left=(window.clX?window.clX(r.left):r.left)+'px';preview.style.top=(window.clFlipTop?window.clFlipTop(r,preview.offsetHeight,6):(r.bottom+6))+'px';});
+                    wrap.addEventListener('click',function(e){e.stopPropagation();e.preventDefault();lightboxImg.src=url;lightbox.classList.add('open');});
+                    photosDiv.appendChild(wrap);
+                });
+                photosTd.appendChild(photosDiv);
+            } else {photosTd.textContent='—';photosTd.style.color='#9ca3af';}
+
+            /* sku */
+            var skuTd=document.createElement('td'); skuTd.className='col-sku';
+            skuTd.innerHTML = v.sku
+                ? '<span class="copy-on-click" data-copy="'+esc(v.sku)+'" title="Copy SKU" style="color:#9ca3af;font-size:12px">'+esc(v.sku)+'</span>'
+                : '<span style="color:#9ca3af;font-size:12px">—</span>';
+
+            /* name */
+            var nameTh=document.createElement('th'); nameTh.className='col-name';
+            nameTh.innerHTML='<span class="col-name-val copy-on-click" data-copy="'+esc(v.name||'')+'" title="Copy" style="color:#374151;">'+esc(v.name||'—')+'</span>';
+
+            /* price */
+            var priceTd=document.createElement('td'); priceTd.className='col-price';
+            priceTd.textContent=v.price?v.price:'—';
+            if(!v.price) priceTd.style.color='#9ca3af';
+
+            /* is_active */
+            var activeTd=document.createElement('td'); activeTd.className='col-active';
+            var activeCb=document.createElement('input'); activeCb.type='checkbox'; activeCb.className='pv-active-cb'; activeCb.checked=!!v.is_active;
+            activeCb.addEventListener('change',function(e){
+                e.stopPropagation();
+                v.is_active=activeCb.checked;
+                saveField(v.id,'is_active',activeCb.checked,activeCb).then(function(){
+                    /* If a status filter or status sort is active, redraw the current page so the
+                       row
+                       immediately disappears/moves according to the filter.
+                       We do NOT reset currentPage: re-apply filter + sort.
+                     */
+                    if(isColFiltered('is_active') || sortField==='is_active'){
+                        renderRows(applyGroup(applySort(applyFilters(allData))));
+                    }
+                });
+            });
+            activeCb.addEventListener('click',function(e){e.stopPropagation();});
+            activeTd.appendChild(activeCb);
+
+            /* categories */
+            var catTd=document.createElement('td'); catTd.className='col-cat';
+            if(v.categories&&v.categories.length){
+                catTd.innerHTML='<div class="cat-wrap">'+v.categories.map(function(c){return '<span class="pv-cat-tag">'+esc(c)+'</span>';}).join('')+'</div>';
+            } else { catTd.textContent='—'; catTd.style.color='#9ca3af'; }
+
+            /* labels */
+            var labelsTd=document.createElement('td'); labelsTd.className='col-labels';
+            if(v.labels&&v.labels.length){
+                labelsTd.innerHTML=v.labels.map(function(l){
+                    return '<span class="app-label" style="--label-color:'+esc(l.color)+'">'+esc(l.name)+'</span>';
+                }).join('');
+            } else { labelsTd.textContent='—'; labelsTd.style.color='#9ca3af'; }
+
+            /* dates */
+            var datesTd=document.createElement('td'); datesTd.className='col-dates';
+            datesTd.innerHTML='<div style="font-size:12px;color:#9ca3af;line-height:1.4;height:38px;display:flex;flex-direction:column;justify-content:center;overflow:hidden">'+
+                '<div><span style="color:#374151;display:inline-block;margin-right:6px">Added:</span>'+esc(v.created_at||'—')+'</div>'+
+                '<div><span style="color:#374151;display:inline-block;margin-right:6px">Updated:</span>'+esc(v.updated_at||'—')+'</div>'+
+            '</div>';
+
+            /* stock */
+            var stockTd=document.createElement('td'); stockTd.className='col-stock';
+            stockTd.textContent=v.stock!=null?v.stock:'—';
+            if(!v.stock) stockTd.style.color='#9ca3af';
+
+            [cbTd,photosTd,skuTd,nameTh,catTd,labelsTd,datesTd,activeTd,priceTd,stockTd].forEach(function(cell){tr.appendChild(cell);});
+            // Remember the current list URL (with filters/sort/pagination)
+            // before navigating away — used by the product change_form to
+            // restore the same view on Save/Cancel/Breadcrumb-back.
+            function rememberBack(){
+                document.cookie = 'drops_back=' + encodeURIComponent(location.href) +
+                                  '; path=/admin/; max-age=600; SameSite=Lax';
+            }
+            tr.addEventListener('click',function(e){
+                if(e.button!==0) return;
+                if(e.target.type==='checkbox'||e.target.tagName==='A'||e.target.tagName==='INPUT'||e.target.tagName==='BUTTON') return;
+                rememberBack();
+                window.location.href=editUrl;
+            });
+            // Also catch direct anchor clicks (the .col-name <a>).
+            var nameLink = nameTh.querySelector('a');
+            if (nameLink) nameLink.addEventListener('click', rememberBack);
+            return tr;
+        }
+    }
+
+    /* Delegated change listener: keep SEL in sync with row checkboxes. */
+    dsTable.addEventListener('change',function(e){
+        var cb=e.target;
+        if(!cb.classList||!cb.classList.contains('ds-cb')) return;
+        if(cb.checked) SEL.add(String(cb.value)); else SEL.delete(String(cb.value));
+        renderRows(currentFiltered);
+        if(window._updateCounter) window._updateCounter();
+    });
+
+    /* Counter override — reports the full cross-page selection (SEL.size)
+       out of the entire filtered dataset (currentFiltered.length). */
+    function _installCounter(){
+        var counter=document.querySelector('.cl-counter');
+        if(!counter) return;
+        // "Clear selection" — clears the whole cross-page selection (including
+        // other pages).
+        if(!document.getElementById('cl-clear-sel')){
+            var clearBtn=document.createElement('a');
+            clearBtn.href='#'; clearBtn.id='cl-clear-sel'; clearBtn.className='cl-top-btn';
+            clearBtn.textContent='Clear selection';
+            clearBtn.style.marginLeft='10px';
+            clearBtn.style.setProperty('display','none','important');
+            clearBtn.addEventListener('click',function(e){
+                e.preventDefault();
+                // Remove only the selection from OTHER pages, keeping the current page's selection.
+                var pageIds=new Set(_pageSlice().map(function(v){return String(v.id);}));
+                Array.from(SEL).forEach(function(id){ if(!pageIds.has(id)) SEL.delete(id); });
+                renderRows(currentFiltered);
+                if(window._updateCounter) window._updateCounter();
+            });
+            counter.insertAdjacentElement('afterend', clearBtn);
+        }
+        window._updateCounter=function(){
+            var total = Math.max((currentFiltered && currentFiltered.length) || 0, SEL.size);
+            counter.textContent='Selected: '+SEL.size+' of '+total;
+            // "Clear selection" — only when there is a selection from OTHER pages
+            // (outside the current one).
+            // .cl-top-btn has display:inline-flex !important — hide it with !important too.
+            var pageIds=_pageSlice().map(function(v){return String(v.id);});
+            var onPage=pageIds.filter(function(id){return SEL.has(id);}).length;
+            var offPage=SEL.size-onPage;
+            var cb=document.getElementById('cl-clear-sel');
+            if(cb){ if(offPage>0) cb.style.removeProperty('display'); else cb.style.setProperty('display','none','important'); }
+        };
+        window._updateCounter();
+        /* cl-bar is built by base_site on DOMContentLoaded - later than our synchronous
+           initial updateTable(). So we draw the reset-filters button here, when the bar is already
+           in the DOM (otherwise a persisted filter after F5 doesn't show it).
+         */
+        _renderResetBtn();
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _installCounter);
+    } else {
+        _installCounter();
+    }
+
+    updateTable({preservePage: true});  // first render — keep page from localStorage
+})();
+</script>
+{% endblock %}
+
+{% block pagination %}{% endblock %}

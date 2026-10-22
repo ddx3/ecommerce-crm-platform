@@ -1,0 +1,92 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+backend/venv/
+backend/env/
+
+# Django
+backend/*.sqlite3
+backend/staticfiles/
+backend/media/
+
+# Environment variables
+.env
+*.env
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.next/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude
+.claude/
+
+# Dev artifacts (screenshots, temporary dumps, one-off debug scripts)
+_check_*.jpg
+screenshot_*.png
+.tmp_*
+_screens/
+llm_last_output.txt
+test.html
+write_views.py
+backend/check_variants.py
+backend/_test_*.py
+backend/_seed_*.py
+
+# Reference API docs (kept locally, not needed in the repo)
+/API_documentation_*
+/order-api-ok-2019*
+
+# Migrations (optional - some projects include them)
+# backend/**/migrations/
+backend/backups/
+
+# Database backups (local, not in git)
+backups/
+
+# MCP config — contains tokens (GITHUB_PERSONAL_ACCESS_TOKEN), kept locally
+.mcp.json
+
+# Stray/one-off artifacts (not needed in the repo/production)
+frontend/frontend/
+*_done.log
+
+# Local catalog embeddings cache (regenerated)
+backend/.embed_cache/
+
+# Log of the background embeddings indexing (warm_embeddings) — temporary artifact
+backend/warm_embeddings.log
+
+# Local dev server logs (the harness writes to the root) — not in the repo.
+# No dot in the pattern: the harness writes both dev_backend.log and dev_backend_err.log.
+/dev_backend*
+/dev_frontend*
+
+# Generated instruction exports and printout backups — local artifacts
+/backend/_exports/
+
+# Shared requests folder for shop-helper on the VPS (ops/shop_helper.py)
+ops-queue/
+
+# Local working materials (exports, printouts) — not in the repo
+/assets/

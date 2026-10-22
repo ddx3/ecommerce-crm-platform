@@ -1,0 +1,54 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Stocktake warning modal. Styled with CRM tokens (base_site.html):
+   --radius-modal / --shadow-modal / --btn-h-default, palette
+   #374151/#6b7280/#9ca3af/#e5e7eb, buttons as in submit-row. Minimal text:
+   numbers only (rows like form-row) + actions.
+   ──────────────────────────────────────────────────────────────────────────
+ */
+.sdm-overlay {
+  position: fixed; inset: 0; z-index: 100000;
+  background: rgba(17, 24, 39, .45);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.sdm-box {
+  background: #fff; border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: var(--radius-modal, 8px);
+  width: 440px; max-width: 100%; max-height: calc(100vh - 32px); overflow: auto;
+  box-shadow: var(--shadow-modal, 0 8px 32px rgba(0, 0, 0, .18));
+  font-family: var(--font, -apple-system, 'Segoe UI', Roboto, sans-serif); color: #374151;
+}
+
+/* Single vertical rhythm: 12px above/below each zone (head/body/actions). */
+/* Header — like the CRM panel header */
+.sdm-head {
+  padding: 12px 16px; border-bottom: 1px solid var(--hairline-color, #e5e7eb);
+  font-size: 13px; font-weight: 600; color: #111827;
+}
+
+.sdm-body { padding: 16px; }
+
+/* The only fact — how many are in orders. Centered, the number is accented. */
+.sdm-fact { text-align: center; font-size: 13px; color: #6b7280; }
+.sdm-fact b { color: #111827; font-weight: 600; font-size: 15px; }
+
+/* Footer — like submit-row (border-top + buttons), buttons centered, 12px rhythm */
+.sdm-actions {
+  display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+  padding: 12px 16px;
+  border-top: 1px solid var(--hairline-color, #e5e7eb);
+}
+.sdm-btn {
+  height: var(--btn-h-default, 28px); display: inline-flex; align-items: center;
+  border: 1px solid #d1d5db; background: #fff; color: #6b7280;
+  border-radius: var(--radius-input, 4px); padding: 0 12px;
+  font-size: 13px; font-weight: 400; cursor: pointer; line-height: 1;
+  font-family: inherit;
+}
+.sdm-btn:hover { background: var(--button-hover-bg, #f3f4f6); color: #374151; border-color: #9ca3af; }
+.sdm-btn.sdm-primary {
+  background: var(--default-button-bg, #374151); border-color: var(--default-button-bg, #374151);
+  color: #fff; font-weight: 500; padding: 0 14px;
+}
+.sdm-btn.sdm-primary:hover { background: #1f2937; border-color: #1f2937; color: #fff; }
+.sdm-btn:focus-visible { outline: 2px solid #1f2937; outline-offset: 1px; }

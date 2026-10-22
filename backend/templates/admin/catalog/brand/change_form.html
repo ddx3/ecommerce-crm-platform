@@ -1,0 +1,307 @@
+{% extends "admin/change_form.html" %}
+
+{% block content_title %}{% endblock %}
+{% block object-tools %}{% endblock %}
+
+{% block submit_buttons_top %}
+{% include "admin/_submit_buttons_top.html" %}
+{% endblock %}
+{% block submit_buttons_bottom %}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  .submit-row:not(.submit-row-top) { display: none !important; }
+
+  /* Uniform spacing */
+  #content-main .form-row { display: flex !important; align-items: flex-start !important; padding: 14px 20px !important; }
+  #content-main fieldset.module { padding-bottom: 0 !important; margin-bottom: 0 !important; }
+  #content-main fieldset.module .form-row:last-of-type { border-bottom: 1px solid #e5e7eb !important; }
+  .form-row label { font-weight: 400 !important; padding-top: 0 !important; float: none !important; }
+  #content-main .form-row > div { padding-top: 0 !important; }
+  #content-main .flex-container { align-items: flex-start !important; }
+  #content-main .flex-container.checkbox-row { align-items: center !important; }
+  #id_discount_percent { width: 38px !important; min-width: 0 !important; max-width: 38px !important; box-sizing: border-box !important; padding: 4px 5px !important; text-align: center !important; }
+  .form-row.field-name label.required { font-weight: 400 !important; }
+
+  .info-section {
+    margin: 14px 20px; padding: 10px 14px;
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+  }
+  .info-section + fieldset { border-top: 1px solid #e5e7eb !important; }
+  .vg-items { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 0; }
+  .vg-items:empty { display: none; }
+  .pg-item {
+    position: relative; border-radius: 6px; overflow: hidden;
+    display: inline-block; cursor: grab; flex-shrink: 0; line-height: 0;
+    border: 1px solid #d1d5db;
+  }
+  .pg-item img { max-height: 80px; max-width: 200px; width: auto; height: auto; display: block; cursor: zoom-in; transition: filter .15s; }
+  .pg-item:hover img { filter: brightness(0.82); }
+  .pg-replace-label input { display: none; }
+  .pg-item.dragging { opacity: 0.35; cursor: grabbing; }
+  .pg-item.drag-over { outline: 2px dashed #9ca3af; outline-offset: 2px; }
+  .pg-actions {
+    position: absolute; top: 4px; right: 4px; display: flex; gap: 3px;
+    opacity: 0; transition: opacity 0.15s;
+  }
+  .pg-item:hover .pg-actions { opacity: 1; }
+  .pg-act-btn {
+    width: 22px; height: 22px; background: rgba(0,0,0,0.6); color: #fff;
+    border: none; border-radius: 3px; cursor: pointer; font-size: 12px;
+    display: flex; align-items: center; justify-content: center; line-height: 1;
+  }
+  .pg-act-btn:hover { background: rgba(0,0,0,0.88); }
+  .pg-del-btn:hover { background: rgba(185,28,28,0.9); }
+  .pg-loading {
+    width: 100px; height: 100px; background: #f3f4f6; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; color: #9ca3af; animation: pg-spin 1s linear infinite;
+  }
+  @keyframes pg-spin { to { transform: rotate(360deg); } }
+  .pg-add-area { margin-top: 0; }
+  .vg-items:not(:empty) + .pg-add-area { margin-top: 8px; }
+  .pg-add-btn {
+    display: inline-flex !important; align-items: center !important;
+    font: inherit !important; font-size: 13px !important;
+    padding: 4px 12px !important; margin: 0 !important;
+    color: #6b7280 !important; background: #fff !important;
+    border: 1px dashed #d1d5db !important; border-radius: 4px !important;
+    cursor: pointer !important; box-shadow: none !important;
+  }
+  .pg-add-btn:hover { background: #f3f4f6 !important; border-color: #9ca3af !important; color: #374151 !important; }
+  .pg-add-btn input[type="file"] { display: none; }
+  /* .pg-lightbox — styles moved to base_site.html (.app-lightbox + .pg-lightbox alias) */
+  .info-section.vg-section { cursor: pointer; transition: border-color .15s; }
+  .info-section.vg-section.paste-active { border-color: #6b7280 !important; }
+</style>
+{% include "admin/_form_guard.html" %}
+{% endblock %}
+
+{% block content %}
+{{ block.super }}
+<script>
+(function() {
+  'use strict';
+
+  /* Dirty state + cancel/exit are already handled in _form_guard.html (included
+     in extrahead above). Do NOT duplicate the logic here, otherwise it overwrites
+     window.pgMarkDirty
+     and form_guard won't remove the .cl-btn-idle class (pointer-events:none) from the
+     "Save" button — and the click won't go through.
+   */
+
+  /* ── Discount field: max 100 ── */
+  document.addEventListener('DOMContentLoaded', function() {
+    var discInp = document.getElementById('id_discount_percent');
+    if (discInp) {
+      discInp.setAttribute('max', '100');
+      discInp.setAttribute('min', '0');
+      discInp.addEventListener('input', function() {
+        if (this.value.length > 3) this.value = this.value.slice(0, 3);
+        var v = parseInt(this.value, 10);
+        if (!isNaN(v) && v > 100) this.value = '100';
+      });
+    }
+  });
+
+  /* ── Photo section ── */
+  document.addEventListener('DOMContentLoaded', function() {
+    var brandId = '{% if original %}{{ original.pk }}{% endif %}';
+    var form = document.querySelector('form[method="post"]');
+    var fieldset = document.querySelector('fieldset.module');
+    if (!fieldset || !form) return;
+
+    /* build section */
+    var section = document.createElement('div');
+    section.className = 'info-section vg-section';
+    section.style.margin = '14px 20px 0';
+
+    var itemsEl = document.createElement('div');
+    itemsEl.className = 'vg-items';
+    section.appendChild(itemsEl);
+
+    var addArea = document.createElement('div');
+    addArea.className = 'pg-add-area';
+    var addLabel = document.createElement('label');
+    addLabel.className = 'pg-add-btn';
+    var fileInput = document.createElement('input');
+    fileInput.type = 'file'; fileInput.multiple = true; fileInput.accept = 'image/*';
+    addLabel.appendChild(fileInput);
+    addLabel.appendChild(document.createTextNode('+ Add photo'));
+    addArea.appendChild(addLabel);
+    section.appendChild(addArea);
+    fieldset.insertAdjacentElement('afterend', section);
+    var divider = document.createElement('div');
+    divider.style.cssText = 'height:1px;background:#e5e7eb;margin:14px 0 0';
+    section.insertAdjacentElement('afterend', divider);
+
+    /* paste from clipboard (only when no photos yet) */
+    function hasPhotos() { return !!itemsEl.querySelector('.pg-item'); }
+
+    section.addEventListener('click', function(e) {
+      if (e.target.closest('button,input,label,img')) return;
+      if (hasPhotos()) return;
+      section.classList.toggle('paste-active');
+    });
+
+    document.addEventListener('paste', function(e) {
+      if (!section.classList.contains('paste-active')) return;
+      var items = e.clipboardData ? e.clipboardData.items : [];
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          var file = items[i].getAsFile();
+          if (file) { doUpload(file); section.classList.remove('paste-active'); e.preventDefault(); return; }
+        }
+      }
+    });
+
+    /* lightbox */
+    var lightbox = document.createElement('div');
+    lightbox.className = 'pg-lightbox';
+    lightbox.style.display = 'none';
+    var lbImg = document.createElement('img');
+    lightbox.appendChild(lbImg);
+    document.body.appendChild(lightbox);
+    lightbox.addEventListener('click', function() { lightbox.style.display = 'none'; });
+    document.addEventListener('keydown', function(e) { if (e.key === 'Escape') lightbox.style.display = 'none'; });
+    function openLightbox(url) { lbImg.src = url; lightbox.style.display = 'flex'; }
+
+    function getCSRF() {
+      var el = document.querySelector('[name=csrfmiddlewaretoken]');
+      return el ? el.value : '';
+    }
+
+    var dragSrc = null;
+
+    function syncAddBtn() {
+      addArea.style.display = itemsEl.querySelector('.pg-item') ? 'none' : '';
+    }
+
+    function addItem(id, url) {
+      var item = document.createElement('div');
+      item.className = 'pg-item';
+      item.dataset.id = id;
+      item.setAttribute('draggable', 'true');
+
+      var imgEl = document.createElement('img');
+      imgEl.src = url; imgEl.alt = '';
+      item.appendChild(imgEl);
+
+      var actions = document.createElement('div');
+      actions.className = 'pg-actions';
+      actions.innerHTML =
+        '<label class="pg-act-btn pg-replace-label" title="Replace photo"><input type="file" accept="image/*">✎</label>' +
+        '<button class="pg-act-btn pg-del-btn" type="button" title="Delete">✕</button>';
+      item.appendChild(actions);
+
+      imgEl.addEventListener('click', function() { openLightbox(imgEl.src); });
+
+      item.querySelector('.pg-del-btn').addEventListener('click', function() {
+        if (!confirm('Delete the photo?')) return;
+        fetch('/admin/catalog/delete-brand-photo/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRF() },
+          body: JSON.stringify({ id: parseInt(id) }),
+        }).then(function(r) { return r.json(); }).then(function(d) {
+          if (d.ok) { item.remove(); syncAddBtn(); window.pgMarkDirty && window.pgMarkDirty(); }
+        });
+      });
+
+      item.querySelector('input[type="file"]').addEventListener('change', function(e) {
+        var file = e.target.files[0];
+        if (!file) return;
+        var fd = new FormData();
+        fd.append('photo_id', id);
+        fd.append('image', file);
+        imgEl.style.opacity = '0.4';
+        fetch('/admin/catalog/replace-brand-photo/', {
+          method: 'POST',
+          headers: { 'X-CSRFToken': getCSRF() },
+          body: fd,
+        }).then(function(r) { return r.json(); }).then(function(d) {
+          if (d.url) { imgEl.src = d.url + '?t=' + Date.now(); }
+          imgEl.style.opacity = '1';
+        });
+        this.value = '';
+      });
+
+      item.addEventListener('dragstart', function(e) {
+        dragSrc = item; item.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      item.addEventListener('dragend', function() {
+        item.classList.remove('dragging');
+        itemsEl.querySelectorAll('.pg-item').forEach(function(i) { i.classList.remove('drag-over'); });
+        dragSrc = null;
+        saveOrder();
+      });
+      item.addEventListener('dragover', function(e) {
+        e.preventDefault(); item.classList.add('drag-over');
+        if (dragSrc && dragSrc !== item) {
+          var all = Array.from(itemsEl.querySelectorAll('.pg-item'));
+          var si = all.indexOf(dragSrc), ti = all.indexOf(item);
+          itemsEl.insertBefore(dragSrc, si < ti ? item.nextSibling : item);
+        }
+      });
+      item.addEventListener('dragleave', function() { item.classList.remove('drag-over'); });
+
+      itemsEl.appendChild(item);
+      syncAddBtn();
+    }
+
+    function saveOrder() {
+      var ids = Array.from(itemsEl.querySelectorAll('.pg-item')).map(function(i) { return parseInt(i.dataset.id); });
+      fetch('/admin/catalog/reorder-brand-photos/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRF() },
+        body: JSON.stringify({ order: ids }),
+      });
+    }
+
+    function doUpload(file) {
+      var loader = document.createElement('div');
+      loader.className = 'pg-loading'; loader.textContent = '↻';
+      itemsEl.appendChild(loader);
+      var fd = new FormData();
+      fd.append('image', file);
+      if (brandId) {
+        fd.append('brand_id', brandId);
+      } else {
+        fd.append('temp_key', tempKey);
+      }
+      fetch('/admin/catalog/upload-brand-photo/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCSRF() },
+        body: fd,
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        loader.remove();
+        if (d.id) { addItem(d.id, d.url); window.pgMarkDirty && window.pgMarkDirty(); }
+      }).catch(function() { loader.remove(); });
+    }
+
+    /* temp key for new brand */
+    var tempKey = '';
+    if (!brandId) {
+      tempKey = 'br_' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+      var hidden = document.createElement('input');
+      hidden.type = 'hidden'; hidden.name = '_brand_photo_temp_key'; hidden.value = tempKey;
+      form.appendChild(hidden);
+    }
+
+    /* load existing photos */
+    if (brandId) {
+      fetch('/admin/catalog/brand-photos/?brand_id=' + brandId)
+        .then(function(r) { return r.json(); })
+        .then(function(d) { (d.photos || []).forEach(function(p) { addItem(p.id, p.url); }); syncAddBtn(); });
+    }
+
+    fileInput.addEventListener('change', function(e) {
+      Array.from(e.target.files).forEach(doUpload);
+      this.value = '';
+    });
+  });
+
+})();
+</script>
+{% endblock %}

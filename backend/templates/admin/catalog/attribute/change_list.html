@@ -1,0 +1,294 @@
+{% extends "admin/change_list.html" %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+#result_list { border-collapse: collapse !important; border-top: none !important; --hairline-color: transparent; table-layout: auto !important; width: 100% !important; }
+/* "Name" column — sized exactly to the longest text. table-layout:auto + width:1px +
+   nowrap:
+   auto-layout must fit unbreakable text, so the column = max-content of the name (minimum),
+   and "Values" takes all the rest. (NOT fixed: fixed scales columns proportionally and
+   may clip.)
+ */
+#result_list .action-checkbox-column, #result_list td.action-checkbox { width: 44px !important; }
+#result_list th.column-name, #result_list td.field-name, #result_list th.field-name {
+    width: 1px !important; white-space: nowrap !important;
+}
+#result_list th.field-name a, #result_list td.field-name a { white-space: nowrap !important; }
+#result_list td, #result_list th { border-top: none !important; }
+#result_list thead th {
+    background: #f9fafb !important; border-bottom: 1px solid #e5e7eb !important;
+    border-left: 1px solid #e5e7eb !important; padding: 10px 12px !important;
+    font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important;
+    letter-spacing: 0.4px !important; color: #6b7280 !important; white-space: nowrap !important;
+    vertical-align: middle !important; text-align: left !important;
+}
+#result_list thead th:first-child { border-left: none !important; }
+#result_list tbody tr { border-bottom: 1px solid #e5e7eb !important; height: 56px; }
+#result_list tbody tr.row1 { background: #fff !important; }
+#result_list tbody tr.row2 { background: #f9fafb !important; }
+#result_list tbody tr:hover { background: #eef0f3 !important; }
+#result_list tbody tr:hover .av-tag { background: #e5e7eb !important; border-color: #d1d5db !important; }
+#result_list tbody td, #result_list tbody th {
+    padding: 8px 12px !important; font-size: 13px !important; vertical-align: middle !important;
+    border-left: 1px solid #e5e7eb !important; border-bottom: none !important;
+    font-weight: 400 !important; color: #374151 !important; overflow: hidden !important;
+    height: 56px !important; box-sizing: border-box !important;
+}
+#result_list tbody td:first-child, #result_list tbody th:first-child { border-left: none !important; }
+#result_list tbody th a { color: #374151 !important; text-decoration: none !important; font-weight: 400 !important; }
+.av-tag {
+    display: inline-block; font-size: 13px; background: #fff;
+    border: 1px solid #e5e7eb; border-radius: 3px;
+    padding: 1px 7px; margin: 1px 3px 1px 0;
+    color: #6b7280; white-space: nowrap;
+}
+/* Values column — tags in 2 rows, but the ROW HEIGHT does not change:
+   .av-wrap has a fixed height of 40px (= the 56px row content area with 8px padding),
+   extra tags are clipped by overflow:hidden. The td height stays 56px.
+ */
+#result_list td.field-display_values {
+    white-space: normal !important; overflow: hidden !important;
+    padding-top: 4px !important; padding-bottom: 4px !important;  /* we sacrifice top/bottom spacing for the gap between rows; 46 + 8 = 54 < 56 → the row doesn't grow */
+}
+#result_list .av-wrap {
+    display: flex; flex-wrap: wrap; align-content: flex-start;
+    max-height: 46px; overflow: hidden; row-gap: 6px;  /* up to 2 rows (20px + 6px gap); 1 row is centered via the cell's vertical-align:middle */
+}
+#result_list .av-wrap .av-tag { margin: 0 4px 0 0 !important; }
+
+/* ── Clickable filter headers ── */
+#result_list thead th.attr-flt-th {
+    cursor: pointer !important; user-select: none; position: relative;
+    padding-right: 26px !important;
+    pointer-events: auto !important;
+}
+#result_list thead th.attr-flt-th:hover,
+#result_list thead th.attr-flt-th.col-open { color: #1f2937 !important; background: #f3f4f6 !important; }
+#result_list thead th.attr-flt-th.col-on { background: #d1d5db !important; color: #1f2937 !important; }
+#result_list thead th .th-badge {
+    position: absolute; right: 7px; top: 50%; transform: translateY(-50%);
+    display: flex; align-items: center; pointer-events: none; color: #374151;
+}
+#result_list thead th.attr-flt-th .sortoptions { display: none !important; }
+
+/* Highlight of matched rows (filter by name). */
+#result_list tbody tr.attr-hit,
+#result_list tbody tr.attr-hit.row1,
+#result_list tbody tr.attr-hit.row2 { background: #fef9c3 !important; }
+#result_list tbody tr.attr-hit:hover { background: #fef08a !important; }
+/* Highlight of matched values (filter by value). */
+.av-tag.av-hit {
+    background: #fde047 !important;
+    border-color: #ca8a04 !important;
+    color: #713f12 !important;
+}
+
+/* ── Popover ── */
+#attr-flt-pop {
+    display: none; position: fixed; z-index: 9999; background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0 0 6px 6px;
+    box-shadow: 0 6px 16px rgba(0,0,0,.18);
+    overflow: hidden; width: 200px;
+}
+#attr-flt-pop.open { display: block; }
+.fp-pop-body { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+.fp-search { width: 100%; box-sizing: border-box; height: 28px; padding: 0 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; outline: none; }
+.fp-search:focus { border-color: #9ca3af; }
+</style>
+
+<div id="attr-flt-pop"></div>
+{% endblock %}
+
+{% block footer %}
+{{ block.super }}
+<script>
+(function() {
+  var resultList = document.getElementById('result_list');
+  if (!resultList) return;
+  var tbody = resultList.querySelector('tbody');
+  var thead = resultList.querySelector('thead');
+  if (!tbody || !thead) return;
+
+  var STATE_KEY = 'attr_list_state_v1';
+  var F = {nameQ:'', valueQ:''};
+  try { var raw = localStorage.getItem(STATE_KEY); if (raw) Object.assign(F, JSON.parse(raw)); } catch(e){}
+  function saveState(){ try { localStorage.setItem(STATE_KEY, JSON.stringify(F)); } catch(e){} }
+
+  var pop = document.getElementById('attr-flt-pop');
+  var popOwner = null;
+
+  function rowMatches(row){
+    if (F.nameQ){
+      var nameCell = row.querySelector('.field-name, th.field-name, td.field-name');
+      var nameText = nameCell ? (nameCell.textContent || '').trim() : '';
+      if (nameText.toLowerCase().indexOf(F.nameQ.toLowerCase()) === -1) return false;
+    }
+    if (F.valueQ){
+      var valuesCell = row.querySelector('.field-display_values');
+      if (!valuesCell) return false;
+      /* Check each av-tag separately — filter by attribute values. */
+      var tags = valuesCell.querySelectorAll('.av-tag');
+      var found = false;
+      var q = F.valueQ.toLowerCase();
+      tags.forEach(function(t){ if ((t.textContent||'').toLowerCase().indexOf(q) !== -1) found = true; });
+      if (!found) return false;
+    }
+    return true;
+  }
+  function hasActiveFilter(){ return !!(F.nameQ || F.valueQ); }
+
+  function applyFilters(){
+    var rows = Array.from(tbody.querySelectorAll('tr'));
+    var nq = (F.nameQ || '').toLowerCase();
+    var vq = (F.valueQ || '').toLowerCase();
+    rows.forEach(function(r){
+      r.style.display = '';
+      /* Row highlight — only if there are name matches. */
+      var nameHit = false;
+      if (nq){
+        var nameCell = r.querySelector('.field-name, th.field-name, td.field-name');
+        var nameText = nameCell ? (nameCell.textContent || '').trim().toLowerCase() : '';
+        nameHit = nameText.indexOf(nq) !== -1;
+      }
+      r.classList.toggle('attr-hit', nameHit);
+      /* Highlight of individual av-tags — per the value filter. */
+      var valuesCell = r.querySelector('.field-display_values');
+      if (valuesCell){
+        valuesCell.querySelectorAll('.av-tag').forEach(function(t){
+          var match = vq && (t.textContent || '').toLowerCase().indexOf(vq) !== -1;
+          t.classList.toggle('av-hit', match);
+        });
+      }
+    });
+  }
+
+  function paintHeader(){
+    thead.querySelectorAll('th.attr-flt-th').forEach(function(th){
+      var col = th.dataset.col;
+      var on = (col==='name' && F.nameQ) || (col==='values' && F.valueQ);
+      th.classList.toggle('col-on', on);
+      var badge = th.querySelector('.th-badge');
+      if (badge) badge.innerHTML = on ? '<svg width="9" height="10" viewBox="0 0 10 11" fill="#374151"><path d="M0 0h10L6.5 5v6h-3V5z"/></svg>' : '';
+    });
+  }
+
+  function update(){ saveState(); paintHeader(); applyFilters(); renderResetBtn(); }
+
+  function closePop(){
+    pop.classList.remove('open');
+    if (popOwner){ popOwner.classList.remove('col-open'); popOwner = null; }
+  }
+  function openPop(th, buildFn){
+    if (popOwner === th && pop.classList.contains('open')){ closePop(); return; }
+    closePop();
+    popOwner = th;
+    pop.innerHTML = '';
+    var resetBar = document.createElement('button'); resetBar.type='button';
+    resetBar.textContent = 'Reset filter';
+    resetBar.style.cssText = 'display:block;width:100%;padding:10px;border:none;border-bottom:1px solid #e5e7eb;background:none;color:#dc2626;font-size:13px;font-weight:500;cursor:pointer;text-align:left;';
+    resetBar.addEventListener('click', function(){ resetCol(th.dataset.col); closePop(); });
+    resetBar.addEventListener('mouseenter', function(){ this.style.background='#fef2f2'; });
+    resetBar.addEventListener('mouseleave', function(){ this.style.background='none'; });
+    pop.appendChild(resetBar);
+    buildFn();
+    var rect = th.getBoundingClientRect();
+    var w = 220;
+    pop.style.width = w + 'px';
+    pop.style.left = (window.clFlipLeft ? window.clFlipLeft(rect, w, 8) : Math.max(8, Math.min(rect.left, window.innerWidth - w - 8))) + 'px';
+    pop.classList.add('open');
+    pop.style.top = (window.clFlipTop ? window.clFlipTop(rect, pop.offsetHeight, 0) : (rect.bottom)) + 'px';
+    th.classList.add('col-open');
+  }
+
+  function resetCol(col){
+    if (col === 'name')   F.nameQ = '';
+    if (col === 'values') F.valueQ = '';
+    update();
+  }
+
+  function popBody(){
+    var d = document.createElement('div'); d.className = 'fp-pop-body';
+    pop.appendChild(d); return d;
+  }
+  function buildNamePop(){
+    var b = popBody();
+    var inp = document.createElement('input'); inp.type='text'; inp.className='fp-search';
+    inp.placeholder = 'Search by name...'; inp.value = F.nameQ;
+    inp.addEventListener('input', function(){ F.nameQ = inp.value; update(); });
+    b.appendChild(inp);
+    setTimeout(function(){ inp.focus(); }, 40);
+  }
+  function buildValuesPop(){
+    var b = popBody();
+    var inp = document.createElement('input'); inp.type='text'; inp.className='fp-search';
+    inp.placeholder = 'Search by value...'; inp.value = F.valueQ;
+    inp.addEventListener('input', function(){ F.valueQ = inp.value; update(); });
+    b.appendChild(inp);
+    setTimeout(function(){ inp.focus(); }, 40);
+  }
+
+  function decorateHeader(){
+    var ths = thead.querySelectorAll('th');
+    ths.forEach(function(th){
+      var col = null;
+      var cls = th.className || '';
+      if (/column-name\b/.test(cls)) col = 'name';
+      else if (/column-display_values\b/.test(cls)) col = 'values';
+      else {
+        var txt = (th.textContent || '').trim().toLowerCase();
+        if (txt === 'name') col = 'name';
+        else if (txt === 'values') col = 'values';
+      }
+      if (!col) return;
+      th.classList.add('attr-flt-th');
+      th.dataset.col = col;
+      var sortLink = th.querySelector('a');
+      if (sortLink){
+        var span = document.createElement('span'); span.textContent = sortLink.textContent;
+        sortLink.parentNode.replaceChild(span, sortLink);
+      }
+      var badge = document.createElement('span'); badge.className = 'th-badge';
+      th.appendChild(badge);
+      th.addEventListener('click', function(e){
+        e.stopPropagation();
+        if (col === 'name') openPop(th, buildNamePop);
+        else if (col === 'values') openPop(th, buildValuesPop);
+      });
+    });
+  }
+
+  function renderResetBtn(){
+    var bar = document.querySelector('.submit-row.cl-bar'); if (!bar) return;
+    var btn = bar.querySelector('#attr-reset-filters');
+    var active = hasActiveFilter();
+    if (active && !btn){
+      btn = document.createElement('button');
+      btn.type='button'; btn.id='attr-reset-filters';
+      btn.className='cl-top-btn'; btn.textContent='Reset filters';
+      btn.addEventListener('click', function(){
+        F.nameQ=''; F.valueQ=''; update();
+      });
+      var del = bar.querySelector('.cl-top-btn-danger');
+      if (del) bar.insertBefore(btn, del); else bar.appendChild(btn);
+    } else if (!active && btn){ btn.remove(); }
+  }
+
+  document.addEventListener('click', function(e){
+    if (e.button !== 0) return;
+    if (!pop.contains(e.target) && !e.target.closest('th.attr-flt-th')) closePop();
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') closePop();
+  });
+
+  decorateHeader();
+  paintHeader();
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', renderResetBtn);
+  } else { renderResetBtn(); }
+  applyFilters();
+})();
+</script>
+{% endblock %}

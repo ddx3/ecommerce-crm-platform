@@ -1,0 +1,2722 @@
+{% extends "admin/change_form.html" %}
+
+{% block extrahead %}
+{{ block.super }}
+{% include "admin/_quill_tabs.html" %}
+<style>
+/* Divider line (as for products) */
+.section-divider { height: 0; border-top: 1px solid #e5e7eb; margin: 14px 0; }
+/* The raw text of the bundle's packaging is not editable in the UI (like the packaging description) */
+#bundle_form .field-raw_text { display: none !important; }
+/* Gallery */
+.pg-items { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 0; }
+.vg-items { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 0; }
+.pg-item { position: relative; border-radius: 6px; overflow: hidden; width: 113px; cursor: grab; flex-shrink: 0; border: 1px solid #d1d5db; box-sizing: content-box; background: #fff; z-index: 1; }
+.vg-items .pg-item { width: 113px; box-sizing: content-box; }
+.pg-image-wrap { position: relative; width: 113px; height: 113px; overflow: hidden; flex-shrink: 0; }
+.pg-image-wrap > img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: zoom-in; }
+.pg-item.dragging { opacity: 0.35; cursor: grabbing; }
+.pg-item.drag-over { outline: 2px dashed #9ca3af; outline-offset: 2px; }
+.pg-actions { position: absolute; top: 4px; right: 4px; display: flex; gap: 3px; opacity: 0; transition: opacity 0.15s; }
+.pg-item:hover .pg-actions { opacity: 1; }
+.pg-act-btn { width: 22px; height: 22px; background: rgba(0,0,0,0.6); color: #fff; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; line-height: 1; }
+.pg-act-btn:hover { background: rgba(0,0,0,0.88); }
+.pg-del-btn:hover { background: rgba(185,28,28,0.9); }
+.pg-replace-label input { display: none; }
+/* Django admin hides ANY <label> without a for attribute inside .aligned
+   (.aligned label:not([for]) { display:none }) and stretches all .aligned label
+   to 160px (.aligned legend, .aligned label { width:160px }) - the specificity
+   of both is higher than .pg-act-btn, so without !important a label-button either disappears or
+   spreads to full width instead of 22×22, like the neighboring buttons.
+ */
+.pg-replace-label {
+    display: flex !important; width: 22px !important; min-width: 0 !important;
+    max-width: none !important; padding: 0 !important; margin: 0 !important; float: none !important;
+}
+.pg-main-badge { display: none; }
+.pg-eye-icon, .pg-pencil-icon { width: 14px; height: 14px; display: block; }
+.pg-eye-icon .pg-eye-slash { display: none; }
+.pg-item.is-hidden .pg-eye-icon .pg-eye-slash { display: block; }
+.pg-item.is-hidden .pg-image-wrap > img { opacity: 0.4; filter: grayscale(0.7); }
+.pg-item.is-hidden:hover .pg-image-wrap > img { opacity: 0.85; filter: grayscale(0.2); }
+.pg-item.is-hidden:not(.pg-pending-del) .pg-image-wrap { outline: 2px solid #9ca3af; outline-offset: -2px; }
+.pg-item.is-hidden:not(.pg-pending-del) .pg-image-wrap::after {
+    content: 'hidden'; position: absolute; left: 0; right: 0; bottom: 0;
+    background: rgba(55,65,81,0.85); color: #fff; font-size: 9px; line-height: 1.4;
+    text-align: center; padding: 2px 0; pointer-events: none;
+}
+/* A photo marked for deletion: dim it and show a badge. It is actually deleted
+   only on "Save". Clicking ✕ again removes the mark.
+ */
+.pg-item.pg-pending-del .pg-image-wrap > img { opacity: 0.3; filter: grayscale(1); }
+.pg-item.pg-pending-del .pg-image-wrap { outline: 2px solid #dc2626; outline-offset: -2px; }
+.pg-item.pg-pending-del .pg-del-btn { background: #dc2626; }
+.pg-item.pg-pending-del .pg-actions { opacity: 1; }
+.pg-item.pg-pending-del .pg-image-wrap::after {
+    content: 'will be deleted'; position: absolute; left: 0; right: 0; bottom: 0;
+    background: rgba(220,38,38,0.9); color: #fff; font-size: 9px; line-height: 1.4;
+    text-align: center; padding: 2px 0; pointer-events: none;
+}
+.pg-loading { width: 96px; height: 96px; background: #f3f4f6; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #9ca3af; animation: pg-spin 1s linear infinite; }
+.vg-items .pg-loading { width: 80px; height: 80px; }
+@keyframes pg-spin { to { transform: rotate(360deg); } }
+.vg-items:empty { display: none; }
+.pg-add-area { margin-top: 0; }
+.pg-items:not(:empty) + .pg-add-area,
+.vg-items:not(:empty) + .pg-add-area { margin-top: 14px; }
+/* width/min-width: reset Django's .aligned label {width:160px} - now
+   #photos-module sits inside fieldset.aligned, and label.pg-add-btn would otherwise
+   stretch to the same size as the form field labels.
+ */
+.pg-add-btn { display: inline-flex !important; align-items: center !important; width: auto !important; min-width: 0 !important; font: inherit !important; font-size: 13px !important; padding: 4px 12px !important; margin: 0 !important; color: #6b7280 !important; background: #fff !important; border: 1px dashed #d1d5db !important; border-radius: 4px !important; cursor: pointer !important; box-shadow: none !important; text-decoration: none !important; line-height: normal !important; }
+.pg-add-btn:hover { background: #f3f4f6 !important; border-color: #9ca3af !important; color: #374151 !important; }
+.pg-add-btn:focus, .pg-add-btn:focus-visible, .pg-add-btn:active { outline: none !important; box-shadow: none !important; }
+.pg-add-btn input[type="file"] { display: none; }
+/* Sections (photos) */
+.info-section {
+    margin: 0; padding: 14px 20px;
+    background: #fff; border: none; border-radius: 0;
+    border-bottom: 1px solid #e5e7eb;
+}
+.info-section.vg-section { cursor: pointer; background: #fff; }
+#photos-module {
+    margin: 14px 20px !important; padding: 14px 16px !important;
+    background: #f9fafb !important; border: 1px solid #e5e7eb !important;
+    border-radius: 6px !important;
+}
+/* Top spacing above "+ Add photo" — as a gap between elements (6px), ONLY when
+   there are photos.
+   Empty gallery → base 0. Main gallery only, other places are untouched.
+ */
+#photos-module .pg-items:not(:empty) + .pg-add-area,
+#photos-module .vg-items:not(:empty) + .pg-add-area { margin-top: 6px !important; }
+#photos-module.paste-target-active { border-color: #9ca3af !important; }
+.paste-target-active, #bundle_form .paste-target-active { border-color: #9ca3af !important; }
+.paste-target-badge {
+    display: inline-block; font-size: 10px; font-weight: 700;
+    color: #6b7280; background: rgba(107,114,128,0.08);
+    border: 1px solid rgba(107,114,128,0.3);
+    border-radius: 3px; padding: 1px 6px; margin-left: 8px;
+    letter-spacing: 0.4px; vertical-align: middle; text-transform: uppercase;
+}
+
+
+/* Fix Django default margins on inputs */
+#content-main .form-row input,
+#content-main .form-row select,
+#content-main .form-row textarea { margin-bottom: 0 !important; margin-top: 0 !important; }
+#content-main .bpc-row input,
+#content-main .discount-row input { margin-bottom: 0 !important; margin-top: 0 !important; }
+
+/* Fix inline formsets */
+#bundle_form .form-row { padding: 14px 20px !important; border-bottom: 1px solid #e5e7eb !important; }
+#bundle_form .form-row > div { padding-top: 0 !important; }
+#bundle_form .form-row input,
+#bundle_form .form-row select,
+#bundle_form .form-row textarea { margin-bottom: 0 !important; margin-top: 0 !important; }
+#bundle_form .flex-container { align-items: center !important; flex: 1 !important; min-width: 0 !important; margin-top: 0 !important; gap: 0 !important; }
+#bundle_form .form-row > div > label:not(.pg-add-btn) { width: 170px !important; min-width: 170px !important; }
+/* Name — stretches to fill the free space (ID selector to take priority over #bundle_form .form-row) */
+#bundle_form .field-name { padding-right: 0 !important; }
+#bundle_form .field-name > div { width: 100% !important; max-width: none !important; margin-left: 0 !important; padding-right: 0 !important; }
+#bundle_form .field-name .flex-container { display: flex !important; align-items: center; width: 100% !important; padding-right: 0 !important; }
+#bundle_form .field-name input { flex: 1 !important; min-width: 0 !important; height: 28px !important; box-sizing: border-box !important; padding: 0 8px !important; }
+.flex-container.checkbox-row { align-items: center !important; }
+
+/* SKU */
+#id_sku, .sku-row input[name$="-sku"] { flex: none !important; width: 56px !important; height: 28px !important; box-sizing: border-box; }
+.sku-row { display: inline-flex; align-items: center; gap: 4px; }
+.sku-gen-btn {
+    width: 28px; height: 28px; padding: 0;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 4px;
+    cursor: pointer; font-size: 16px; color: #374151;
+    display: inline-flex; align-items: center; justify-content: center;
+}
+.sku-gen-btn:hover { background: #f3f4f6; border-color: #9ca3af; }
+.sku-error { color: #991b1b; font-size: 12px; margin-top: 4px; display: none; }
+
+/* ── General layout of form rows ── */
+fieldset.module { display: contents !important; }
+fieldset.module > h2 { display: none !important; }
+.form-row { display: flex !important; align-items: center !important; padding: 14px 20px !important; border-bottom: 1px solid #e5e7eb !important; margin: 0 !important; }
+.form-row.field-description, .form-row.field-description > div, .form-row.field-description .flex-container { align-items: flex-start !important; }
+.change-form .aligned .form-row { padding: 14px 20px !important; }
+#bundle_form .form-row,
+#bundle_form .bpc-row,
+#bundle_form .discount-row,
+#bundle_form .bi-toolbar { padding-left: 20px !important; padding-right: 20px !important; }
+.module .form-row:last-child { border-bottom: 1px solid #e5e7eb !important; }
+.form-row > div { display: flex !important; align-items: center !important; width: 100% !important; padding: 0 !important; }
+.form-row > div > label:not(.pg-add-btn) { width: 170px !important; min-width: 170px !important; flex-shrink: 0 !important; float: none !important; color: var(--body-quiet-color) !important; font-size: 13px !important; font-weight: 400 !important; padding: 0 14px 0 0 !important; margin: 0 !important; }
+.flex-container { display: flex !important; align-items: center !important; flex: 1 !important; min-width: 0 !important; }
+.flex-container > label { width: 160px !important; min-width: 160px !important; flex-shrink: 0 !important; font-weight: 400 !important; color: var(--body-quiet-color) !important; font-size: 13px !important; padding: 0 14px 0 0 !important; margin: 0 !important; }
+.flex-container input[type=checkbox] { margin-right: 6px !important; }
+.vCheckboxLabel { width: auto !important; min-width: 0 !important; }
+.change-form .flex-container input[type=text],
+.change-form .flex-container input[type=number],
+.change-form .flex-container select { flex: 1 !important; width: auto !important; min-width: 0 !important; box-sizing: border-box !important; max-width: none !important; height: 28px !important; padding: 0 8px !important; }
+.change-form .flex-container textarea { flex: 1 !important; width: auto !important; min-width: 0 !important; box-sizing: border-box !important; max-width: none !important; }
+/* Name: label on top, field full width */
+#id_name { height: 28px !important; box-sizing: border-box !important; }
+/* Categories: the fieldset is replaced via JS */
+.js-inline-admin-formset { margin-bottom: 0 !important; }
+.field-categories { align-items: center !important; }
+.field-categories > fieldset { flex: 1 !important; display: flex !important; align-items: center !important; padding: 0 !important; margin: 0 !important; border: none !important; min-inline-size: 0 !important; }
+.field-categories > fieldset > legend { display: none !important; }
+.field-categories fieldset > div,
+.field-categories .flex-container { padding: 0 !important; margin: 0 !important; display: flex !important; align-items: center !important; }
+.field-cat-lbl { min-width: 160px !important; flex-shrink: 0 !important; font-size: 13px !important; font-weight: 400 !important; color: var(--body-quiet-color) !important; align-self: center !important; }
+
+/* Picker (categories) */
+.picker-trigger {
+    display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px;
+    height: 28px; box-sizing: border-box; min-width: 180px; max-width: 480px;
+    padding: 0 10px; background: #fff;
+    border: 1px solid #d1d5db; border-radius: 4px;
+    cursor: pointer; font-size: 13px; color: #374151;
+    text-align: left; font: inherit; overflow: hidden;
+}
+.picker-trigger:hover { border-color: #9ca3af; }
+.picker-ph { color: #9ca3af; }
+.picker-tag {
+    display: inline-block; padding: 0 7px; line-height: 18px;
+    background: #f3f4f6; border: 1px solid #e5e7eb;
+    border-radius: 3px; font-size: 12px; color: #374151;
+}
+.picker-popup {
+    position: fixed; z-index: 99999; background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.10);
+    overflow: hidden;
+}
+.picker-pop-body {
+    padding: 0;
+}
+.picker-list {
+    max-height: 260px; overflow-y: auto; overscroll-behavior: contain;
+}
+.picker-item {
+    padding: 5px 14px; font-size: 13px; color: #374151;
+    display: flex; align-items: center;
+}
+.picker-item label { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: color .12s; }
+.picker-item label:hover { color: #111827; }
+.picker-item input[type=checkbox] {
+    appearance: none; -webkit-appearance: none;
+    width: 14px; height: 14px; flex-shrink: 0;
+    border: 1.5px solid #d1d5db; background: #fff; cursor: pointer; position: relative;
+    transition: background .12s, border-color .12s; border-radius: 3px;
+}
+.picker-item label:hover input[type=checkbox]:not(:checked),
+.picker-item input[type=checkbox]:hover { border-color: #9ca3af; }
+.picker-item input[type=checkbox]:checked { background: #1f2937; border-color: #1f2937; }
+.picker-item input[type=checkbox]:checked::after {
+    content: ''; position: absolute; left: 3px; top: 0px; width: 4px; height: 8px;
+    border: 1.5px solid #fff; border-top: none; border-left: none; transform: rotate(45deg);
+}
+/* Multi-select without a checkbox — clicking a row toggles it, selected ones are highlighted. */
+.picker-item-single { cursor: pointer; transition: background .12s; }
+.picker-item-single:hover { background: #f3f4f6; }
+.picker-item-single.is-selected { background: #e5e7eb; }
+.picker-item-single.is-selected:hover { background: #d1d5db; }
+.picker-item-single.is-selected > span { font-weight: 600; color: #111827; }
+/* Tree lines in the picker popup. 2px lines, color same as the checkbox. */
+.picker-item { position: relative; }
+.picker-item .pick-vline {
+    position: absolute; top: 0; bottom: 0; width: 2px;
+    background: #d1d5db; pointer-events: none;
+}
+.picker-item .pick-vline.is-first { top: 8px; }
+.picker-item .pick-vline.is-last  { bottom: 50%; }
+.picker-item .pick-hline {
+    position: absolute; top: 50%; height: 2px;
+    background: #d1d5db; pointer-events: none;
+}
+.picker-item .pick-elbow {
+    position: absolute;
+    border-left: 2px solid #d1d5db;
+    border-bottom: 2px solid #d1d5db;
+    border-bottom-left-radius: 6px;
+    pointer-events: none;
+}
+
+/* Variant picker */
+.vpick { position: relative; min-width: 260px; }
+.vpick-selected { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; }
+.vpick-photo { width: 44px; height: 44px; object-fit: cover; border-radius: 3px; background: #f3f4f6; flex-shrink: 0; }
+.vpick-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.vpick-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vpick-meta { font-size: 11px; color: #9ca3af; }
+.vpick-clear { background: none; border: none; font-size: 18px; color: #9ca3af; cursor: pointer; padding: 0 4px; line-height: 1; flex-shrink: 0; }
+.vpick-clear:hover { color: #991b1b; }
+.vpick-search { width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; outline: none; }
+.vpick-search:focus { border-color: #9ca3af; }
+.vpick-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; cursor: pointer; border-bottom: 1px solid #f3f4f6; }
+.vpick-item:hover, .vpick-item.hi { background: #f9fafb; }
+.vpick-item img { width: 44px; height: 44px; object-fit: cover; border-radius: 3px; background: #f3f4f6; flex-shrink: 0; }
+.vpick-item-av { width: 44px; height: 44px; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex-shrink: 0; }
+.vpick-item-col { display: flex; flex-direction: column; gap: 1px; }
+.vpick-item-name { font-size: 13px; font-weight: 600; color: #1f2937; }
+.vpick-item-row { font-size: 11px; color: #6b7280; }
+.vpick-empty { padding: 10px 14px; text-align: center; color: #9ca3af; font-size: 13px; }
+
+/* Hide raw price/stock/auto/discount/sort fields — replaced by custom UI */
+.field-price, .field-stock, .field-auto_price, .field-auto_stock,
+.field-discount_percent, .field-discount_amount,
+.field-sort_order { display: none !important; }
+/* Hide variant description form-row — replaced by custom Quill UI */
+#bundle_form .field-description { display: none !important; }
+#bundle_form .field-application_norms { display: none !important; }
+/* Instructions live in the "Instructions" tab. Hiding via style.display in JS is not
+   possible:
+   `.form-row { display:flex !important }` (below) overrides the inline style —
+   so each such field is hidden by its own rule.
+ */
+#bundle_form .field-instruction_html { display: none !important; }
+
+/* Bundle items section */
+.bundle-items-wrap { border-bottom: 1px solid #e5e7eb; }
+
+/* General section separator (after variants) */
+.field-categories { border-top: none !important; margin-top: 0 !important; }
+
+/* Price / stock toggle panel */
+.bpc-panel { margin: 0; border-bottom: 1px solid #e5e7eb; }
+.bpc-row { display: flex; align-items: center; gap: 0; padding: 14px 20px; border-bottom: 1px solid #e5e7eb; }
+/* remove the double outline: the panel already has a bottom line, the last row must not duplicate it */
+.bpc-panel > .bpc-row:last-child { border-bottom: none; }
+/* the wrapper with the products has its own bottom line — the last child element must not duplicate it */
+.bundle-items-wrap > *:last-child { border-bottom: none !important; }
+.bpc-lbl { width: 170px; min-width: 170px; flex-shrink: 0; font-size: 13px; color: var(--body-quiet-color); padding-right: 14px; }
+.bpc-body { display: flex; align-items: center; gap: 10px; padding-top: 0; }
+.bpc-auto-val { font-size: 13px; font-weight: 400; color: #374151; min-width: 70px; }
+.bpc-auto-val.dim { color: #9ca3af; }
+.bpc-auto-old { color: #9ca3af; text-decoration: line-through; font-size: 12px; margin-right: 6px; }
+.bpc-toggle { display: flex; border: 1px solid #d1d5db; border-radius: 4px; overflow: hidden; }
+.bpc-btn { padding: 0 11px; height: 28px; font-size: 12px; font-weight: 500; border: none; cursor: pointer; background: #f9fafb; color: #9ca3af; transition: background .12s, color .12s; }
+.bpc-btn.on { background: #1f2937; color: #fff; }
+.bpc-inp { width: 100px; height: 28px; padding: 0 8px; font-size: 13px; border: 1px solid #d1d5db; border-radius: 4px; outline: none; box-sizing: border-box; }
+.bpc-inp:focus { border-color: #9ca3af; }
+.bpc-hint { font-size: 12px; color: #9ca3af; }
+
+/* ── Bundle items table ── */
+.bundle-items-wrap { margin: 0; }
+.bi-table { table-layout: auto; width: 100%; border-collapse: collapse !important; }
+.bi-table thead tr th { background: #f9fafb; border-left: 1px solid #e5e7eb; padding: 10px 12px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; white-space: nowrap; vertical-align: middle; text-align: left; }
+.bi-table thead tr th:first-child { border-left: none; }
+.bi-table thead tr th.col-cb { padding: 0 0 0 14px !important; width: 44px !important; }
+.bi-table .col-cb { width: 44px !important; min-width: 44px !important; max-width: 44px !important; padding: 0 0 0 14px !important; }
+.bi-table .col-cb input[type=checkbox], .bi-table .action-checkbox input[type=checkbox] { width: 15px; height: 15px; accent-color: #374151; cursor: pointer; }
+.bi-table tbody tr { border-bottom: 1px solid #e5e7eb; }
+.bi-table tbody tr:last-child { border-bottom: none; }
+.bi-table tbody tr.row1 { background: #fff; }
+.bi-table tbody tr.row2 { background: #f9fafb; }
+.bi-table tbody tr:hover { background: #eef0f3 !important; }
+.bi-table tbody td, .bi-table tbody th { padding: 8px 12px; font-size: 13px; vertical-align: middle; border-left: 1px solid #e5e7eb; border-bottom: none; font-weight: 400; color: #374151; text-align: left; white-space: nowrap; }
+.bi-table tbody td:first-child, .bi-table tbody th:first-child { border-left: none; }
+.bi-table tbody th a { color: #374151; text-decoration: none; font-weight: 400; }
+.bi-table .col-photos { padding: 6px 12px; }
+.bi-table .col-name { white-space: normal; word-break: break-word; min-width: 160px; }
+.bi-table .col-price { min-width: 140px; white-space: nowrap; }
+.bi-table .col-sku   { white-space: nowrap; }
+.bi-table .col-disc  { white-space: nowrap; }
+.bi-table .col-stock { white-space: nowrap; }
+/* "Raw name" column — name from the recognized text + % on one line */
+.bi-table .col-src { width: 1%; white-space: nowrap; }
+.bi-table .bi-src-row { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.bi-table .bi-src-name { font-size: 12px; color: #6b7280; white-space: nowrap; }
+/* Similarity badge — standard from supplier invoices/orders */
+.sim-badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+.sim-high { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.sim-med  { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.sim-low  { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.bi-price-unit  { color: #374151; font-weight: 400; }
+.bi-price-total { color: #9ca3af; font-size: 12px; margin-left: 6px; }
+.bi-price-old   { color: #9ca3af; font-size: 12px; text-decoration: line-through; margin-right: 5px; }
+.bi-price-sale  { color: #dc2626; font-weight: 600; }
+/* Clickable component discount badge: active = discount applied, struck through = not applied. */
+.bi-disc-badge {
+    font-size: 12px; font-weight: 600; color: #dc2626; background: #fef2f2;
+    border: 1px solid #fecaca; border-radius: 5px; padding: 1px 7px;
+    cursor: pointer; user-select: none; line-height: 1.5; transition: all .12s;
+}
+.bi-disc-badge:hover { background: #fee2e2; }
+.bi-disc-badge.bi-disc-off {
+    color: #9ca3af; background: #f3f4f6; border-color: #e5e7eb;
+    text-decoration: line-through;
+}
+/* Badge for quickly switching the component's packaging (own ↔ factory). */
+.bi-table .col-name { vertical-align: middle; }
+.bi-name-wrap { display: flex; align-items: center; gap: 8px; }
+.bi-name-wrap > a:not(.oi-site-btn) { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Action buttons — the SAME classes and style as in the order items table (oi-site-btn / em-item-edit-btn) */
+.bi-name-wrap .oi-site-btn, .bi-name-wrap .em-item-edit-btn {
+    flex-shrink: 0; line-height: 0; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 4px; color: #6b7280; text-decoration: none; padding: 0; cursor: pointer;
+    transition: background .12s, border-color .12s, color .12s;
+}
+.bi-name-wrap .oi-site-btn:hover, .bi-name-wrap .em-item-edit-btn:hover { background: #f3f4f6; border-color: #9ca3af; color: #1f2937; }
+.bi-name-wrap .oi-site-btn svg, .bi-name-wrap .em-item-edit-btn svg { display: block; }
+/* Packaging badge — same bordered-button look, but with text */
+.bi-swap-badge {
+    flex-shrink: 0; height: 26px; padding: 0 8px; border: 1px solid #d1d5db; border-radius: 4px; background: #fff;
+    color: #6b7280; font-size: 12px; font-weight: 600; cursor: pointer; user-select: none; white-space: nowrap; gap: 4px;
+    display: inline-flex; align-items: center; justify-content: center; transition: all .12s;
+}
+.bi-swap-badge:hover { background: #f3f4f6; border-color: #9ca3af; color: #1f2937; }
+.bi-table .col-qty { padding: 6px 8px; }
+.bi-pv-photos { display: flex; gap: 3px; }
+.bi-pv-photo-wrap { position: relative; display: inline-block; flex-shrink: 0; }
+.bi-pv-photo-wrap img.bi-pv-thumb { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; border: 1px solid #d1d5db; background: #f3f4f6; display: block; transition: filter .15s; }
+.bi-pv-photo-wrap:hover img.bi-pv-thumb { filter: brightness(0.82); }
+.bi-item-av { width: 28px; height: 28px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; transition: filter .15s; }
+.bi-pv-photo-wrap:hover .bi-item-av { filter: brightness(0.88); }
+.bi-pv-preview .ic-av { width: 180px; height: 180px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 64px; font-weight: 700; }
+.bi-pv-preview .ic-name { margin-top: 6px; font-size: 12px; color: #1f2937; font-weight: 500; line-height: 1.4; white-space: normal; width: 180px; padding: 0 4px; }
+.bi-pv-preview .ic-sku { margin-top: 2px; font-size: 11px; color: #9ca3af; padding: 0 4px; }
+.bi-pv-photo-wrap:hover img.bi-pv-thumb { filter: brightness(0.82); }
+/* .bi-pv-preview — main styles moved to base_site.html. Only the .ic-* sub-classes (unique to bundle items, above in the file) remain. */
+.bi-qty-wrap { display: inline-flex; align-items: stretch; gap: 2px; }
+/* .bi-qty-btn — styles moved to base_site.html (as alias .app-qty-btn) */
+.bi-qty-inp { width: 46px; height: 28px; padding: 0 5px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; text-align: center; background: #fff; color: #374151; box-sizing: border-box; }
+.bi-del-btn { background: none; border: none; cursor: pointer; color: #d1d5db; font-size: 16px; padding: 2px 4px; border-radius: 3px; line-height: 1; }
+.bi-del-btn:hover { color: var(--err-fg); background: var(--err-bg); }
+/* ── Bundle composition — looks like the order items table ── */
+.bi-table tbody tr { height: 59px; }
+.bi-table .col-photos { width: 59px !important; min-width: 59px !important; max-width: 59px !important; padding: 0 !important; text-align: center; vertical-align: middle; }
+.bi-table .bi-pv-photo-wrap img.bi-pv-thumb, .bi-table .bi-item-av { width: 44px !important; height: 44px !important; }
+.bi-table .bi-item-av { font-size: 16px; }
+/* Row delete button (✕, as in the order) */
+.bi-table .bi-del-cell { position: relative; width: 59px !important; min-width: 59px !important; max-width: 59px !important; padding: 0 !important; }
+.bi-row-del { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: #9ca3af; font-size: 20px; cursor: pointer; }
+.bi-row-del:hover { color: #dc2626 !important; background: #fef2f2 !important; }
+/* Product replace button (pencil) + inline search editor */
+.bi-repl-btn { border: 1px solid #e5e7eb; background: #fff; border-radius: 4px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; color: #9ca3af; cursor: pointer; flex-shrink: 0; padding: 0; }
+.bi-repl-btn:hover { background: #f3f4f6; border-color: #9ca3af; color: #1f2937; }
+.bi-repl-editor { display: flex; align-items: center; gap: 6px; width: 100%; }
+.bi-repl-editor input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; color: #374151; outline: none; }
+.bi-repl-editor .bi-repl-cancel { width: 26px; height: 26px; border: 1px solid #e5e7eb; background: #fff; border-radius: 4px; color: #9ca3af; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; padding: 0; }
+.bi-repl-editor .bi-repl-cancel:hover { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
+.bi-toolbar { display: flex; align-items: center; gap: 8px; padding: 14px 20px; }
+.bi-add-inp { padding: 0 10px; border: 1px dashed #d1d5db; border-radius: 4px; font-size: 13px; color: #6b7280; background: #fff; width: 280px; height: 28px; outline: none; }
+.bi-add-inp:focus { border-color: #9ca3af; border-style: solid; color: #1f2937; }
+.bi-add-inp::placeholder { color: #9ca3af; }
+.bi-bulk-del-btn { height: 28px; padding: 0 12px; border: 1px solid var(--err-border); border-radius: var(--radius-input); background: #fff; color: var(--err-fg); font-size: 13px; cursor: pointer; white-space: nowrap; margin-left: auto; }
+.bi-bulk-del-btn:hover { background: var(--err-bg); border-color: var(--err-border); color: var(--err-fg); }
+.bi-drop { position: fixed; z-index: 99999; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,.10); min-width: 320px; }
+.bi-drop-inner { max-height: 300px; overflow-y: auto; overscroll-behavior: contain; }
+
+/* Discount */
+.discount-row { display: flex; align-items: center; padding: 14px 20px; border-bottom: 1px solid #e5e7eb; }
+.discount-row-lbl { width: 160px; flex-shrink: 0; font-size: 13px; color: var(--body-quiet-color); display: flex; align-items: center; gap: 4px; }
+.disc-type-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 28px; padding: 0 8px;
+    border: 1px solid #d1d5db; border-radius: 4px;
+    background: #fff; font-size: 12px; color: #374151;
+    cursor: pointer; white-space: nowrap; font-family: inherit;
+}
+.disc-type-btn:hover { border-color: #9ca3af; }
+.disc-type-drop {
+    position: fixed; z-index: 99999;
+    background: #fff; border: 1px solid #d1d5db;
+    border-radius: 4px; box-shadow: 0 2px 6px rgba(0,0,0,.08);
+    overflow: hidden;
+}
+.disc-type-opt {
+    height: 28px; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-family: inherit; color: #374151; cursor: pointer;
+}
+.disc-type-opt:hover { background: #f3f4f6; }
+.disc-type-opt.active { color: #111; }
+.disc-type-btn svg { margin-left: 3px; }
+.discount-vis-inp { width: 100px; height: 28px; padding: 0 8px; font-size: 13px; border: 1px solid #d1d5db; border-radius: 4px; outline: none; box-sizing: border-box; }
+.discount-vis-inp:focus { border-color: #9ca3af; }
+.discount-result { margin-left: 10px; font-size: 13px; color: #6b7280; }
+
+/* Short "Done" toast (no dialog) - looks like the toast in the history form */
+#pg-toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 12px); z-index: 100000; padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 500; background: #f0fdf4; border: 1px solid #86efac; color: #15803d; box-shadow: 0 4px 16px rgba(0,0,0,0.12); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; }
+#pg-toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+.info-section > h3 { font-size: 10px; font-weight: 700; color: #6b7280; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.7px; }
+
+/* Description — hover */
+.desc-header:hover { color: #374151 !important; }
+.desc-header:hover span { border-color: #374151 !important; }
+
+/* General description + Raw text — full width, hide label, no extra bottom padding */
+.change-form .field-description { border-bottom: none !important; }
+/* Raw text — a separate section: divider line at the BOTTOM + top/bottom padding
+   (like a regular section). border-bottom and 14px padding come from .form-row.
+ */
+.field-description > div, .field-raw_text > div { display: block !important; }
+.field-description > div > label, .field-raw_text > div > label { display: none !important; }
+.field-description > div > .flex-container, .field-raw_text > div > .flex-container { display: block !important; }
+.field-description > div > .flex-container > label, .field-raw_text > div > .flex-container > label { display: none !important; }
+.field-description .quill-wrapper, .field-raw_text .quill-wrapper { margin-bottom: 0 !important; }
+
+/* Packaging tabs */
+.variant-tab-bar {
+    display: flex; flex-wrap: wrap; align-items: flex-end;
+    gap: 0 10px; padding: 12px 0 0 20px; margin-top: 0;
+    border-bottom: 2px solid #e5e7eb; margin-bottom: -2px;
+    position: relative; z-index: 1;
+}
+.variant-tab {
+    padding: 7px 18px; background: #f9fafb;
+    border: 2px solid #e5e7eb; border-bottom: none;
+    border-radius: 4px 4px 0 0; cursor: pointer; font-size: 13px;
+    color: #6b7280; position: relative; bottom: -2px; line-height: 1.5;
+    font-family: inherit; white-space: nowrap; max-width: none; z-index: 1;
+}
+.variant-tab:hover { background: #f3f4f6; color: #374151; }
+.variant-tab.active { background: #e5e7eb; color: #111827; border-bottom-color: #e5e7eb; }
+.tab-row-sep { flex-basis: calc(100% + 36px); height: 0; border-bottom: 2px solid #e5e7eb; margin-bottom: 6px; margin-left: -20px; margin-right: -20px; }
+.variant-tab.deleted { text-decoration: line-through; color: #9ca3af; font-style: italic; }
+.variant-tab-add {
+    padding: 5px 14px; background: #f9fafb;
+    border: 2px solid #e5e7eb; border-bottom: none;
+    border-radius: 4px 4px 0 0; cursor: pointer; font-size: 18px;
+    font-weight: 300; color: #9ca3af; position: relative; bottom: -2px; z-index: 1; line-height: 1.2;
+    display: inline-flex; align-items: center; justify-content: center;
+}
+.variant-tab-add:hover { color: #374151; border-color: #d1d5db; background: #f3f4f6; }
+#bundle_form .add-row { display: none !important; }
+
+/* Inline row header — hidden, delete checkbox handled via tab */
+#bundle_form > h3 { display: none !important; }
+
+/* Two names / two display checkboxes (bundle + active packaging) in one row */
+.pg-names-row, .pg-display-row { display: flex; gap: 0; align-items: stretch; }
+.pg-names-row .pg-name-cell, .pg-display-row .pg-name-cell { flex: 1 1 0; min-width: 0; }
+.pg-names-row .pg-name-cell + .pg-name-cell,
+.pg-display-row .pg-name-cell + .pg-name-cell { border-left: 1px solid #f0f0f0; }
+.pg-names-row .form-row, .pg-display-row .form-row { padding: 15px 20px 14px !important; border-bottom: 1px solid #e5e7eb !important; }
+.pg-names-row .form-row > div > label, .pg-display-row .form-row > div > label { width: auto !important; min-width: 0 !important; }
+
+/* Hide all content until JS initialization finishes */
+#content-main { visibility: hidden; }
+.variant-tab-del { margin-left: 6px; background: none; border: none; color: #9ca3af; font-size: 14px; cursor: pointer; padding: 0 2px; line-height: 1; border-radius: 3px; flex-shrink: 0; }
+.variant-tab-del:hover { color: #dc2626; background: #fee2e2; }
+</style>
+{% include "admin/_form_guard.html" %}
+{% endblock %}
+
+{% block content_title %}{% endblock %}
+{% block object-tools %}{% endblock %}
+
+{% block field_sets %}
+<div id="bv-tab-bar-target"></div>
+{% for fieldset in adminform %}
+    {% include "admin/includes/fieldset.html" with heading_level=2 prefix="fieldset" id_prefix=0 id_suffix=forloop.counter0 %}
+{% endfor %}
+<div id="photos-module" class="info-section vg-section"{% if original %} data-bundle-id="{{ original.pk }}"{% endif %}>
+    <div id="pg-items" class="vg-items pg-items"></div>
+    <div class="pg-add-area">
+        <label class="pg-add-btn">
+            <input type="file" id="pg-file-input" multiple accept="image/*">
+            + Add photo
+        </label>
+    </div>
+</div>
+{% endblock %}
+
+{% block inline_field_sets %}{{ block.super }}{% endblock %}
+
+{% block submit_buttons_top %}
+{% include "admin/_submit_buttons_top.html" %}
+{% endblock %}
+{% block submit_buttons_bottom %}{% endblock %}
+
+{% block after_related_objects %}{{ block.super }}{% endblock %}
+
+{% block admin_change_form_document_ready %}
+{{ block.super }}
+<script>
+(function(){
+    {% if bundle_items_json %}
+    window._BUNDLE_ITEMS = {{ bundle_items_json|safe }};
+    {% endif %}
+    {% if instruction_job_json %}
+    window._INS_JOB = {{ instruction_job_json|safe }};   /* state of the "Run through AI" queue: {tone,text} or null */
+    {% endif %}
+    var _bvData = { items: window._BUNDLE_ITEMS || [] };
+    /* A bundle is a flat entity (1:1 with the former BundleVariant): all fields
+       (name, sku, price, stock, description, instruction...) live on one row -
+       the form's root fieldset. Previously several .inline-related
+       packaging rows were iterated here; now there is one row.
+     */
+    function mainRow() {
+        return document.querySelector('#bundle_form fieldset.module') || document.querySelector('#bundle_form');
+    }
+
+    // ── Picker for categories ──
+    function buildPicker(fieldId, opts) {
+        var widget = document.getElementById(fieldId);
+        if (!widget) return;
+        var checkboxes = Array.from(widget.querySelectorAll('input[type=checkbox]'));
+        widget.style.display = 'none';
+        var btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'picker-trigger';
+        var popup = document.createElement('div');
+        popup.className = 'picker-popup'; popup.style.display = 'none';
+        document.body.appendChild(popup);
+
+        /* Globally on the popup: right-click and the middle button change nothing,
+           only the browser context menu remains.
+         */
+        ['mousedown', 'mouseup', 'click', 'auxclick'].forEach(function(ev){
+            popup.addEventListener(ev, function(e) {
+                if (e.button !== 0) { e.preventDefault(); e.stopPropagation(); }
+            }, true);
+        });
+        function escP(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+        function getItems() {
+            return checkboxes.map(function(inp) {
+                var lbl = inp.closest('label') || inp.parentElement;
+                return { value: inp.value, label: lbl ? lbl.textContent.trim() : inp.value, checked: inp.checked, input: inp };
+            });
+        }
+        function cleanLabel(label) { return label.replace(/^(— )*/, ''); }
+        function labelDepth(label) { var m = label.match(/^(— )*/); return m ? m[0].length / 2 : 0; }
+        function updateBtn() {
+            var sel = getItems().filter(function(i) { return i.checked; });
+            if (!sel.length) {
+                btn.innerHTML = '<span class="picker-ph">' + escP(opts.placeholder || 'Select...') + '</span>';
+            } else {
+                var shown = sel.slice(0, 4), more = sel.length - shown.length;
+                btn.innerHTML = shown.map(function(i) { return '<span class="picker-tag">' + escP(cleanLabel(i.label)) + '</span>'; }).join('') +
+                    (more > 0 ? ' <span class="picker-ph">+' + more + '</span>' : '');
+            }
+        }
+        /* External changes (e.g. the wand from the description) — trigger an update of the trigger. */
+        widget._updatePicker = updateBtn;
+        checkboxes.forEach(function(cb) {
+            cb.addEventListener('change', updateBtn);
+        });
+        function renderPopup() {
+            popup.innerHTML = '<div class="picker-pop-body"><div class="picker-list"></div></div>';
+            var body = popup.querySelector('.picker-list');
+            var items = getItems();
+            var parsed = items.map(function(item){
+                return { item: item, depth: labelDepth(item.label), name: cleanLabel(item.label) };
+            });
+            function isLastAtDepth(i, d) {
+                for (var j = i + 1; j < parsed.length; j++) {
+                    if (parsed[j].depth < d) return true;
+                    if (parsed[j].depth === d) return false;
+                }
+                return true;
+            }
+            /* Ancestors of row idx in the DFS tree (one per each level above). */
+            function ancestorsOf(idx) {
+                var res = [];
+                var need = parsed[idx].depth - 1;
+                for (var j = idx - 1; j >= 0 && need >= 0; j--) {
+                    if (parsed[j].depth === need) { res.push(parsed[j]); need--; }
+                }
+                return res;
+            }
+            /* Descendants of row idx: adjacent rows below with depth greater than its own. */
+            function descendantsOf(idx) {
+                var res = [];
+                var base = parsed[idx].depth;
+                for (var j = idx + 1; j < parsed.length; j++) {
+                    if (parsed[j].depth <= base) break;
+                    res.push(parsed[j]);
+                }
+                return res;
+            }
+            var STEP = 18;
+            var LINE_OFFSET = 18;
+            var GAP = 6;
+            parsed.forEach(function(o, i) {
+                var item = o.item;
+                var depth = o.depth;
+                var name = o.name;
+                var row = document.createElement('div');
+                row.className = 'picker-item' + (depth === 0 ? ' picker-item-root' : '');
+                o.row = row;
+                if (depth > 0) {
+                    for (var lvl = 1; lvl < depth; lvl++) {
+                        if (isLastAtDepth(i, lvl)) continue;
+                        var v = document.createElement('span');
+                        v.className = 'pick-vline';
+                        v.style.left = (LINE_OFFSET + (lvl - 1) * STEP) + 'px';
+                        row.appendChild(v);
+                    }
+                    var ownX = LINE_OFFSET + (depth - 1) * STEP;
+                    var isFirstP = (i === 0 || parsed[i - 1].depth < depth);
+                    var isLastP  = isLastAtDepth(i, depth);
+                    if (isLastP) {
+                        var el = document.createElement('span');
+                        el.className = 'pick-elbow';
+                        el.style.left = ownX + 'px';
+                        el.style.top = isFirstP ? '8px' : '0';
+                        el.style.height = isFirstP ? 'calc(50% - 6px)' : 'calc(50% + 2px)';
+                        el.style.width = (STEP - GAP) + 'px';
+                        row.appendChild(el);
+                    } else {
+                        var v = document.createElement('span');
+                        v.className = 'pick-vline';
+                        v.style.left = ownX + 'px';
+                        if (isFirstP) v.classList.add('is-first');
+                        row.appendChild(v);
+                        var hl = document.createElement('span');
+                        hl.className = 'pick-hline';
+                        hl.style.left = ownX + 'px';
+                        hl.style.width = (STEP - GAP) + 'px';
+                        row.appendChild(hl);
+                    }
+                }
+                /* No checkboxes — clicking a row toggles it (like categories). */
+                row.classList.add('picker-item-single');
+                if (item.checked) row.classList.add('is-selected');
+                if (depth > 0) row.style.paddingLeft = (LINE_OFFSET + depth * STEP) + 'px';
+                var nameNode = document.createElement('span');
+                nameNode.textContent = name;
+                row.appendChild(nameNode);
+                body.appendChild(row);
+                function blockNonLeft(e) {
+                    if (e.type === 'contextmenu') { e.preventDefault(); e.stopPropagation(); return; }
+                    if (e.button !== 0) { e.preventDefault(); e.stopPropagation(); }
+                }
+                ['mousedown','mouseup','auxclick','contextmenu'].forEach(function(ev){
+                    row.addEventListener(ev, blockNonLeft, true);
+                });
+                row.addEventListener('click', function(e){
+                    if (e.button !== 0) { e.preventDefault(); e.stopPropagation(); return; }
+                    e.stopPropagation();
+                    var orig = checkboxes.find(function(i) { return i.value === item.value; });
+                    var newChecked = !(orig && orig.checked);
+                    /* Clicking an ancestor that already has a descendant selected — the ancestor is
+                       redundant,
+                       so we don't let it be selected.
+                     */
+                    if (opts.pruneAncestors && newChecked &&
+                        descendantsOf(i).some(function(d) { return d.item.checked; })) {
+                        return;
+                    }
+                    if (orig) orig.checked = newChecked;
+                    item.checked = newChecked;
+                    row.classList.toggle('is-selected', newChecked);
+                    /* A descendant was selected — remove redundant ancestors (mirrors the backend signal). */
+                    if (opts.pruneAncestors && newChecked) {
+                        ancestorsOf(i).forEach(function(a) {
+                            var aOrig = checkboxes.find(function(c) { return c.value === a.item.value; });
+                            if (!(aOrig && aOrig.checked)) return;
+                            aOrig.checked = false;
+                            a.item.checked = false;
+                            if (a.row) a.row.classList.remove('is-selected');
+                            try { aOrig.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+                        });
+                    }
+                    updateBtn();
+                    if (window.pgMarkDirty) window.pgMarkDirty();
+                    try { if (orig) orig.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+                });
+            });
+        }
+        function openPop() {
+            renderPopup();
+            var rect = btn.getBoundingClientRect();
+            var popW = opts.popupWidth ? opts.popupWidth : Math.max(rect.width, 200);
+            popup.style.width = popW + 'px';
+            var left = rect.left;
+            if (left + popW > window.innerWidth - 8) left = window.innerWidth - popW - 8;
+            if (left < 8) left = 8;
+            popup.style.left = (window.clFlipLeft ? window.clFlipLeft(rect, popW, 8) : left) + 'px';
+            popup.style.display = 'block';
+            popup.style.top = (window.clFlipTop ? window.clFlipTop(rect, popup.offsetHeight, 8) : (rect.bottom + 8)) + 'px';
+        }
+        function closePop() { popup.style.display = 'none'; }
+        btn.addEventListener('mousedown', function(e) { if(e.button !== 0) return; e.stopPropagation(); popup.style.display === 'none' ? openPop() : closePop(); });
+        document.addEventListener('mousedown', function(e) { if (e.button !== 0) return; if (!popup.contains(e.target) && !btn.contains(e.target)) closePop(); });
+        window.addEventListener('scroll', function(e) { if (!popup.contains(e.target)) closePop(); }, true);
+        widget.parentNode.insertBefore(btn, widget.nextSibling);
+        updateBtn();
+    }
+    buildPicker('id_categories', { multi: true, placeholder: 'Not selected', popupWidth: 340, pruneAncestors: true });
+    document.querySelectorAll('.related-widget-wrapper-link').forEach(function(a) { a.remove(); });
+
+    // ── Name: stretch the input ──
+    (function() {
+        var inp = document.getElementById('id_name');
+        if (!inp) return;
+        function resize() {
+            var cm = document.getElementById('content-main');
+            if (!cm) return;
+            var cmW = cm.getBoundingClientRect().width;
+            if (cmW < 100) return;
+            var row = inp.closest('.form-row');
+            var pl = row ? (parseFloat(window.getComputedStyle(row).paddingLeft) || 20) : 20;
+            var pr = row ? (parseFloat(window.getComputedStyle(row).paddingRight) || 20) : 20;
+            var lbl = row ? row.querySelector('label') : null;
+            var lblW = lbl ? lbl.getBoundingClientRect().width : 0;
+            var w = cmW - pl - 16 - lblW;
+            if (w > 50) inp.style.setProperty('width', Math.floor(w) + 'px', 'important');
+        }
+        setTimeout(resize, 0);
+        setTimeout(resize, 150);
+        window.addEventListener('load', resize);
+        window.addEventListener('resize', function() { setTimeout(resize, 50); });
+    })();
+
+    // ── Bundle SKU gen ──
+    (function() {
+        var skuInp = document.getElementById('id_sku');
+        if (!skuInp || skuInp.closest('.sku-row')) return;
+        skuInp.maxLength = 4;
+        var wrap = document.createElement('div');
+        wrap.className = 'sku-row';
+        skuInp.parentNode.insertBefore(wrap, skuInp);
+        wrap.appendChild(skuInp);
+        var btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'sku-gen-btn'; btn.textContent = '↻'; btn.title = 'Generate SKU';
+        wrap.appendChild(btn);
+        var err = document.createElement('div');
+        err.className = 'sku-error'; err.textContent = 'This SKU already exists';
+        wrap.after(err);
+        function genSku() {
+            btn.disabled = true;
+            fetch('/admin/catalog/generate-sku/', {credentials: 'same-origin'})
+                .then(function(r) { return r.json(); })
+                .then(function(d) { skuInp.value = d.sku; err.style.display = 'none'; })
+                .catch(function() {})
+                .finally(function() { btn.disabled = false; });
+        }
+        btn.addEventListener('click', genSku);
+        if (!skuInp.value) genSku();
+        skuInp.addEventListener('blur', function() {
+            var val = skuInp.value.trim();
+            if (!val) return;
+            var bundleId = '{% if original %}{{ original.pk }}{% endif %}';
+            fetch('/admin/catalog/check-sku/?sku=' + encodeURIComponent(val) + '&exclude_bundle_id=' + bundleId, {credentials: 'same-origin'})
+                .then(function(r) { return r.json(); })
+                .then(function(d) { err.style.display = d.exists ? 'block' : 'none'; });
+        });
+    })();
+
+    // ── Helpers ──
+    function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    function pgGetCSRF() {
+        var el = document.querySelector('[name=csrfmiddlewaretoken]');
+        return el ? el.value : '';
+    }
+
+    /* Success - a short toast that fades on its own. A dialog (alert) is kept only for
+       what did NOT succeed: it must be noticed and dismissed.
+     */
+    function pgToast(msg, ms) {
+        var el = document.getElementById('pg-toast');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'pg-toast';
+            document.body.appendChild(el);
+        }
+        el.textContent = msg;
+        el.classList.add('show');
+        clearTimeout(el._t);
+        el._t = setTimeout(function() { el.classList.remove('show'); }, ms || 2600);
+    }
+
+    // ── Global dropdown for vpick ──
+    var gDrop = document.createElement('div');
+    gDrop.className = 'vpick-dropdown';
+    gDrop.style.cssText = 'position:fixed;z-index:99999;background:#fff;border:1px solid #e5e7eb;border-radius:6px;max-height:280px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.10);display:none;';
+    document.body.appendChild(gDrop);
+    var gActivePick = null;
+
+    function positionDrop(search) {
+        var r = search.getBoundingClientRect();
+        var dropH = Math.min(280, gDrop.scrollHeight || 280);
+        var spaceBelow = window.innerHeight - r.bottom;
+        var spaceAbove = r.top;
+        gDrop.style.top = (window.clFlipTop ? window.clFlipTop(r, dropH, 0) : (spaceBelow < dropH && spaceAbove > spaceBelow ? (r.top - dropH) : r.bottom)) + 'px';
+        gDrop.style.left = (window.clX ? window.clX(r.left) : r.left) + 'px';
+        gDrop.style.width = r.width + 'px';
+    }
+
+    function closeDrop() { gDrop.style.display='none'; gDrop.innerHTML=''; gActivePick=null; }
+
+    document.addEventListener('mousedown', function(e){
+        if (e.button !== 0) return;
+        if (gActivePick && !gActivePick.contains(e.target) && !gDrop.contains(e.target)) closeDrop();
+    });
+
+    function initPicker(wrap) {
+        if (wrap._vi) return;
+        wrap._vi = true;
+        var search = wrap.querySelector('.vpick-search');
+        var hidden = wrap.querySelector('input[type=hidden]');
+        var sel = wrap.querySelector('.vpick-selected');
+        var sw = wrap.querySelector('.vpick-search-wrap');
+        var clr = wrap.querySelector('.vpick-clear');
+        if (!search || !hidden) return;
+        var t = null;
+
+        search.addEventListener('input', function(){
+            clearTimeout(t);
+            var q = search.value.trim();
+            if (!q){ closeDrop(); return; }
+            t = setTimeout(function(){ doSearch(q, search, wrap); }, 250);
+        });
+        search.addEventListener('focus', function(){
+            if (search.value.trim()) doSearch(search.value.trim(), search, wrap);
+        });
+        search.addEventListener('keydown', function(e){
+            var items = gDrop.querySelectorAll('.vpick-item');
+            var cur = gDrop.querySelector('.vpick-item.hi');
+            var idx = Array.from(items).indexOf(cur);
+            if (e.key==='ArrowDown'){ e.preventDefault(); if(cur) cur.classList.remove('hi'); if(items[idx+1]) items[idx+1].classList.add('hi'); }
+            else if (e.key==='ArrowUp'){ e.preventDefault(); if(cur) cur.classList.remove('hi'); if(items[idx-1]) items[idx-1].classList.add('hi'); }
+            else if (e.key==='Enter' && cur){ e.preventDefault(); cur.click(); }
+            else if (e.key==='Escape'){ closeDrop(); }
+        });
+        if (clr) clr.addEventListener('click', function(){
+            hidden.value=''; sel.style.display='none'; sw.style.display='block';
+            search.value=''; closeDrop();
+            hidden.dispatchEvent(new Event('change',{bubbles:true}));
+        });
+
+        function doSearch(q, searchEl, w){
+            gActivePick = w;
+            positionDrop(searchEl);
+            gDrop.style.display='block';
+            gDrop.innerHTML='<div class="vpick-empty">Searching…</div>';
+            fetch('/admin/catalog/variant-search/?q='+encodeURIComponent(q), {credentials:'same-origin'})
+                .then(function(r){ if(!r.ok) throw r.status; return r.json(); })
+                .then(function(data){
+                    if (gActivePick !== w) return;
+                    var selectedIds = new Set();
+                    document.querySelectorAll('.vpick input[type=hidden]').forEach(function(h) {
+                        if (h.value) selectedIds.add(String(h.value));
+                    });
+                    if (hidden.value) selectedIds.delete(String(hidden.value));
+                    gDrop.innerHTML='';
+                    var filtered = (data.results||[]).filter(function(item){ return !selectedIds.has(String(item.id)); });
+                    if (!filtered.length){
+                        gDrop.innerHTML='<div class="vpick-empty">Nothing found</div>';
+                    } else {
+                        filtered.forEach(function(item){
+                            var el=document.createElement('div');
+                            el.className='vpick-item';
+                            var nm=esc(item.name||item.product_name);
+                            el.innerHTML='<img src="'+esc(item.photo||'')+'" onerror="this.style.display=\'none\'">'+
+                                '<div class="vpick-item-col">'+
+                                '<div class="vpick-item-name">'+nm+'</div>'+
+                                '<div class="vpick-item-row">SKU: '+esc(item.sku)+'</div>'+
+                                '<div class="vpick-item-row">Price: '+esc(item.price)+' UAH</div>'+
+                                '<div class="vpick-item-row">Stock: '+(item.stock > 0 ? esc(item.stock)+' pcs' : '<span style="color:#dc2626">Out of stock</span>')+'</div>'+
+                                '</div>';
+                            el.addEventListener('mousedown',function(e){ if(e.button!==0)return; e.preventDefault(); pick(item); });
+                            gDrop.appendChild(el);
+                        });
+                    }
+                    positionDrop(searchEl);
+                })
+                .catch(function(e){ console.error('vpick err:',e); });
+        }
+
+        function pick(item){
+            hidden.value=item.id;
+            var ph=wrap.querySelector('.vpick-photo'); if(ph){ ph.src=item.photo||''; ph.style.display=item.photo?'':'none'; }
+            var nm=wrap.querySelector('.vpick-name'); if(nm) nm.textContent=item.name||item.product_name;
+            var mt=wrap.querySelector('.vpick-meta'); if(mt) mt.textContent=item.sku+' · '+item.price+' UAH';
+            sel.style.display='flex'; sw.style.display='none';
+            closeDrop();
+            hidden.dispatchEvent(new Event('change',{bubbles:true}));
+        }
+    }
+
+    function initAll(){ document.querySelectorAll('.vpick').forEach(initPicker); }
+
+    // ── Variant SKU gen button ──
+    function addVariantSkuButton(row) {
+        var skuInp = row.querySelector('[name="sku"]');
+        if (!skuInp || skuInp.closest('.sku-row')) return;
+        skuInp.style.cssText = 'width:52px!important;height:28px!important;box-sizing:border-box;';
+        var wrap = document.createElement('div'); wrap.className = 'sku-row';
+        skuInp.parentNode.insertBefore(wrap, skuInp);
+        wrap.appendChild(skuInp);
+        var btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'sku-gen-btn'; btn.textContent = '↻'; btn.title = 'Generate SKU';
+        wrap.appendChild(btn);
+        function genVariantSku() {
+            btn.disabled = true;
+            fetch('/admin/catalog/generate-sku/', {credentials: 'same-origin'})
+                .then(function(r) { return r.json(); })
+                .then(function(d) { skuInp.value = d.sku; })
+                .catch(function() {})
+                .finally(function() { btn.disabled = false; });
+        }
+        btn.addEventListener('click', genVariantSku);
+        if (!skuInp.value) genVariantSku();
+    }
+
+    // ── Per-row recalc ──
+    function recalcRow(row) {
+        var pval = row._bpcPVal, sval = row._bpcSVal;
+        if (!pval) return;
+        var items = (row._biItems || []).map(function(it) {
+            return { id: String(it.variantId), qty: it.qty };
+        });
+        if (!items.length) {
+            pval.textContent = '—'; pval.className = 'bpc-auto-val dim';
+            if (sval) { sval.textContent = '—'; sval.className = 'bpc-auto-val dim'; }
+            row._recalcToken = (row._recalcToken || 0) + 1;  // invalidate in-flight requests
+            return;
+        }
+        // Token against a race condition: with fast consecutive calls (AI adds items in bulk)
+        // requests fly in parallel; ignore the response if a newer call occurred while waiting.
+        var myToken = (row._recalcToken || 0) + 1;
+        row._recalcToken = myToken;
+        var ids = items.map(function(i) { return i.id; }).filter(function(v, i, a) { return a.indexOf(v) === i; });
+        fetch('/admin/catalog/variant-price-stock/?' + ids.map(function(id) { return 'id=' + id; }).join('&'), {credentials: 'same-origin'})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (row._recalcToken !== myToken) return;  // stale result — discard
+                var v = data.variants || {}, bags = data.bags || {}, total = 0, totalBase = 0;
+                // 1) Price — sum of (price with discount) * qty over all items.
+                //    totalBase — without component discounts (for the struck-through "old" price).
+                items.forEach(function(i) {
+                    var d = v[String(i.id)]; if (!d) return;
+                    var base = parseFloat(d.price);
+                    if (isNaN(base)) base = 0;  // dropshipping without a price
+                    var price = base;
+                    var bi = (row._biItems || []).find(function(it) { return String(it.variantId) === String(i.id); });
+                    if (bi && bi.applyDiscount) {
+                        if (bi.discountPercent) price = base * (1 - parseFloat(bi.discountPercent) / 100);
+                        else if (bi.discountAmount) price = Math.max(0, base - parseFloat(bi.discountAmount));
+                    }
+                    total += price * i.qty;
+                    totalBase += base * i.qty;
+                });
+                // 2) Stock — aggregate qty by variantId (in case of duplicates),
+                // then separately for regular variants and grouped by bulk bag
+                var regularQty = {};   // variantId -> total qty per bundle
+                var bagTotals = {};    // bag_id -> total consumption in g/ml per bundle
+                items.forEach(function(i) {
+                    var d = v[String(i.id)]; if (!d) return;
+                    var bagId = d.bulk_source_id;
+                    var unitSize = parseFloat(d.unit_size);
+                    if (bagId && !isNaN(unitSize) && unitSize > 0) {
+                        bagTotals[bagId] = (bagTotals[bagId] || 0) + unitSize * i.qty;
+                    } else {
+                        regularQty[i.id] = (regularQty[i.id] || 0) + i.qty;
+                    }
+                });
+                var stocks = [];
+                Object.keys(regularQty).forEach(function(vid) {
+                    var d = v[String(vid)]; if (!d || d.stock == null) return;
+                    var totalQty = regularQty[vid];
+                    if (totalQty > 0) stocks.push(Math.floor(d.stock / totalQty));
+                });
+                Object.keys(bagTotals).forEach(function(bagId) {
+                    var bag = bags[String(bagId)];
+                    if (!bag || bag.quantity == null) return;
+                    var bagQty = parseFloat(bag.quantity);
+                    if (isNaN(bagQty)) return;
+                    var perBundle = bagTotals[bagId];
+                    if (perBundle > 0) stocks.push(Math.floor(bagQty / perBundle));
+                });
+                row._autoPrice = total;
+                row._autoPriceBase = totalBase;
+                pval.className = 'bpc-auto-val' + (row._bpcManP ? ' dim' : '');
+                // If the component discount is applied — show the struck-through base sum + the
+                // discounted price.
+                if (totalBase > total + 0.005) {
+                    pval.innerHTML = '<span class="bpc-auto-old">' + totalBase.toFixed(2) + ' UAH</span>' + total.toFixed(2) + ' UAH';
+                } else {
+                    pval.textContent = total.toFixed(2) + ' UAH';
+                }
+                if (sval) {
+                    sval.textContent = stocks.length ? Math.min.apply(null, stocks) + ' pcs' : '—';
+                    sval.className = 'bpc-auto-val' + (row._bpcManS ? ' dim' : '');
+                }
+                if (row._discountUpdateResult) row._discountUpdateResult();
+            });
+    }
+
+    // ── Per-row BPC panel ──
+    function buildRowBPC(row) {
+        var idPrice = row.querySelector('[name="price"]');
+        var idStock = row.querySelector('[name="stock"]');
+
+        var panel = document.createElement('div');
+        panel.className = 'bpc-panel';
+        panel.innerHTML =
+            '<div class="bpc-row">' +
+                '<span class="bpc-lbl">Price</span>' +
+                '<div class="bpc-body">' +
+                    '<span class="bpc-auto-val dim bpc-pval">—</span>' +
+                    '<div class="bpc-toggle">' +
+                        '<button type="button" class="bpc-btn on bpc-p-auto">Auto</button>' +
+                        '<button type="button" class="bpc-btn bpc-p-man">Manual</button>' +
+                    '</div>' +
+                    '<input type="number" class="bpc-inp bpc-p-inp" placeholder="UAH" style="display:none" step="0.01" min="0">' +
+                    '<span class="bpc-hint bpc-p-hint" style="display:none">UAH</span>' +
+                '</div>' +
+            '</div>' +
+            '<div class="bpc-row">' +
+                '<span class="bpc-lbl">Stock</span>' +
+                '<div class="bpc-body">' +
+                    '<span class="bpc-auto-val dim bpc-sval">—</span>' +
+                    '<div class="bpc-toggle">' +
+                        '<button type="button" class="bpc-btn on bpc-s-auto">Auto</button>' +
+                        '<button type="button" class="bpc-btn bpc-s-man">Manual</button>' +
+                    '</div>' +
+                    '<input type="text" inputmode="numeric" pattern="[0-9]*" class="bpc-inp bpc-s-inp" placeholder="pcs" style="display:none">' +
+                    '<span class="bpc-hint bpc-s-hint" style="display:none">pcs</span>' +
+                '</div>' +
+            '</div>';
+        row.appendChild(panel);
+        row._bpcPanel = panel;
+
+        var pAutoBtn = panel.querySelector('.bpc-p-auto');
+        var pManBtn  = panel.querySelector('.bpc-p-man');
+        var pInp     = panel.querySelector('.bpc-p-inp');
+        var pHint    = panel.querySelector('.bpc-p-hint');
+        var pVal     = panel.querySelector('.bpc-pval');
+        var sAutoBtn = panel.querySelector('.bpc-s-auto');
+        var sManBtn  = panel.querySelector('.bpc-s-man');
+        var sInp     = panel.querySelector('.bpc-s-inp');
+        var sHint    = panel.querySelector('.bpc-s-hint');
+        var sVal     = panel.querySelector('.bpc-sval');
+
+        row._bpcPVal = pVal;
+        row._bpcSVal = sVal;
+        row._bpcManP = false;
+        row._bpcManS = false;
+
+        function setPriceMode(mode, initVal) {
+            row._bpcManP = (mode !== 'auto');
+            if (mode === 'auto') {
+                pAutoBtn.classList.add('on'); pManBtn.classList.remove('on');
+                pInp.style.display = 'none'; pHint.style.display = 'none';
+                if (idPrice) idPrice.value = '';
+            } else {
+                pManBtn.classList.add('on'); pAutoBtn.classList.remove('on');
+                pInp.style.display = ''; pHint.style.display = '';
+                if (initVal !== undefined) pInp.value = initVal;
+                if (idPrice) idPrice.value = pInp.value;
+                pInp.focus();
+            }
+            if (row._discountUpdateResult) row._discountUpdateResult();
+        }
+        function setStockMode(mode, initVal) {
+            row._bpcManS = (mode !== 'auto');
+            if (mode === 'auto') {
+                sAutoBtn.classList.add('on'); sManBtn.classList.remove('on');
+                sInp.style.display = 'none'; sHint.style.display = 'none';
+                if (idStock) idStock.value = '';
+            } else {
+                sManBtn.classList.add('on'); sAutoBtn.classList.remove('on');
+                sInp.style.display = ''; sHint.style.display = '';
+                if (initVal !== undefined) sInp.value = initVal;
+                if (idStock) idStock.value = sInp.value;
+                sInp.focus();
+            }
+        }
+
+        if (idPrice && idPrice.value && parseFloat(idPrice.value) !== 0) setPriceMode('manual', idPrice.value);
+        if (idStock && idStock.value && parseFloat(idStock.value) !== 0) setStockMode('manual', idStock.value);
+
+        pAutoBtn.addEventListener('click', function() { setPriceMode('auto'); if (window.pgMarkDirty) pgMarkDirty(); });
+        pManBtn.addEventListener('click', function() { setPriceMode('manual'); });
+        sAutoBtn.addEventListener('click', function() { setStockMode('auto'); if (window.pgMarkDirty) pgMarkDirty(); });
+        sManBtn.addEventListener('click', function() { setStockMode('manual'); });
+
+        pInp.addEventListener('input', function() {
+            if (idPrice) idPrice.value = this.value;
+            if (this.value && window.pgMarkDirty) pgMarkDirty();
+            if (row._discountUpdateResult) row._discountUpdateResult();
+        });
+        sInp.addEventListener('input', function() {
+            this.value = this.value.replace(/\D/g, '');
+            if (idStock) idStock.value = this.value;
+            if (this.value && window.pgMarkDirty) pgMarkDirty();
+        });
+    }
+
+    // ── Per-row discount UI ──
+    function initRowDiscount(row) {
+        var pctInp = row.querySelector('[name="discount_percent"]');
+        var amtInp = row.querySelector('[name="discount_amount"]');
+        if (!pctInp && !amtInp) return;
+
+        var mode = (amtInp && amtInp.value && parseFloat(amtInp.value) > 0) ? 'amt' : 'pct';
+
+        var vis = document.createElement('input');
+        vis.type = 'number'; vis.min = '0'; vis.step = '0.01'; vis.placeholder = '0';
+        vis.className = 'discount-vis-inp';
+
+        var sel = document.createElement('select');
+        sel.innerHTML = '<option value="pct">%</option><option value="amt">UAH</option>';
+        sel.style.display = 'none';
+
+        var discBtn = document.createElement('button');
+        discBtn.type = 'button'; discBtn.className = 'disc-type-btn';
+        var discDrop = document.createElement('div');
+        discDrop.className = 'disc-type-drop'; discDrop.style.display = 'none';
+        document.body.appendChild(discDrop);
+
+        function updateDiscBtn() {
+            var lbl = sel.value === 'pct' ? '%' : 'UAH';
+            discBtn.innerHTML = lbl + '<svg width="8" height="5" viewBox="0 0 8 5" fill="none"><path d="M1 1l3 3 3-3" stroke="#9ca3af" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        }
+        function openDiscDrop() {
+            discDrop.innerHTML = '';
+            [{v:'pct',l:'%'},{v:'amt',l:'UAH'}].forEach(function(opt) {
+                var item = document.createElement('div');
+                item.className = 'disc-type-opt' + (sel.value === opt.v ? ' active' : '');
+                item.textContent = opt.l;
+                item.addEventListener('click', function() {
+                    sel.value = opt.v; sel.dispatchEvent(new Event('change'));
+                    updateDiscBtn(); discDrop.style.display = 'none';
+                });
+                discDrop.appendChild(item);
+            });
+            var r = discBtn.getBoundingClientRect();
+            discDrop.style.display = 'block';
+            var dh = discDrop.scrollHeight;
+            discDrop.style.top = (window.clFlipTop ? window.clFlipTop(r, dh, 2) : (window.innerHeight - r.bottom < dh && r.top > dh ? r.top - dh - 2 : r.bottom + 2)) + 'px';
+            discDrop.style.left = (window.clX ? window.clX(r.left) : r.left) + 'px';
+            discDrop.style.width = r.width + 'px';
+        }
+        discBtn.addEventListener('mousedown', function(e) {
+            if (e.button !== 0) return;
+            e.stopPropagation();
+            discDrop.style.display === 'none' ? openDiscDrop() : (discDrop.style.display = 'none');
+        });
+        document.addEventListener('mousedown', function(e) {
+            if (e.button !== 0) return;
+            if (!discBtn.contains(e.target) && !discDrop.contains(e.target)) discDrop.style.display = 'none';
+        });
+
+        var result = document.createElement('span');
+        result.className = 'discount-result';
+
+        function getBasePrice() {
+            if (row._bpcManP) {
+                var bpcPInp = row.querySelector('.bpc-p-inp');
+                return bpcPInp ? parseFloat(bpcPInp.value) || 0 : 0;
+            }
+            return row._autoPrice || 0;
+        }
+        function updateResult() {
+            var val = parseFloat(vis.value) || 0;
+            var price = getBasePrice();
+            if (!val || !price) { result.textContent = ''; return; }
+            var final;
+            if (mode === 'pct') {
+                if (val > 100) { result.textContent = ''; return; }
+                final = price * (1 - val / 100);
+            } else {
+                final = price - val;
+                if (final < 0) { result.textContent = ''; return; }
+            }
+            result.textContent = '→ ' + final.toFixed(2) + ' UAH';
+        }
+        function syncHidden() {
+            if (mode === 'pct') { if (pctInp) pctInp.value = vis.value || ''; if (amtInp) amtInp.value = ''; }
+            else                { if (amtInp) amtInp.value = vis.value || ''; if (pctInp) pctInp.value = ''; }
+        }
+
+        vis.addEventListener('input', function() { syncHidden(); updateResult(); });
+        sel.addEventListener('change', function() {
+            mode = sel.value;
+            vis.max = mode === 'pct' ? '100' : '';
+            if (mode === 'pct' && amtInp) amtInp.value = '';
+            if (mode === 'amt' && pctInp) pctInp.value = '';
+            vis.value = ''; updateResult(); vis.focus();
+        });
+
+        if (mode === 'amt') {
+            sel.value = 'amt';
+            vis.value = amtInp && amtInp.value ? amtInp.value : '';
+        } else {
+            sel.value = 'pct'; vis.max = '100';
+            vis.value = pctInp && pctInp.value ? pctInp.value : '';
+        }
+        syncHidden(); updateDiscBtn(); updateResult();
+
+        var discRow = document.createElement('div');
+        discRow.className = 'discount-row';
+        var lbl = document.createElement('span');
+        lbl.className = 'discount-row-lbl';
+        lbl.appendChild(document.createTextNode('Discount '));
+        lbl.appendChild(discBtn); lbl.appendChild(sel);
+        lbl.appendChild(document.createTextNode(':'));
+        discRow.appendChild(lbl); discRow.appendChild(vis); discRow.appendChild(result);
+        row.appendChild(discRow);
+        row._discountRow = discRow;
+
+        row._discountUpdateResult = updateResult;
+    }
+
+    // ── Per-row items table render ──
+    function biRenderRow(row) {
+        var wrap = row._biWrap;
+        if (!wrap) return;
+        wrap.querySelectorAll('.bi-table, .bi-toolbar').forEach(function(el) { el.remove(); });
+
+        var biItems = row._biItems || [];
+
+        var toolbar = document.createElement('div');
+        toolbar.className = 'bi-toolbar';
+
+        var addInp = document.createElement('input');
+        addInp.type = 'text'; addInp.className = 'bi-add-inp';
+        addInp.placeholder = '+ Add product…'; addInp.autocomplete = 'off';
+        toolbar.appendChild(addInp);
+
+        wrap.appendChild(toolbar);
+        biInitSearchForRow(addInp, row);
+
+        if (!biItems.length) return;
+
+        /* "Raw name" column (name from the recognized text + matching %) —
+           only if there is at least one auto-recognized item.
+         */
+        var hasAi = biItems.some(function(it){ return it._aiRaw; });
+        function aiScoreBadge(s) {
+            if (s == null) return '';
+            var pct = Math.round(s * 100);
+            var cls = s >= 0.85 ? 'sim-high' : (s >= 0.75 ? 'sim-med' : 'sim-low');
+            return '<span class="sim-badge ' + cls + '">' + pct + '%</span>';
+        }
+
+        var table = document.createElement('table');
+        table.className = 'bi-table';
+        table.innerHTML = '<thead><tr>' +
+            '<th class="bi-del-cell"></th>' +
+            '<th class="col-photos">Photo</th>' +
+            '<th class="col-name">Name</th>' +
+            (hasAi ? '<th class="col-src">Raw name</th>' : '') +
+            '<th class="col-sku">SKU</th>' +
+            '<th class="col-disc">Discount</th>' +
+            '<th class="col-price">Price</th>' +
+            '<th class="col-stock">Stock</th>' +
+            '<th class="col-qty">Quantity</th>' +
+            '</tr></thead>';
+        var tbody = document.createElement('tbody');
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+
+        biItems.forEach(function(item, i) {
+            var tr = document.createElement('tr');
+            tr.className = i % 2 === 0 ? 'row1' : 'row2';
+
+            var tdCh = document.createElement('td');
+            tdCh.className = 'bi-del-cell';
+            var delRow = document.createElement('button');
+            delRow.type = 'button'; delRow.className = 'bi-row-del'; delRow.title = 'Delete'; delRow.textContent = '✕';
+            delRow.addEventListener('click', function(e){
+                e.stopPropagation();
+                var idx = row._biItems.indexOf(item);
+                if (idx > -1) { row._biItems.splice(idx, 1); biRenderRow(row); recalcRow(row); if (window.pgMarkDirty) window.pgMarkDirty(); }
+            });
+            tdCh.appendChild(delRow); tr.appendChild(tdCh);
+
+            var tdP = document.createElement('td');
+            tdP.className = 'col-photos';
+            (function() {
+                var palettes = ['#e0e7ff:#6366f1','#fce7f3:#db2777','#dcfce7:#16a34a','#fef9c3:#ca8a04','#ffedd5:#ea580c','#f3e8ff:#9333ea'];
+                var letter = (item.name || '?')[0].toUpperCase();
+                var ci = letter.charCodeAt(0) % palettes.length;
+                var bg = palettes[ci].split(':')[0], fg = palettes[ci].split(':')[1];
+                var wrap = document.createElement('div'); wrap.className = 'bi-pv-photo-wrap';
+                if (item.photo) {
+                    var img = document.createElement('img'); img.className = 'bi-pv-thumb'; img.src = item.photo;
+                    wrap.appendChild(img);
+                } else {
+                    var av = document.createElement('div'); av.className = 'bi-item-av';
+                    av.style.cssText = 'background:' + bg + ';color:' + fg + ';';
+                    av.textContent = letter; wrap.appendChild(av);
+                }
+                var preview = document.createElement('div'); preview.className = 'bi-pv-preview';
+                if (item.photo) {
+                    var pi = document.createElement('img'); pi.src = item.photo; preview.appendChild(pi);
+                } else {
+                    var pav = document.createElement('div'); pav.className = 'ic-av';
+                    pav.style.cssText = 'background:' + bg + ';color:' + fg + ';';
+                    pav.textContent = letter; preview.appendChild(pav);
+                }
+                var nm = document.createElement('div'); nm.className = 'ic-name'; nm.textContent = item.name || '—'; preview.appendChild(nm);
+                if (item.sku) { var sk = document.createElement('div'); sk.className = 'ic-sku'; sk.textContent = item.sku; preview.appendChild(sk); }
+                wrap.appendChild(preview);
+                tdP.appendChild(wrap);
+            })();
+            tr.appendChild(tdP);
+
+            var thN = document.createElement('th');
+            thN.className = 'col-name';
+            var nameWrap = document.createElement('div');
+            nameWrap.className = 'bi-name-wrap';
+            var href = item.productId ? '/admin/catalog/product/' + item.productId + '/change/#v' + item.variantId : '#';
+            nameWrap.innerHTML = '<a href="' + href + '" style="text-decoration:none">' + esc(item.name) + '</a>';
+            // Quick packaging switch button: shown only if the product
+            // has a paired variant (own ↔ factory). We swap the fields in row._biItems —
+            // saved normally via _bv_items_ on form submit.
+            if (item.paired) {
+                var swapBtn = document.createElement('button');
+                swapBtn.type = 'button';
+                swapBtn.className = 'bi-swap-badge';
+                var _target = item.paired.packagingKind === 'own' ? 'own' : 'factory';
+                var _cur = item.packagingKind === 'own' ? 'own' : 'factory';
+                swapBtn.textContent = '⇄ ' + _target;
+                swapBtn.title = 'Switch packaging: ' + _cur + ' → ' + _target;
+                swapBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    var p = item.paired;
+                    if (!p) return;
+                    var cur = {
+                        variantId: item.variantId, productId: item.productId, sku: item.sku,
+                        name: item.name, price: item.price, stock: item.stock, photo: item.photo,
+                        discountPercent: item.discountPercent, discountAmount: item.discountAmount,
+                        packagingKind: item.packagingKind, siteUrl: item.siteUrl
+                    };
+                    item.variantId = p.variantId; item.productId = p.productId; item.sku = p.sku;
+                    item.name = p.name; item.price = p.price; item.stock = p.stock; item.photo = p.photo;
+                    item.discountPercent = p.discountPercent; item.discountAmount = p.discountAmount;
+                    item.packagingKind = p.packagingKind; item.siteUrl = p.siteUrl; item.paired = cur;  // symmetric — can be swapped back
+                    biRenderRow(row); recalcRow(row);
+                    if (window.pgMarkDirty) window.pgMarkDirty();
+                });
+                nameWrap.appendChild(swapBtn);
+            }
+            if (item.siteUrl) {
+                var siteBtn = document.createElement('a');
+                siteBtn.className = 'oi-site-btn'; siteBtn.href = item.siteUrl; siteBtn.target = '_blank'; siteBtn.rel = 'noopener'; siteBtn.title = 'Open on site';
+                siteBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+                siteBtn.addEventListener('click', function(e){ e.stopPropagation(); });
+                nameWrap.appendChild(siteBtn);
+            }
+            var replBtn = document.createElement('button');
+            replBtn.type = 'button'; replBtn.className = 'em-item-edit-btn'; replBtn.title = 'Replace product';
+            replBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M9.5 2L12 4.5L4.5 12L1.5 12.5L2 9.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg>';
+            replBtn.addEventListener('click', function(e){ e.stopPropagation(); biOpenReplace(thN, item, row); });
+            nameWrap.appendChild(replBtn);
+            thN.appendChild(nameWrap);
+            tr.appendChild(thN);
+
+            /* "Raw name" — name from the recognized text + % (only for auto-recognized items) */
+            if (hasAi) {
+                var tdSrc = document.createElement('td');
+                tdSrc.className = 'col-src';
+                if (item._aiRaw) {
+                    tdSrc.innerHTML = '<div class="bi-src-row">' +
+                        (item._aiScore != null ? aiScoreBadge(item._aiScore) : '') +
+                        '<span class="bi-src-name">' + esc(item._aiRaw) + '</span></div>';
+                } else {
+                    tdSrc.innerHTML = '<span style="color:#d1d5db;">—</span>';
+                }
+                tr.appendChild(tdSrc);
+            }
+
+            var tdS = document.createElement('td');
+            tdS.className = 'col-sku';
+            tdS.innerHTML = '<span style="color:#9ca3af;font-size:12px">' + esc(item.sku) + '</span>';
+            tr.appendChild(tdS);
+
+            var tdDsc = document.createElement('td');
+            tdDsc.className = 'col-disc';
+            tdDsc.style.whiteSpace = 'nowrap';
+            var discBadge = null;
+            var renderDiscBadge = function(){};
+            if (item.discountPercent || item.discountAmount) {
+                discBadge = document.createElement('button');
+                discBadge.type = 'button';
+                discBadge.className = 'bi-disc-badge';
+                discBadge.textContent = item.discountPercent ? '−' + item.discountPercent + '%' : '−' + item.discountAmount + ' UAH';
+                renderDiscBadge = function() {
+                    var on = item.applyDiscount !== false;
+                    discBadge.classList.toggle('bi-disc-off', !on);
+                    discBadge.title = on
+                        ? 'Discount is included in the price. Click to strike it out and exclude it'
+                        : 'Discount is not included. Click to include it';
+                };
+                renderDiscBadge();
+                tdDsc.appendChild(discBadge);
+            } else {
+                tdDsc.innerHTML = '<span style="color:#9ca3af">—</span>';
+            }
+            tr.appendChild(tdDsc);
+
+            var tdPr = document.createElement('td');
+            tdPr.className = 'col-price';
+            tdPr.style.whiteSpace = 'nowrap';
+            function discountedUnit(){
+                var base = parseFloat(item.price) || 0;
+                if (item.applyDiscount === false) return base;
+                if (item.discountPercent) return base * (1 - parseFloat(item.discountPercent) / 100);
+                if (item.discountAmount) return Math.max(0, base - parseFloat(item.discountAmount));
+                return base;
+            }
+            function renderPriceCell(){
+                var base = parseFloat(item.price) || 0;
+                var eff = discountedUnit();
+                var qty = parseInt(item.qty) || 1;
+                var hasDisc = eff < base - 0.005;  // discount applied → show old + new
+                var unitHtml = hasDisc
+                    ? '<span class="bi-price-old">' + base.toFixed(2) + '</span><span class="bi-price-unit bi-price-sale">' + eff.toFixed(2) + '</span>'
+                    : '<span class="bi-price-unit">' + base.toFixed(2) + '</span>';
+                if (qty <= 1) {
+                    tdPr.innerHTML = unitHtml;
+                } else {
+                    tdPr.innerHTML = unitHtml +
+                        '<span class="bi-price-total">× ' + qty + ' = ' + (eff * qty).toFixed(2) + '</span>';
+                }
+            }
+            renderPriceCell();
+            tr.appendChild(tdPr);
+
+            var tdSt = document.createElement('td');
+            tdSt.className = 'col-stock';
+            if (item.stock > 0) {
+                tdSt.innerHTML = '<span style="font-size:12px;color:#374151">' + item.stock + '</span>';
+            } else {
+                tdSt.innerHTML = '<span style="font-size:12px;color:#dc2626">None</span>';
+            }
+            tr.appendChild(tdSt);
+
+            var tdQ = document.createElement('td');
+            tdQ.className = 'col-qty';
+            var qWrap = document.createElement('span'); qWrap.className = 'bi-qty-wrap';
+            var minBtn = document.createElement('button'); minBtn.type='button'; minBtn.className='bi-qty-btn'; minBtn.textContent='−';
+            var qInp  = document.createElement('input');  qInp.type='number'; qInp.className='bi-qty-inp'; qInp.value=item.qty; qInp.min=1;
+            var plusBtn= document.createElement('button'); plusBtn.type='button'; plusBtn.className='bi-qty-btn is-plus'; plusBtn.textContent='+';
+            qWrap.appendChild(minBtn); qWrap.appendChild(qInp); qWrap.appendChild(plusBtn);
+            tdQ.appendChild(qWrap); tr.appendChild(tdQ);
+
+            tbody.appendChild(tr);
+
+            (function(item, qInp, minBtn, plusBtn, discBadge, renderPriceCell){
+                function setQty(q) {
+                    q = Math.max(1, parseInt(q)||1);
+                    item.qty = q; qInp.value = q;
+                    renderPriceCell();
+                    recalcRow(row);
+                    if (window.pgMarkDirty) window.pgMarkDirty();
+                }
+                minBtn.addEventListener('click', function(){ setQty(item.qty - 1); });
+                plusBtn.addEventListener('click', function(){ setQty(item.qty + 1); });
+                qInp.addEventListener('change', function(){ setQty(this.value); });
+                if (item.productId) {
+                    tr.style.cursor = 'pointer';
+                    tr.addEventListener('click', function(e) {
+                        if (e.target.closest('input, button, a')) return;
+                        window.open('/admin/catalog/product/' + item.productId + '/change/#v' + item.variantId, '_blank');
+                    });
+                }
+                if (discBadge) discBadge.addEventListener('click', function(e){
+                    e.stopPropagation();
+                    item.applyDiscount = (item.applyDiscount === false);  // toggle the discount strikethrough
+                    renderDiscBadge();
+                    renderPriceCell();
+                    recalcRow(row);
+                    if (window.pgMarkDirty) window.pgMarkDirty();
+                });
+            })(item, qInp, minBtn, plusBtn, discBadge, renderPriceCell);
+        });
+    }
+
+    // ── Search for adding items to a variant (onPick optional → replace instead of add) ──
+    function biInitSearchForRow(inp, row, onPick) {
+        var drop = document.createElement('div');
+        drop.className = 'bi-drop'; drop.style.display = 'none';
+        var dropInner = document.createElement('div');
+        dropInner.className = 'bi-drop-inner';
+        drop.appendChild(dropInner);
+        document.body.appendChild(drop);
+        var t = null;
+        function closeD(){ drop.style.display='none'; dropInner.innerHTML=''; }
+        function posD(){
+            var r = inp.getBoundingClientRect();
+            drop.style.left = (window.clX ? window.clX(r.left) : r.left)+'px';
+            drop.style.top = (window.clFlipTop ? window.clFlipTop(r, drop.offsetHeight, 2) : (r.bottom+2)) + 'px';
+            drop.style.width = Math.max(r.width, 480)+'px';
+        }
+        inp.addEventListener('input', function(){
+            clearTimeout(t);
+            var q = inp.value.trim();
+            if (!q){ closeD(); return; }
+            t = setTimeout(function(){
+                dropInner.innerHTML='<div class="vpick-empty">Searching…</div>';
+                drop.style.display='block'; posD();
+                fetch('/admin/catalog/variant-search/?q='+encodeURIComponent(q), {credentials:'same-origin'})
+                    .then(function(r){ return r.json(); })
+                    .then(function(data){
+                        var used = new Set((row._biItems||[]).map(function(i){ return String(i.variantId); }));
+                        var res = (data.results||[]).filter(function(r){ return !used.has(String(r.id)); });
+                        dropInner.innerHTML='';
+                        if (!res.length){ dropInner.innerHTML='<div class="vpick-empty">Nothing found</div>'; return; }
+                        var _palettes=['#e0e7ff:#6366f1','#fce7f3:#db2777','#dcfce7:#16a34a','#fef9c3:#ca8a04','#ffedd5:#ea580c','#f3e8ff:#9333ea'];
+                        res.forEach(function(v){
+                            var el=document.createElement('div'); el.className='vpick-item';
+                            var nm=esc(v.name||v.product_name);
+                            var photoEl;
+                            if(v.photo){
+                                photoEl=document.createElement('img'); photoEl.src=v.photo;
+                            } else {
+                                var letter=((v.name||v.product_name||'?')[0]).toUpperCase();
+                                var ci=letter.charCodeAt(0)%_palettes.length;
+                                var bg=_palettes[ci].split(':')[0], fg=_palettes[ci].split(':')[1];
+                                photoEl=document.createElement('div'); photoEl.className='vpick-item-av';
+                                photoEl.style.cssText='background:'+bg+';color:'+fg+';';
+                                photoEl.textContent=letter;
+                            }
+                            el.appendChild(photoEl);
+                            var col=document.createElement('div'); col.className='vpick-item-col'; col.style.cssText='flex:1;min-width:0;';
+                            // "own" label — as in the main products table (own packaging);
+                            // the factory pack has no label.
+                            var ownBadge = v.packaging_kind==='own' ? '<span style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;font-weight:600;margin-right:6px;flex-shrink:0;">own</span>' : '';
+                            col.innerHTML='<div class="vpick-item-name" style="display:flex;align-items:baseline;">'+ownBadge+'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+nm+'</span></div>'+
+                                '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
+                                '<div class="vpick-item-row">'+esc(v.sku)+'</div>'+
+                                '<div class="vpick-item-row" style="color:'+(v.stock>0?'#16a34a':'#dc2626')+';flex-shrink:0;">'+(v.stock>0?v.stock+' pcs':'None')+'</div>'+
+                                '</div>';
+                            el.appendChild(col);
+                            el.addEventListener('mousedown', function(e){
+                                if(e.button!==0)return; e.preventDefault(); closeD(); inp.value='';
+                                if (onPick) onPick(v); else biPickItemRow(v, row);
+                            });
+                            dropInner.appendChild(el);
+                        });
+                        posD();
+                    });
+            }, 250);
+        });
+        inp.addEventListener('blur', function(){ closeD(); });
+        // Returning to the field with text already entered → show the results again.
+        inp.addEventListener('focus', function(){ if(inp.value.trim()) inp.dispatchEvent(new Event('input')); });
+        document.addEventListener('mousedown', function(e){
+            if (e.button !== 0) return;
+            if (e.target!==inp && !drop.contains(e.target)) closeD();
+        });
+    }
+
+    function biPickItemRow(variant, row, qty, ai) {
+        if (!row._biItems) row._biItems = [];
+        var name = variant.name || variant.product_name;
+        /* If such a variant already exists — only increase the quantity. */
+        var existing = row._biItems.find(function(it){ return String(it.variantId) === String(variant.id); });
+        if (existing) {
+            existing.qty = (parseInt(existing.qty,10) || 1) + (parseInt(qty,10) || 1);
+            if (ai && ai.raw && !existing._aiRaw) { existing._aiRaw = ai.raw; existing._aiScore = ai.score; }
+        } else {
+            row._biItems.push({
+                variantId: variant.id, productId: variant.product_id||null,
+                sku: variant.sku, name: name, price: variant.price, stock: variant.stock,
+                photo: variant.photo||'', discountPercent: variant.discount_percent||'',
+                discountAmount: variant.discount_amount||'', applyDiscount: true,
+                packagingKind: variant.packaging_kind||'',
+                paired: variant.paired ? {
+                    variantId: variant.paired.variant_id, productId: variant.paired.product_id||null,
+                    sku: variant.paired.sku, name: variant.paired.name, price: variant.paired.price,
+                    stock: variant.paired.stock, photo: variant.paired.photo||'',
+                    discountPercent: variant.paired.discount_percent||'',
+                    discountAmount: variant.paired.discount_amount||'',
+                    packagingKind: variant.paired.packaging_kind||'',
+                    siteUrl: variant.paired.site_url||''
+                } : null,
+                siteUrl: variant.site_url||'', qty: parseInt(qty, 10) || 1,
+                _aiRaw: (ai && ai.raw) || '', _aiScore: (ai && ai.score != null) ? ai.score : null
+            });
+        }
+        biRenderRow(row);
+        recalcRow(row);
+        if (window.pgMarkDirty) window.pgMarkDirty();
+    }
+
+    // Replacing a product in a composition item: copy the fields from the selected variant, keep
+    // the quantity
+    function biReplaceItem(item, variant, row) {
+        item.variantId = variant.id; item.productId = variant.product_id || null; item.sku = variant.sku;
+        item.name = variant.name || variant.product_name; item.price = variant.price; item.stock = variant.stock;
+        item.photo = variant.photo || ''; item.discountPercent = variant.discount_percent || '';
+        item.discountAmount = variant.discount_amount || ''; item.applyDiscount = true;
+        item.packagingKind = variant.packaging_kind || ''; item.siteUrl = variant.site_url || ''; item.paired = null;
+        biRenderRow(row); recalcRow(row); if (window.pgMarkDirty) window.pgMarkDirty();
+    }
+    // Inline search editor for replacing a product in the name cell (as in the order)
+    function biOpenReplace(thN, item, row) {
+        var ed = document.createElement('div'); ed.className = 'bi-repl-editor';
+        var ri = document.createElement('input'); ri.type = 'text'; ri.placeholder = 'Find a product to replace with…'; ri.autocomplete = 'off';
+        var cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'bi-repl-cancel'; cancel.title = 'Cancel';
+        cancel.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>';
+        ed.appendChild(ri); ed.appendChild(cancel);
+        thN.innerHTML = ''; thN.appendChild(ed);
+        biInitSearchForRow(ri, row, function(v){ biReplaceItem(item, v, row); });
+        ri.focus();
+        cancel.addEventListener('mousedown', function(ev){ ev.preventDefault(); biRenderRow(row); });
+        ri.addEventListener('blur', function(){ setTimeout(function(){ if (document.body.contains(ri)) biRenderRow(row); }, 220); });
+    }
+
+    window._bgGalleryOrigIds = window._bgGalleryOrigIds || new Set();
+
+    /* ── "Cancel" — delete newly uploaded photos, then reload */
+    window.clCancelHook = function(){
+        var deletions = [];
+        /* "will be deleted" marks are only local state, reset them. */
+        window.bgPendingDelete = {};
+        document.querySelectorAll('.pg-item.pg-pending-del').forEach(function(el) { el.classList.remove('pg-pending-del'); });
+        // General bundle gallery: delete photos added after page load
+        var origGen = window._bgGalleryOrigIds || new Set();
+        document.querySelectorAll('#pg-items .pg-item[data-id]').forEach(function(el) {
+            var id = parseInt(el.dataset.id);
+            if (id && !origGen.has(id)) {
+                deletions.push(fetch('/admin/catalog/delete-bundle-photo/', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': pgGetCSRF()},
+                    body: JSON.stringify({id: id})
+                }));
+            }
+        });
+        Promise.allSettled(deletions).finally(function() {
+            if (typeof window.clMarkLeaving === 'function') window.clMarkLeaving();
+            window.location.reload();
+        });
+    };
+
+    /* ── Bundle items extraction (wand) ──
+       Fills: 1) Name (id_name), 2) Categories (checkbox list),
+                 3) bi-table (via biPickItemRow).
+     */
+    document.addEventListener('bundle-items-extracted', function(e){
+        var detail = e.detail || {};
+        var items = detail.items || [];
+        var suggestedName = (detail.name || '').trim();
+        var suggestedVariantName = (detail.variant_name || '').trim();
+        var suggestedCategories = detail.categories || [];  // [{id, name}, ...]
+        var existingBundle = detail.existing_bundle;
+        var matchError = (detail.match_error || '').trim();
+
+        /* If a bundle with this main name already exists — warn. */
+        if (existingBundle && existingBundle.id) {
+            var msg = 'Warning! A bundle with this name already exists:\n"' + existingBundle.name + '"\n\nOpen it and add a new variant? OK — go there, Cancel — continue here.';
+            if (confirm(msg)) {
+                window.location.href = existingBundle.url;
+                return;
+            }
+        }
+
+        var activeRow = mainRow();
+
+        /* 0) Description + usage - the bundle is flat, the fields are shared by all. */
+        var descHtml = (detail.description || '').trim();
+        var normsHtml = (detail.application_norms || '').trim();
+        if (activeRow) {
+            if (descHtml && typeof activeRow._vDescSetHtml === 'function') activeRow._vDescSetHtml(descHtml);
+            if (normsHtml && typeof activeRow._vAppSetHtml === 'function') activeRow._vAppSetHtml(normsHtml);
+        }
+
+        /* 1) Name (id_name) - prefer the more specific one (with a packaging suffix),
+           otherwise the base one.
+         */
+        var finalName = suggestedVariantName || suggestedName;
+        if (finalName) {
+            var bundleNameInp = document.querySelector('#id_name');
+            if (bundleNameInp) {
+                bundleNameInp.value = finalName;
+                bundleNameInp.dispatchEvent(new Event('input', {bubbles:true}));
+            }
+        }
+        /* 2) Categories — the backend has already resolved names to real IDs in the DB.
+           Set the checkboxes by value (id).
+         */
+        if (suggestedCategories.length) {
+            var wantIds = {};
+            suggestedCategories.forEach(function(c){ if (c && c.id) wantIds[String(c.id)] = true; });
+            document.querySelectorAll('.field-categories input[type=checkbox]').forEach(function(cb){
+                if (wantIds[String(cb.value)] && !cb.checked) {
+                    cb.checked = true;
+                    cb.dispatchEvent(new Event('change', {bubbles:true}));
+                }
+            });
+        }
+
+        /* 3) Items → bi-table */
+        var added = 0, notFound = [];
+        if (items.length) {
+            if (!activeRow) {
+                alert('Add a variant first');
+                return;
+            }
+            items.forEach(function(it){
+                if (!it.variant_id) {
+                    notFound.push(it.name);
+                    return;
+                }
+                biPickItemRow({
+                    id: it.variant_id, product_id: it.product_id,
+                    name: it.variant_name, sku: it.sku,
+                    price: it.price, stock: it.stock, photo: it.photo,
+                    packaging_kind: it.packaging_kind, paired: it.paired,
+                }, activeRow, it.qty || 1, {
+                    raw: it.name || '',
+                    score: (it.similarity !== undefined && it.similarity !== null) ? it.similarity : null,
+                });
+                added++;
+            });
+        }
+
+        /* Success - a short toast. There is no summary of what was filled: everything is visible in
+           the form, and
+           doubtful composition matches are marked with a similarity badge in the table. A dialog
+           only
+           when something did NOT succeed: product not found, matching failure, photo not processed.
+         */
+        var problems = [];
+        if (notFound.length) problems.push('Not found:\n• ' + notFound.join('\n• '));
+        if (matchError) {
+            // Previously a matching failure looked like "product not found" —
+            // the manager
+            // saw an empty composition and did not understand why. Now the reason is visible.
+            problems.push(added
+                ? '⚠ Matching was incomplete:\n' + matchError
+                : '⚠ The composition was NOT matched — this is a matching failure, not a lack of products:\n' + matchError);
+        }
+        (detail.image_notes || []).forEach(function(s) { problems.push(s); });
+        if (problems.length) alert(problems.join('\n\n'));
+        else pgToast('Done — the bundle is filled');
+    });
+
+    /* Waiting ring - the same as on the toolbar buttons in the product card
+       (product/change_form.html): 14px, rotates in 0.7 s. The pg-spin animation
+       is declared in this page's styles.
+     */
+    var SPIN = '<span style="width:14px;height:14px;border:2px solid #d1d5db;' +
+        'border-top-color:#6b7280;border-radius:50%;display:block;' +
+        'animation:pg-spin 0.7s linear infinite;"></span>';
+
+    /* The wands "Fill the bundle composition" ("Description" and
+       "Raw text") start ONE
+       parse that fills the whole form. While it runs (LLM, up to a minute), the ring spins
+       on each of them, and a repeated start is blocked: biPickItemRow on a second pass would just
+       add the composition quantities again. Dimming the button doesn't work here:
+       base_site.html sets opacity:1 !important on toolbar buttons, so the change was not visible.
+     */
+    var wandBtns = [], wandsBusy = false;
+    function paintWand(b, busy) {
+        if (busy && b._idleHtml == null) {
+            b._idleHtml = b.innerHTML; b._idleTitle = b.title;
+            b.innerHTML = SPIN; b.title = 'Processing text…';
+        } else if (!busy && b._idleHtml != null) {
+            b.innerHTML = b._idleHtml; b.title = b._idleTitle; b._idleHtml = null;
+        }
+        b.disabled = busy;
+        b.style.cursor = busy ? 'progress' : 'pointer';
+    }
+    function setWandsBusy(busy) {
+        wandsBusy = busy;
+        wandBtns.forEach(function(b) { paintWand(b, busy); });
+    }
+
+    // ── Variant text editor (Quill) — shared builder for Description / Raw text ──
+    function buildVariantEditor(row, fieldSuffix, labelText, withWand) {
+        var ta = row.querySelector('[name="' + fieldSuffix + '"]');
+        if (!ta) return null;
+        var formRow = ta.closest('.form-row');
+        if (formRow) formRow.style.display = 'none';
+
+        var TOOLBAR = [
+            [{ size: ['10px','12px','14px','16px','18px','20px','24px','28px','32px','36px','48px'] }, { header: [1,2,3,4,5,6,false] }],
+            ['bold','italic','underline','strike'],
+            [{ script: 'super' }, { script: 'sub' }],
+            [{ color: [] }, { background: [] }],
+            [{ list: 'ordered' }, { list: 'bullet' }, { list: 'check' }],
+            [{ indent: '-1' }, { indent: '+1' }],
+            [{ align: [] }],
+            ['blockquote','code-block'],
+            ['link','image','video'],
+            ['table'],
+            ['clean']
+        ];
+
+        var section = document.createElement('div');
+        section.className = 'quill-wrapper';
+        section.style.cssText = 'margin:14px 20px;min-height:0;resize:none;';
+
+        var header = document.createElement('div');
+        header.className = 'desc-header';
+        header.style.cssText = 'font-size:11px;font-weight:700;color:#6b7280;letter-spacing:0.5px;text-transform:uppercase;padding:8px 12px;background:#f9fafb;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;';
+
+        var headerText = document.createElement('span');
+        headerText.textContent = labelText;
+        header.appendChild(headerText);
+
+        var arrowBtn = document.createElement('button');
+        arrowBtn.type = 'button';
+        arrowBtn.style.cssText = 'padding:0;width:16px;height:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:transparent;border:none;cursor:pointer;';
+        function arrowSvg(up) {
+            return '<span style="display:block;width:7px;height:7px;border-right:2px solid #6b7280;border-bottom:2px solid #6b7280;transform:rotate('+(up?'-135deg':'45deg')+');margin-top:'+(up?'3px':'-3px')+';"></span>';
+        }
+        arrowBtn.innerHTML = arrowSvg(false);
+        header.appendChild(arrowBtn);
+
+        section.appendChild(header);
+
+        var editorDiv = document.createElement('div');
+        editorDiv.style.display = 'none';
+        section.appendChild(editorDiv);
+
+        var isOpen = false;
+        var quillInited = false;
+        var q = null;
+        var qlToolbar = null;
+
+        function makeIconBtn(svgHtml, title) {
+            var b = document.createElement('button');
+            b.type = 'button'; b.innerHTML = svgHtml; b.title = title;
+            b.style.cssText = 'padding:2px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;color:#6b7280;background:#fff;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;flex-shrink:0;';
+            b.addEventListener('mouseenter', function() { b.style.borderColor='#9ca3af'; });
+            b.addEventListener('mouseleave', function() { b.style.borderColor='#d1d5db'; });
+            return b;
+        }
+        var wandSvg = '<svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="17" x2="11" y2="9" stroke-width="1.8"/><line x1="11" y1="9" x2="17" y2="3" stroke-width="1.8"/><circle cx="17" cy="3" r="1.2" fill="currentColor" stroke="none"/><circle cx="17" cy="7.5" r="0.9" fill="currentColor" stroke="none"/><circle cx="12.5" cy="2" r="0.9" fill="currentColor" stroke="none"/><circle cx="14.5" cy="6" r="0.9" fill="currentColor" stroke="none"/></svg>';
+
+        function openEditor() {
+            editorDiv.style.display = '';
+            if (!quillInited) {
+                quillInited = true;
+                q = new Quill(editorDiv, { theme: 'snow', modules: { toolbar: TOOLBAR } });
+                qlToolbar = section.querySelector('.ql-toolbar');
+                var raw = ta.value;
+                if (raw) q.clipboard.dangerouslyPasteHTML(raw);
+                q.on('text-change', function(delta, old, source) {
+                    ta.value = q.root.innerHTML === '<p><br></p>' ? '' : q.root.innerHTML;
+                    /* Without this "Save"/"Cancel" do not appear: Quill writes
+                       to the
+                       textarea directly, bypassing events, while the form listens for 'input'
+                       (_form_guard.html:53). source === 'user' is mandatory — otherwise
+                       HTML normalization on value load would mark the form as
+                       changed before the person touched anything. Same
+                       in QuillWidget (catalog/widgets.py:322).
+                     */
+                    if (source === 'user' && window.pgMarkDirty) window.pgMarkDirty();
+                });
+                var form = ta.closest('form');
+                if (form) form.addEventListener('submit', function() {
+                    ta.value = q.root.innerHTML === '<p><br></p>' ? '' : q.root.innerHTML;
+                });
+                // AI buttons — the wand does EXACTLY the same as in "General description":
+                // extracts the bundle composition from the text and fills the bi-table.
+                var editBtn = withWand ? makeIconBtn(wandSvg, 'Fill the bundle composition') : null;
+                if (editBtn) editBtn.addEventListener('click', function() {
+                    if (wandsBusy) return;
+                    if (!q.getText().trim()) { alert('The editor is empty'); return; }
+                    setWandsBusy(true);
+                    /* We build the request inside the chain: a synchronous failure would otherwise
+                       slip
+                       past .catch and leave the ring spinning forever on both wands.
+                     */
+                    Promise.resolve().then(function() {
+                        return fetch('/admin/catalog/generate-description/', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json', 'X-CSRFToken': pgGetCSRF()},
+                            body: JSON.stringify({text: q.root.innerHTML, prompt: 'bundle_items'}),
+                        });
+                    }).then(function(r){ return r.json(); })
+                    .catch(function(e){ return {error: String(e)}; })
+                    .then(function(d){
+                        /* We stop the ring BEFORE the alerts below - otherwise it would keep spinning under the dialog. */
+                        setWandsBusy(false);
+                        if (!d || d.error) { alert('Error: ' + ((d && d.error) || 'empty server response')); return; }
+                        document.dispatchEvent(new CustomEvent('bundle-items-extracted', {
+                            detail: {
+                                general_name: d.general_name || '',
+                                name: d.name || '',
+                                variant_name: d.variant_name || '',
+                                items: d.items || [],
+                                match_error: d.match_error || '',
+                                categories: d.categories || [],
+                                existing_bundle: d.existing_bundle || null,
+                                description: d.description || '',
+                                application_norms: d.application_norms || '',
+                                image_notes: d.image_notes || [],
+                            }
+                        }));
+                    });
+                });
+                /* The broom ("Improve selected text") is deliberately
+                   absent here.
+                   It hands the selected fragment to the model with a general cleanup prompt
+                   that is allowed to "slightly improve the wording", and
+                   inserts the reply as is — WITHOUT a dose check. Bundle fields
+                   (instructions, application norms) contain pesticide doses, so
+                   the price of such an edit is a burnt bush at the customer's. For these texts
+                   there is
+                   "Run through AI": same meaning, but the result goes through
+                   a deterministic dose check and is rejected entirely if even one dose
+                   appeared, disappeared or changed.
+                 */
+                /* Take the same icons as the bundle's QuillWidget editors,
+                   so the buttons look identical (there it is img-base64, here it differs).
+                 */
+                function _refIcon(title) {
+                    var btns = document.querySelectorAll('.quill-wrapper .ql-toolbar button[title="' + title + '"]');
+                    for (var i = 0; i < btns.length; i++) { if (btns[i].querySelector('img')) return btns[i].innerHTML; }
+                    return '';
+                }
+                if (editBtn) { var _wIc = _refIcon('Fill the bundle composition'); if (_wIc) editBtn.innerHTML = _wIc; }
+                /* We register AFTER the icon swap: paintWand remembers the current markup
+                   as 'inactive'. The editor could have been opened while the parse is already
+                   running.
+                 */
+                if (editBtn) { wandBtns.push(editBtn); if (wandsBusy) paintWand(editBtn, true); }
+                if (qlToolbar) {
+                    var lastGroup = qlToolbar.querySelector('.ql-formats:last-child');
+                    if (lastGroup) {
+                        lastGroup.style.display = 'inline-flex'; lastGroup.style.gap = '4px'; lastGroup.style.alignItems = 'center';
+                        if (editBtn) lastGroup.appendChild(editBtn);
+                    }
+                }
+                /* Alignment button — like the other editors (injector from base_site.html). */
+                if (window._pgInjectAlign) window._pgInjectAlign(section, q);
+            }
+            if (qlToolbar) qlToolbar.style.display = '';
+            header.style.borderBottom = '1px solid #e5e7eb';
+            arrowBtn.innerHTML = arrowSvg(true);
+            /* Reset inline min-height/resize → the editor picks up the global
+               .quill-wrapper { min-height:220px; resize:vertical } — so that all
+               editors (bundle-level and variant-level) have the same height.
+             */
+            section.style.minHeight = '';
+            section.style.resize = '';
+            isOpen = true;
+        }
+        function closeEditor() {
+            if (qlToolbar) qlToolbar.style.display = 'none';
+            editorDiv.style.display = 'none';
+            header.style.borderBottom = 'none';
+            arrowBtn.innerHTML = arrowSvg(false);
+            section.style.minHeight = '0';
+            section.style.resize = 'none';
+            section.style.height = '';
+            isOpen = false;
+        }
+
+        header.addEventListener('click', function() {
+            if (isOpen) closeEditor(); else openEditor();
+        });
+
+        if (ta.value && ta.value.trim()) {
+            setTimeout(openEditor, 0);
+        }
+        /* External fill (AI wand): open the editor, insert the HTML,
+           sync the textarea + dispatch('input') for the CRM dirty buttons.
+         */
+        function setHtml(html) {
+            openEditor();
+            if (!q) return;
+            q.setContents([]);
+            if (html) q.clipboard.dangerouslyPasteHTML(html);
+            ta.value = q.root.innerHTML === '<p><br></p>' ? '' : q.root.innerHTML;
+            ta.dispatchEvent(new Event('input', {bubbles:true}));
+        }
+        return { section: section, open: openEditor, setHtml: setHtml };
+    }
+
+    /* ── Instructions: run through LLM ──────────────────────────────────────
+       The model cleans up the text and MARKS UP drug mentions (by which exact word each is
+       named in this text and which catalog product it is). The markup is needed for the
+       auto-replacement when the composition changes — without it you have to guess with a
+       heuristic.
+
+       The result is NEVER written to the field silently: we show it next to the list of
+       edits, and the person applies it with a button. The reason is that the leaflet carries
+       pesticide doses, and the
+       model makes substantive decisions (e.g. substitutes a drug name based on its composition).
+       The server also checks the doses: if even one appeared or disappeared, the result
+       is rejected entirely.
+     */
+    function initInstructionAI(row, ins) {
+        /* Hidden input for the markup: instruction_map has editable=False, so it is not in
+           the form - it travels the same way as the composition (_bundle_items) and is read in
+           BundleAdmin.save_model.
+         */
+        var mapInput = document.createElement('input');
+        mapInput.type = 'hidden';
+        mapInput.name = '_bundle_instruction_map';
+        row.appendChild(mapInput);
+        row._insMapInput = mapInput;
+
+        var wrap = document.createElement('span');
+        wrap.style.cssText = 'display:inline-flex;gap:4px;align-items:center;';
+
+        var INK = '#374151';
+        /* The same 'magic wand' icon as in buildVariantEditor
+           above (makeIconBtn/wandSvg) - pure SVG, no base64.
+         */
+        var wandIcon = '<svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="17" x2="11" y2="9" stroke-width="1.8"/><line x1="11" y1="9" x2="17" y2="3" stroke-width="1.8"/><circle cx="17" cy="3" r="1.2" fill="currentColor" stroke="none"/><circle cx="17" cy="7.5" r="0.9" fill="currentColor" stroke="none"/><circle cx="12.5" cy="2" r="0.9" fill="currentColor" stroke="none"/><circle cx="14.5" cy="6" r="0.9" fill="currentColor" stroke="none"/></svg>';
+        function iconChip(svg, title) {
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.innerHTML = svg;
+            b.title = title || '';
+            b.dataset.icon = '1';
+            b._title = title || '';
+            b._icon = svg;
+            b.style.cssText = 'padding:2px;width:28px;height:28px;display:flex;align-items:center;' +
+                'justify-content:center;color:#6b7280;background:#fff;border:1px solid #d1d5db;' +
+                'border-radius:4px;cursor:pointer;flex-shrink:0;';
+            b.addEventListener('mouseenter', function() { b.style.borderColor = '#9ca3af'; });
+            b.addEventListener('mouseleave', function() { b.style.borderColor = '#d1d5db'; });
+            return b;
+        }
+
+        var downloadIcon = '<svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="' + INK +
+            '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M10 3v10"/><path d="M6 9l4 4 4-4"/>' +
+            '<path d="M3.5 15.5v1A1.5 1.5 0 0 0 5 18h10a1.5 1.5 0 0 0 1.5-1.5v-1"/></svg>';
+
+        var btnAI = iconChip(wandIcon, 'Clean up the text and mark up the preparations');
+        var btnDownload = iconChip(downloadIcon, 'Download the instructions (.docx)');
+        wrap.appendChild(btnAI);
+        wrap.appendChild(btnDownload);
+
+        /* State of the run queue (AI limit): a strip under the tab header, visible even when the
+           editor
+           is collapsed. The initial state comes from the server (_INS_JOB): "waiting in the queue"
+           / "processed" /
+           "not applied" - the summary is shown once.
+         */
+        var jobNote = document.createElement('div');
+        jobNote.style.cssText = 'display:none;margin:6px 0 8px;padding:7px 10px;border-radius:6px;' +
+            'font-size:13px;line-height:1.4;border:1px solid;';
+        ins.section.insertBefore(jobNote, ins.section.children[1] || null);
+        function showJobNote(text, tone) {
+            var c = { wait: ['#fff7ed', '#9a3412', '#fed7aa'], ok: ['#ecfdf5', '#065f46', '#a7f3d0'],
+                      warn: ['#fef2f2', '#991b1b', '#fecaca'] }[tone] || ['#f3f4f6', '#374151', '#d1d5db'];
+            jobNote.style.background = c[0]; jobNote.style.color = c[1]; jobNote.style.borderColor = c[2];
+            jobNote.textContent = text;
+            jobNote.style.display = 'block';
+        }
+        if (window._INS_JOB) {
+            showJobNote(window._INS_JOB.text, window._INS_JOB.tone);
+            pgToast(window._INS_JOB.text, 7000);
+        }
+
+        function bvPk() {
+            var pk = '{% if original %}{{ original.pk }}{% endif %}';
+            return pk || null;
+        }
+        function editorHtml() {
+            var ed = ins.section.querySelector('.ql-editor');
+            return ed ? ed.innerHTML : '';
+        }
+        function busy(btn, on, label) {
+            btn.style.pointerEvents = on ? 'none' : 'auto';
+            /* While waiting, the icon button shows a spinning ring and the label goes into
+               the tooltip: textContent would wipe out the icon itself. We don't dim it —
+               the ring must be clearly visible.
+             */
+            if (btn.dataset && btn.dataset.icon) {
+                btn.style.opacity = '1';
+                btn.innerHTML = on ? SPIN : btn._icon;
+                btn.title = on ? (label || btn._title) : btn._title;
+            } else {
+                btn.style.opacity = on ? '0.5' : '1';
+                if (label) btn.textContent = label;
+            }
+        }
+
+        btnAI.addEventListener('click', function() {
+            var text = editorHtml();
+            if (!text || !text.replace(/<[^>]*>/g, '').trim()) {
+                alert('Paste the instruction text first');
+                return;
+            }
+            /* No need to save the bundle: the model sees only the name, the text and the
+               composition, and
+               all of that is already in the form. The composition comes from the form, not from the
+               DB: the DB may hold
+               an earlier version.
+             */
+            var items = (row._biItems || []).map(function(it) {
+                return { variant_id: it.variantId, qty: parseInt(it.qty, 10) || 1 };
+            });
+            if (!items.length) {
+                alert('Add the bundle composition first — the preparation markup relies on it');
+                return;
+            }
+            var nameInp = document.querySelector('#id_name');
+            busy(btnAI, true, 'Thinking…');
+            fetch('/admin/catalog/instruction-normalize/', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': pgGetCSRF() },
+                body: JSON.stringify({ name: nameInp ? nameInp.value : '', items: items, text: text, bundle_id: bvPk() })
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    busy(btnAI, false, 'Run through AI');
+                    if (d.queued) {
+                        /* AI limit: the run waits in the queue and will execute on its own. On the
+                           bundle ADD form there is
+                           no bundle yet - the queue number travels with the form and is bound on
+                           "Save".
+                         */
+                        if (!d.linked) {
+                            if (!row._insJobInput) {
+                                row._insJobInput = document.createElement('input');
+                                row._insJobInput.type = 'hidden';
+                                row._insJobInput.name = '_bundle_instruction_job';
+                                row.appendChild(row._insJobInput);
+                            }
+                            row._insJobInput.value = d.job_id;
+                        }
+                        showJobNote(d.message, 'wait');
+                        pgToast(d.message, 9000);
+                        return;
+                    }
+                    jobNote.style.display = 'none';     // ran manually - the old queue strip is no longer true
+                    if (d.error) { alert('Error: ' + d.error); return; }
+                    if (d.ok === false) {
+                        alert('The result was rejected by the check:\n' + (d.rejected || ''));
+                        return;
+                    }
+                    insApply(d, ins, row);
+                })
+                .catch(function(e) {
+                    busy(btnAI, false, 'Run through AI');
+                    alert('Error: ' + e);
+                });
+        });
+
+        btnDownload.addEventListener('click', function() {
+            var pk = bvPk();
+            if (!pk) { alert('Save the bundle first'); return; }
+            var text = editorHtml();
+            if (!text || !text.replace(/<[^>]*>/g, '').trim()) {
+                alert('Paste the instruction text first');
+                return;
+            }
+            /* The file is generated from what is in the DB, not from the editor - if
+               there are unsaved edits, the generated file will have the old text.
+               The 'form is dirty' signal (project_crm_dirty_buttons) - the "Save" button
+               loses .cl-btn-idle when changes appear.
+             */
+            var saveBtn = document.querySelector('.submit-row-top input[name="_continue"]');
+            if (saveBtn && !saveBtn.classList.contains('cl-btn-idle')) {
+                alert('Save your changes first — the file is generated from the saved text');
+                return;
+            }
+            window.open('/admin/catalog/bundle/' + pk + '/instruction-docx/', '_blank');
+        });
+
+        var origOpen = ins.open;
+        ins.open = function() {
+            var r = origOpen.apply(this, arguments);
+            if (!wrap.parentNode) {
+                var tb = ins.section.querySelector('.ql-toolbar');
+                if (tb) {
+                    tb.style.flexWrap = 'wrap';
+                    /* Attach to the LAST .ql-formats group of the toolbar - the same way
+                       as the AI buttons (magic wand/broom) in the Quill editors
+                       (catalog/widgets.py) attach to qlToolbar.lastGroup.
+                       Was: a separate group with margin-left:auto - a larger, atypical
+                       left gap than between the other toolbar buttons.
+                     */
+                    var lastGroup = tb.querySelector('.ql-formats:last-child');
+                    if (lastGroup) {
+                        lastGroup.style.display = 'inline-flex'; lastGroup.style.gap = '4px'; lastGroup.style.alignItems = 'center';
+                        lastGroup.appendChild(wrap);
+                    } else {
+                        tb.appendChild(wrap);
+                    }
+                }
+            }
+            return r;
+        };
+    }
+
+    /* The result is applied IMMEDIATELY into the editor, without a review panel.
+       The panel showed the full list of edits and nobody reads it every time: the
+       text itself is visible in the editor, and nothing has gone to the DB until
+       "Save" is pressed. The protection against dose changes is not human eyes but a
+       deterministic
+       check on the server: it rejects the result ENTIRELY if a dose
+       appeared, disappeared or changed. So what remains is the one thing the check cannot
+       do — the model's substantive remarks; they go into the notification.
+     */
+    function insApply(d, ins, row) {
+        if (ins.setHtml) ins.setHtml(d.html);
+        var ta = row.querySelector('[name="instruction_html"]');
+        if (ta) {
+            ta.value = d.html;
+            /* Without this "Save"/"Cancel" will not appear — project_crm_dirty_buttons */
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (row._insMapInput) {
+            row._insMapInput.value = JSON.stringify(d.map || {});
+            row._insMapInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        /* Only a short toast. The model's remarks (warnings) are not shown: they are reasoning
+           like 'no contradiction found'. A real failure - the dose changed - is rejected by the
+           server
+           entirely (separate alert above), and the remarks themselves are written to the server
+           log.
+         */
+        pgToast('Done — the instructions were processed');
+    }
+
+    function initVariantDescription(row) {
+        var desc = buildVariantEditor(row, 'description', 'Description', true);
+        if (!desc) return;
+        var app = buildVariantEditor(row, 'application_norms', 'Application', false);
+        var ins = buildVariantEditor(row, 'instruction_html', 'Instructions (print)', false);
+        if (ins) initInstructionAI(row, ins);
+        var raw = buildVariantEditor(row, 'raw_text', 'Raw text', true);
+        row._vDescSection = desc.section;
+        row._vDescOpen = desc.open;
+        row._vDescSetHtml = desc.setHtml;
+        row._vAppSection = app ? app.section : null;
+        row._vAppOpen = app ? app.open : null;
+        row._vAppSetHtml = app ? app.setHtml : null;
+        row._vInsSection = ins ? ins.section : null;
+        row._vInsOpen = ins ? ins.open : null;
+        row._vInsSetHtml = ins ? ins.setHtml : null;
+        row._vRawSection = raw ? raw.section : null;
+        row._vRawOpen = raw ? raw.open : null;
+
+        /* The same shared tabs block as for the product (_quill_tabs.html),
+           only without 'general/variant' pairs - a bundle no longer has a separate
+           packaging level, so each field is a single tab.
+         */
+        var items = [
+            { el: desc.section, label: 'Description', open: desc.open },
+            app ? { el: app.section, label: 'Application', open: app.open } : null,
+            ins ? { el: ins.section, label: 'Instructions (print)', open: ins.open } : null,
+            raw ? { el: raw.section, label: 'Raw text', open: raw.open, right: true } : null,
+        ].filter(Boolean);
+        var block = window.PGQuillTabs ? window.PGQuillTabs(items, null) : null;
+        if (!block) {
+            block = document.createElement('div');
+            items.forEach(function(it) { block.appendChild(it.el); });
+        }
+        row.appendChild(block);
+        row._descSection = block;
+    }
+
+    // ── Per-row init ──
+    function initVariantRow(row, variantData) {
+        addVariantSkuButton(row);
+
+        // Items table first
+        var wrap = document.createElement('div');
+        wrap.className = 'bundle-items-wrap';
+        row.appendChild(wrap);
+        row._biWrap = wrap;
+        row._biItems = [];
+
+        if (variantData && variantData.items) {
+            variantData.items.forEach(function(it) {
+                var _paired = null;
+                if (it.paired) {
+                    _paired = {
+                        variantId: it.paired.variant_id, productId: it.paired.product_id||null,
+                        sku: it.paired.sku, name: it.paired.name, price: it.paired.price, stock: it.paired.stock,
+                        photo: it.paired.photo||'', discountPercent: it.paired.discount_percent||'',
+                        discountAmount: it.paired.discount_amount||'', packagingKind: it.paired.packaging_kind||'',
+                        siteUrl: it.paired.site_url||''
+                    };
+                }
+                row._biItems.push({
+                    variantId: it.variant_id, productId: it.product_id||null,
+                    sku: it.sku, name: it.name, price: it.price, stock: it.stock,
+                    photo: it.photo||'', discountPercent: it.discount_percent||'',
+                    discountAmount: it.discount_amount||'', applyDiscount: it.apply_discount !== false, qty: it.qty,
+                    packagingKind: it.packaging_kind||'', siteUrl: it.site_url||'', paired: _paired
+                });
+            });
+        }
+
+        biRenderRow(row);
+
+        // BPC and discount AFTER the items table
+        buildRowBPC(row);
+        initRowDiscount(row);
+
+        // Variant gallery — packaging photos are now in the single gallery at the top (with the
+        // binding popup + filter by the active tab, as in products). We no longer build a separate
+        // gallery
+        // in the packaging row.
+
+        // Variant description
+        initVariantDescription(row);
+
+        // Reorder elements (as in the old version with packaging tabs, only without the
+        // 'general/variant' pair: Name → SKU → Display → Composition →
+        // Price/Stock → Discount → Categories → Photos → Texts).
+        var photosModule = document.getElementById('photos-module');
+        var photosWrap = null;
+        if (photosModule) {
+            photosWrap = document.createElement('div');
+            photosWrap.style.cssText = 'border-bottom: 1px solid #e5e7eb;';
+            photosWrap.appendChild(photosModule);
+        }
+        [
+            row.querySelector('.field-name'),
+            row.querySelector('.field-sku'),
+            row.querySelector('.field-is_active'),
+            row._biWrap,
+            row._bpcPanel,
+            row._discountRow,
+            row.querySelector('.field-categories'),
+            photosWrap,
+            row._descSection,
+        ].filter(Boolean).forEach(function(el) { row.appendChild(el); });
+
+        /* Divider line under the texts block (as for products) - but the texts block here is
+           always the last element of the form. If the page is longer than the screen anyway
+           (there is scroll), the line is not needed. If it fits without scroll, the line
+           marks the end of the form.
+           Important: the line does NOT add its own margin (margin:0 - .qtab-block already
+           has margin-bottom 14px) - otherwise its own weight took part in the
+           'is there scroll' measurement, and the measurement kept turning the line on and off by
+           itself
+           (the height added by the line itself decided whether to show it). Without
+           its own height, showing/hiding the line has no effect on scrollHeight,
+           so it can be measured simply and reliably.
+         */
+        if (row._descSection && row.parentNode) {
+            var afterDesc = document.createElement('div');
+            afterDesc.className = 'section-divider';
+            afterDesc.style.margin = '0';
+            row.parentNode.insertBefore(afterDesc, row.nextSibling);
+            function updateDividerVisibility() {
+                var scrolls = document.documentElement.scrollHeight > window.innerHeight;
+                afterDesc.style.display = scrolls ? 'none' : '';
+            }
+            updateDividerVisibility();
+            window.addEventListener('resize', updateDividerVisibility);
+            window.addEventListener('load', updateDividerVisibility);
+            /* Photos (initBundleGallery) and fonts load asynchronously and may
+               shift the page height AFTER the first measurement - ResizeObserver
+               recalculates the line whenever the height of the real content changes.
+               We do NOT observe row: fieldset.module has display:contents (line
+               116 above) - no box of its own, so ResizeObserver on it never
+               fires. We observe row.parentNode (the real container) and not
+               <html>: <html> has min-height:100vh (zebra filler) and does not
+               report its own resize from overflow (scrollHeight), only from
+               a change of border-box (= viewport for the root).
+             */
+            if (window.ResizeObserver) {
+                new ResizeObserver(updateDividerVisibility).observe(row.parentNode);
+            }
+        }
+
+        setTimeout(function() { recalcRow(row); }, 100);
+    }
+
+    // Packaging tabs removed: the bundle is 1:1 with the former BundleVariant,
+    // there is nothing left to choose between several packagings.
+
+    // ── Gallery ──
+    initBundleGallery();
+
+    /* ── Paste from clipboard ── */
+    var _activePaste = false;
+    var vgSection = document.querySelector('.vg-section');
+    if (vgSection) {
+        vgSection.addEventListener('click', function(e) {
+            if (e.target.closest('button,input,label,img')) return;
+            _activePaste = !_activePaste;
+            if (_activePaste) {
+                vgSection.classList.add('paste-target-active');
+            } else {
+                vgSection.classList.remove('paste-target-active');
+            }
+        });
+    }
+    document.addEventListener('paste', function(e) {
+        if (!_activePaste) return;
+        var items = e.clipboardData ? e.clipboardData.items : [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type.startsWith('image/')) {
+                bgUpload(items[i].getAsFile());
+                e.preventDefault();
+                return;
+            }
+        }
+    });
+    document.addEventListener('mousedown', function(e) {
+        if (e.button !== 0) return;
+        if (!_activePaste) return;
+        if (vgSection && vgSection.contains(e.target)) return;
+        _activePaste = false;
+        vgSection.classList.remove('paste-target-active');
+    });
+
+    // ── Categories: span label ──
+    (function() {
+        var catRow = document.querySelector('.field-categories');
+        if (!catRow) return;
+        var legend = catRow.querySelector('legend');
+        if (legend) {
+            var lbl = document.createElement('span');
+            lbl.className = 'field-cat-lbl';
+            lbl.textContent = legend.textContent.trim();
+            catRow.insertBefore(lbl, catRow.firstChild);
+        }
+        catRow.querySelectorAll('fieldset, fieldset > div, fieldset .flex-container').forEach(function(el) {
+            el.style.setProperty('padding', '0', 'important');
+            el.style.setProperty('margin', '0', 'important');
+        });
+    })();
+
+    // ── Init row (a bundle is one flat entity, without packagings) ──
+    initAll();
+    var _row = mainRow();
+    if (_row) initVariantRow(_row, _bvData);
+
+    // ── Form submit: serialize items to hidden inputs ──
+    var _form = document.querySelector('#content-main form');
+    if (_form) {
+        _form.addEventListener('submit', function() {
+            var row = mainRow();
+            if (!row) return;
+            var inp = document.createElement('input');
+            inp.type = 'hidden';
+            inp.name = '_bundle_items';
+            inp.value = JSON.stringify((row._biItems || []).map(function(it) {
+                return { variant_id: it.variantId, qty: it.qty, apply_discount: it.applyDiscount !== false };
+            }));
+            _form.appendChild(inp);
+        });
+        /* Register the listener on DOMContentLoaded — then it fires AFTER
+           _form_guard, and we see its e.preventDefault() (empty required
+           fields): in that case we do not wipe the photos, the form stays as is.
+         */
+        document.addEventListener('DOMContentLoaded', function() {
+            _form.addEventListener('submit', function(e) {
+                if (e.defaultPrevented) return;
+                var pend = Object.keys(window.bgPendingDelete || {}).filter(function(k) { return window.bgPendingDelete[k]; });
+                if (!pend.length) return;
+                e.preventDefault();
+                Promise.allSettled(pend.map(function(pid) {
+                    return fetch('/admin/catalog/delete-bundle-photo/', {
+                        method: 'POST', credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': pgGetCSRF() },
+                        body: JSON.stringify({ id: parseInt(pid) }),
+                    });
+                })).then(function() {
+                    window.bgPendingDelete = {};
+                    /* form.submit() does not carry the button's value → we put "_continue" back
+                       to stay on the form, as with a native click.
+                     */
+                    if (!_form.querySelector('input[type="hidden"][name="_continue"]')) {
+                        var cont = document.createElement('input');
+                        cont.type = 'hidden'; cont.name = '_continue'; cont.value = '1';
+                        _form.appendChild(cont);
+                    }
+                    _form.submit();
+                });
+            });
+        });
+    }
+
+    // ── Gallery functions ──
+    var _bgDragSrc = null;
+    /* Photos marked for deletion. Erased from the DB only on "Save". */
+    window.bgPendingDelete = window.bgPendingDelete || {};
+
+    /* Gallery filter: the bundle is now flat (no packagings) - show everything. */
+    window.bgApplyFilter = function() {
+        document.querySelectorAll('#pg-items .pg-item').forEach(function(item) {
+            item.style.display = '';
+        });
+    };
+
+    function bgAddItem(id, url, isMain, isHidden) {
+        var container = document.getElementById('pg-items');
+        var item = document.createElement('div');
+        item.className = 'pg-item';
+        item.dataset.id = id;
+        if (isMain) item.dataset.isMain = '1';
+        if (isHidden) { item.dataset.isHidden = '1'; item.classList.add('is-hidden'); }
+        item.setAttribute('draggable', 'true');
+
+        item.innerHTML =
+            '<div class="pg-image-wrap">' +
+                '<img src="' + url + '" alt="" draggable="false">' +
+                '<div class="pg-actions">' +
+                    '<button class="pg-act-btn pg-hide-btn" type="button" title="' + (isHidden ? 'Show photo' : 'Hide photo') + '">' +
+                        '<svg class="pg-eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+                            '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>' +
+                            '<circle cx="12" cy="12" r="3"></circle>' +
+                            '<path class="pg-eye-slash" d="M2 2l20 20"></path>' +
+                        '</svg>' +
+                    '</button>' +
+                    '<label class="pg-act-btn pg-replace-label" title="Replace">' +
+                        '<input type="file" accept="image/*">' +
+                        '<svg class="pg-pencil-icon" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round">' +
+                            '<path d="M9.5 2L12 4.5L4.5 12L1.5 12.5L2 9.5z"></path>' +
+                        '</svg>' +
+                    '</label>' +
+                    '<button class="pg-act-btn pg-del-btn" type="button" title="Delete">✕</button>' +
+                '</div>' +
+            '</div>';
+
+        var imgEl = item.querySelector('img');
+        var _d = null;
+        imgEl.addEventListener('mousedown', function(e) { _d = { x: e.clientX, y: e.clientY }; });
+        imgEl.addEventListener('mouseup', function(e) {
+            if (!_d) return; var dx = Math.abs(e.clientX - _d.x), dy = Math.abs(e.clientY - _d.y); _d = null;
+            if (dx < 4 && dy < 4) {
+                /* .pg-lightbox in base_site has display:none — without inline flex
+                   the overlay is added to body and stays invisible.
+                 */
+                var box = document.createElement('div'); box.className = 'pg-lightbox';
+                box.style.display = 'flex';
+                var im = document.createElement('img'); im.src = imgEl.src; box.appendChild(im);
+                var esc = function(ev) { if (ev.key === 'Escape') { box.remove(); document.removeEventListener('keydown', esc); } };
+                box.addEventListener('click', function() { box.remove(); document.removeEventListener('keydown', esc); });
+                document.addEventListener('keydown', esc);
+                document.body.appendChild(box);
+            }
+        });
+
+        /* Hide/show - only is_hidden (and is_main, if hiding). */
+        item.querySelector('.pg-hide-btn').addEventListener('click', function() {
+            var btn = this;
+            btn.disabled = true;
+            fetch('/admin/catalog/toggle-bundle-photo-hidden/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': pgGetCSRF() },
+                body: JSON.stringify({ id: parseInt(id) }),
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                btn.disabled = false;
+                if (!data.ok) return;
+                if (data.is_hidden) item.dataset.isHidden = '1';
+                else delete item.dataset.isHidden;
+                if (!data.is_main) delete item.dataset.isMain;
+                item.classList.toggle('is-hidden', !!data.is_hidden);
+                btn.title = data.is_hidden ? 'Show photo' : 'Hide photo';
+                /* The server automatically assigned a new main photo in place of the hidden one. */
+                if (data.promoted_main_id) {
+                    var promoted = document.querySelector('#pg-items .pg-item[data-id="' + data.promoted_main_id + '"]');
+                    if (promoted) promoted.dataset.isMain = '1';
+                }
+                if (window.pgMarkDirty) window.pgMarkDirty();
+            }).catch(function() { btn.disabled = false; });
+        });
+
+        /* Deferred deletion: we only mark the photo, and actually erase it on "Save"
+           (submit hook above). Clicking again removes the mark — hence no confirm.
+         */
+        item.querySelector('.pg-del-btn').addEventListener('click', function() {
+            if (window.bgPendingDelete[id]) {
+                delete window.bgPendingDelete[id];
+                item.classList.remove('pg-pending-del');
+                return;
+            }
+            window.bgPendingDelete[id] = true;
+            item.classList.add('pg-pending-del');
+            if (window.pgMarkDirty) window.pgMarkDirty();
+        });
+
+        item.querySelector('input[type="file"]').addEventListener('change', function(e) {
+            var file = e.target.files[0]; if (!file) return;
+            var fd = new FormData(); fd.append('photo_id', id); fd.append('image', file);
+            var img = item.querySelector('img'); img.style.opacity = '0.4';
+            fetch('/admin/catalog/replace-bundle-photo/', { method: 'POST', headers: { 'X-CSRFToken': pgGetCSRF() }, body: fd })
+                .then(function(r) { return r.json(); })
+                .then(function(data) { if (data.url) img.src = data.url + '?t=' + Date.now(); img.style.opacity = '1'; });
+            this.value = '';
+        });
+
+        item.addEventListener('dragstart', function(e) { _bgDragSrc = item; item.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+        item.addEventListener('dragend', function() {
+            item.classList.remove('dragging');
+            document.querySelectorAll('#pg-items .pg-item').forEach(function(i) { i.classList.remove('drag-over'); });
+            _bgDragSrc = null; bgSaveOrder();
+        });
+        item.addEventListener('dragover', function(e) {
+            e.preventDefault(); item.classList.add('drag-over');
+            if (_bgDragSrc && _bgDragSrc !== item) {
+                var items = Array.from(container.querySelectorAll('.pg-item'));
+                var si = items.indexOf(_bgDragSrc), ti = items.indexOf(item);
+                container.insertBefore(_bgDragSrc, si < ti ? item.nextSibling : item);
+            }
+        });
+        item.addEventListener('dragleave', function() { item.classList.remove('drag-over'); });
+        item.addEventListener('drop', function(e) { e.preventDefault(); item.classList.remove('drag-over'); });
+
+        container.appendChild(item);
+    }
+
+    function bgUpload(file) {
+        var gallery = document.getElementById('photos-module');
+        var bundleId = gallery.dataset.bundleId;
+        var tempKey = gallery.dataset.tempKey;
+        var container = document.getElementById('pg-items');
+        var loader = document.createElement('div');
+        loader.className = 'pg-loading'; loader.textContent = '↻';
+        container.appendChild(loader);
+        var fd = new FormData();
+        fd.append('image', file);
+        if (bundleId) { fd.append('bundle_id', bundleId); }
+        else { fd.append('temp_key', tempKey); }
+        fetch('/admin/catalog/upload-bundle-photo/', { method: 'POST', headers: { 'X-CSRFToken': pgGetCSRF() }, body: fd })
+            .then(function(r) { return r.json(); })
+            .then(function(data) { loader.remove(); if (data.id) { bgAddItem(data.id, data.url, null, false, false); if (window.bgApplyFilter) bgApplyFilter(); if (window.pgMarkDirty) window.pgMarkDirty(); } })
+            .catch(function() { loader.remove(); });
+    }
+
+    function bgSaveOrder() {
+        var items = Array.from(document.querySelectorAll('.vg-items .pg-item[data-id]'));
+        if (!items.length) return;
+        var photos = items.map(function(el, i) { return { id: parseInt(el.dataset.id), sort_order: i }; });
+        fetch('/admin/catalog/reorder-bundle-photos/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': pgGetCSRF() },
+            body: JSON.stringify({ photos: photos }),
+        });
+    }
+
+    function initBundleGallery() {
+        var gallery = document.getElementById('photos-module');
+        if (!gallery) return;
+        var bundleId = gallery.dataset.bundleId;
+        if (bundleId) {
+            fetch('/admin/catalog/bundle-photos/?bundle_id=' + bundleId)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    (data.photos || []).forEach(function(p) { bgAddItem(p.id, p.url, p.is_main, p.is_hidden); window._bgGalleryOrigIds.add(p.id); });
+                    if (window.bgApplyFilter) bgApplyFilter();
+                });
+        } else {
+            var tempKey = 'btmp_' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+            gallery.dataset.tempKey = tempKey;
+            var form = document.querySelector('#content-main form');
+            if (form) {
+                var hidden = document.createElement('input');
+                hidden.type = 'hidden'; hidden.name = '_bundle_photo_temp_key'; hidden.value = tempKey;
+                form.appendChild(hidden);
+            }
+            fetch('/admin/catalog/bundle-temp-photos/?temp_key=' + encodeURIComponent(tempKey))
+                .then(function(r) { return r.json(); })
+                .then(function(data) { (data.photos || []).forEach(function(p) { bgAddItem(p.id, p.url, p.is_main, p.is_hidden); }); if (window.bgApplyFilter) bgApplyFilter(); });
+        }
+        var fileInp = document.getElementById('pg-file-input');
+        if (fileInp) {
+            fileInp.addEventListener('change', function(e) {
+                Array.from(e.target.files).forEach(bgUpload); this.value = '';
+            });
+        }
+    }
+    /* A bundle no longer has separate 'variants': description/usage/instruction/
+       raw text are edited directly via initVariantRow → buildVariantEditor
+       (row._descSection), without 'general/variant' tabs and without syncing
+       between rows - there is nothing left to reconcile here.
+     */
+
+    var cm = document.getElementById('content-main');
+    if (cm) cm.style.visibility = 'visible';
+})();
+</script>
+{% endblock %}

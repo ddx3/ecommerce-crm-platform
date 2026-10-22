@@ -1,0 +1,689 @@
+{% extends "admin/change_form.html" %}
+{% load i18n admin_urls %}
+
+{% block extrahead %}{{ block.super }}
+<style>
+#le-revert-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+#le-toast {
+    display: none; position: fixed; bottom: 24px; right: 24px; z-index: 99999;
+    padding: 10px 16px; border-radius: 6px; font-size: 13px; font-weight: 500;
+    max-width: 420px; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+}
+#le-toast.ok  { background: #f0fdf4; border: 1px solid #86efac; color: #15803d; display: flex; }
+#le-toast.err { background: #fef2f2; border: 1px solid #fca5a5; color: #dc2626; display: flex; }
+
+/* ── Meta rows (as on other CRM pages) ── */
+.le-meta-row {
+    display: flex; align-items: baseline;
+    padding: 9px 20px; border-bottom: 1px solid #f3f4f6; font-size: 13px;
+}
+.le-meta-lbl { width: 170px; min-width: 170px; flex-shrink: 0; color: #9ca3af; }
+.le-meta-val { color: #1f2937; flex: 1; word-break: break-word; }
+.le-meta-val a { color: inherit; text-decoration: none; border-bottom: 1px dotted #9ca3af; }
+.le-meta-val a:hover { border-bottom-color: #374151; }
+
+/* Metadata in the header to the right of the object card */
+.le-objhead-meta {
+    text-align: right; font-size: 12px; color: #6b7280;
+    line-height: 1.6; flex-shrink: 0; white-space: nowrap;
+}
+.le-objhead-meta .who { color: #374151; font-weight: 500; }
+
+.le-badge {
+    display: inline-block; padding: 1px 8px; border-radius: 3px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+}
+.le-badge-add    { background: #d1fae5; color: #065f46; }
+.le-badge-change { background: #fef3c7; color: #92400e; }
+.le-badge-delete { background: #fee2e2; color: #991b1b; }
+
+/* ── Header with the object's card information ── */
+.le-objhead {
+    display: flex; align-items: center; gap: 16px;
+    padding: 16px 20px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #fafafa;
+}
+.le-objhead-thumb {
+    width: 64px; height: 64px; border-radius: 8px;
+    border: 1px solid #e5e7eb; background: #fff;
+    object-fit: cover; display: block; flex-shrink: 0;
+}
+.le-objhead-thumb-empty {
+    width: 64px; height: 64px; border-radius: 8px;
+    border: 1px solid #e5e7eb; background: #fff;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #d1d5db; font-size: 24px; flex-shrink: 0;
+}
+.le-objhead-text { min-width: 0; flex: 1; }
+.le-objhead-type {
+    font-size: 11px; font-weight: 600; color: #9ca3af;
+    text-transform: uppercase; letter-spacing: 0.4px;
+}
+.le-objhead-name {
+    margin-top: 3px; font-size: 16px; font-weight: 600;
+    color: #1f2937; text-decoration: none; word-break: break-word;
+    line-height: 1.3; display: inline-block;
+}
+.le-objhead-name:hover { color: #111827; text-decoration: underline; }
+.le-objhead-sku {
+    margin-top: 4px; font-size: 12px; color: #6b7280;
+}
+.le-objhead-sku-code { color: #374151; font-weight: 500; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.le-objhead-action {
+    flex-shrink: 0; align-self: flex-start;
+}
+
+/* ── Changes ── */
+.le-changes-title {
+    padding: 14px 20px 4px; font-size: 11px; font-weight: 700;
+    color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.le-change {
+    padding: 12px 20px; border-bottom: 1px solid #f3f4f6;
+}
+.le-change:last-child { border-bottom: none; }
+.le-change-field {
+    font-size: 12px; font-weight: 600; color: #374151;
+    margin-bottom: 8px;
+    text-transform: uppercase; letter-spacing: 0.3px;
+}
+.le-diff-block {
+    border-radius: 6px; overflow: hidden;
+    border: 1px solid #e5e7eb;
+    font-size: 13px;
+}
+.le-diff-side {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 8px 12px;
+}
+.le-diff-side + .le-diff-side { border-top: 1px solid #e5e7eb; }
+.le-diff-side.before { background: #fef2f2; }
+.le-diff-side.after  { background: #f0fdf4; }
+.le-diff-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.4px;
+    text-transform: uppercase;
+    padding: 2px 8px; border-radius: 3px;
+    flex-shrink: 0; line-height: 1.4;
+}
+.le-diff-side.before .le-diff-tag { background: #fecaca; color: #991b1b; }
+.le-diff-side.after  .le-diff-tag { background: #bbf7d0; color: #166534; }
+.le-diff-val {
+    flex: 1; min-width: 0; word-break: break-word;
+    line-height: 1.55; color: #1f2937;
+    white-space: pre-wrap; font-family: inherit;
+}
+.le-diff-val .val-empty { color: #9ca3af; }
+.le-diff-val .val-dim { color: #6b7280; font-style: italic; }
+/* Word-level highlighting (for short strings) */
+.le-diff-val .diff-del {
+    background: #fecaca; color: #7f1d1d;
+    border-radius: 2px; padding: 0 2px;
+    text-decoration: none;
+}
+.le-diff-val .diff-add {
+    background: #bbf7d0; color: #14532d;
+    border-radius: 2px; padding: 0 2px;
+}
+
+/* ── Unified line-based diff (GitHub-style) ── */
+.le-udiff {
+    border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden;
+    background: #fff;
+}
+.le-udiff .dl {
+    display: flex; align-items: flex-start; gap: 0;
+    font-size: 12.5px; line-height: 1.55;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.le-udiff .dl-sign {
+    width: 24px; flex-shrink: 0; text-align: center;
+    padding: 2px 0; user-select: none; font-weight: 700;
+}
+.le-udiff .dl-text {
+    flex: 1; min-width: 0; padding: 2px 10px 2px 4px;
+    white-space: pre-wrap; word-break: break-word;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    font-size: 13px;
+}
+.le-udiff .dl-eq  { background: #fff; color: #374151; }
+.le-udiff .dl-eq .dl-sign { color: #d1d5db; }
+.le-udiff .dl-del { background: #fef2f2; color: #7f1d1d; }
+.le-udiff .dl-del .dl-sign { color: #dc2626; background: #fee2e2; }
+.le-udiff .dl-add { background: #f0fdf4; color: #14532d; }
+.le-udiff .dl-add .dl-sign { color: #16a34a; background: #dcfce7; }
+.le-udiff .dl + .dl { border-top: 1px solid #f3f4f6; }
+.le-udiff .dl-empty { padding: 8px 12px; color: #9ca3af; font-style: italic; }
+
+/* Single-line compact variant for short values */
+.le-diff-inline {
+    display: inline-flex; align-items: center; gap: 8px;
+    flex-wrap: wrap;
+    font-size: 13px;
+}
+.le-diff-inline .v { padding: 2px 8px; border-radius: 3px; }
+.le-diff-inline .v.before {
+    background: #fef2f2; color: #991b1b;
+    text-decoration: line-through;
+}
+.le-diff-inline .v.after { background: #f0fdf4; color: #166534; font-weight: 500; }
+.le-diff-inline .arrow { color: #d1d5db; }
+
+.le-change.related { font-size: 13px; color: #6b7280; }
+.le-change.related .related-line { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.le-change.related .related-ctype { color: #9ca3af; font-style: italic; }
+.le-change.related em { font-style: normal; color: #374151; font-weight: 500; }
+.le-change.related .related-field {
+    font-size: 11px; padding: 2px 8px; border-radius: 3px;
+    background: #fef3c7; color: #92400e; font-weight: 600;
+    letter-spacing: 0.3px; text-transform: uppercase;
+}
+
+.le-empty {
+    padding: 18px 20px; color: #9ca3af; font-size: 13px;
+}
+
+</style>
+{% endblock %}
+
+{% block content_title %}{% endblock %}
+{% block object-tools %}{% endblock %}
+
+{% block submit_row %}{% endblock %}
+{% block form_top %}
+{% load admin_urls %}
+<div class="submit-row submit-row-top cl-bar">
+  <a class="cl-top-btn" href="{% url opts|admin_urlname:'changelist' %}">Exit</a>
+  <button type="button" class="cl-top-btn" id="le-revert-btn"
+          data-flag="{{ original.action_flag }}"
+          data-log-id="{{ original.pk }}"
+          data-back="{% url opts|admin_urlname:'changelist' %}">
+  </button>
+  <span class="submit-spacer"></span>
+  <a class="cl-top-btn cl-top-btn-danger" href="{% url opts|admin_urlname:'delete' original.pk|admin_urlquote %}">Delete</a>
+</div>
+<div id="le-toast"></div>
+<script>
+(function(){
+  var btn = document.getElementById('le-revert-btn');
+  var flag = parseInt(btn.dataset.flag);
+  if(flag === 1){ btn.style.display = 'none'; return; }
+  btn.textContent = flag === 3 ? 'Restore object' : 'Revert changes';
+  var logId  = btn.dataset.logId;
+  var backUrl = btn.dataset.back;
+  function getCsrf(){
+    var m = document.cookie.match(/csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+  function toast(msg, ok){
+    var el = document.getElementById('le-toast');
+    el.textContent = msg;
+    el.className = ok ? 'ok' : 'err';
+    clearTimeout(el._t);
+    el._t = setTimeout(function(){ el.className = ''; }, 4000);
+  }
+  function doRevert(cascade){
+    btn.disabled = true;
+    var url = '/admin/history/revert/'+logId+'/'+(cascade ? '?cascade=1' : '');
+    fetch(url, {method:'POST', headers:{'X-CSRFToken': getCsrf()}})
+      .then(function(r){ return r.json().then(function(d){ return {status:r.status, data:d}; }); })
+      .then(function(r){
+        if(r.data.ok){
+          toast(r.data.message, true);
+          setTimeout(function(){ window.location.href = backUrl; }, 1500);
+        } else if(r.data.needs_cascade){
+          btn.disabled = false;
+          if(confirm(r.data.message)) doRevert(true);
+        } else {
+          toast(r.data.error || 'Error', false);
+          btn.disabled = false;
+        }
+      })
+      .catch(function(){ toast('Connection error', false); btn.disabled = false; });
+  }
+  btn.addEventListener('click', function(){
+    if(confirm(btn.textContent.trim() + ' — are you sure?')) doRevert(false);
+  });
+})();
+</script>
+{% endblock %}
+
+{% block field_sets %}
+{{ original.change_message|json_script:"_le_cm" }}
+<script id="_le_current" type="application/json">{{ le_current_snapshot_json|safe }}</script>
+<script id="_le_label_map" type="application/json">{{ le_label_map_json|safe }}</script>
+
+<div class="le-objhead">
+  {% if le_obj_info.photo %}
+    <img src="{{ le_obj_info.photo }}" alt="" class="le-objhead-thumb">
+  {% else %}
+    <span class="le-objhead-thumb-empty">—</span>
+  {% endif %}
+  <div class="le-objhead-text">
+    <div class="le-objhead-type">{{ original.content_type.name|capfirst }}</div>
+    {% if le_obj_info.edit_url %}
+      <a href="{{ le_obj_info.edit_url }}" class="le-objhead-name">{{ le_obj_info.name|default:original.object_repr }}</a>
+    {% else %}
+      <span class="le-objhead-name">{{ original.object_repr }}</span>
+    {% endif %}
+    {% if le_obj_info.sku %}
+      <div class="le-objhead-sku">SKU: <span class="le-objhead-sku-code">{{ le_obj_info.sku }}</span></div>
+    {% endif %}
+  </div>
+  <div class="le-objhead-meta">
+    <div>
+      {% if original.action_flag == 1 %}<span class="le-badge le-badge-add">Added</span>
+      {% elif original.action_flag == 2 %}<span class="le-badge le-badge-change">Changed</span>
+      {% else %}<span class="le-badge le-badge-delete">Deleted</span>{% endif %}
+    </div>
+    <div class="who" style="margin-top:6px">{{ original.user }}</div>
+    <div>{{ original.action_time|date:"d.m.Y H:i" }}</div>
+  </div>
+</div>
+
+{% if original.action_flag != 3 %}
+<div class="le-changes-title">Changes</div>
+<div id="le-changes"></div>
+{% endif %}
+
+<script>
+(function () {
+    function esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    var FIELD_LABELS = {
+        name: 'Name', slug: 'URL (slug)',
+        description: 'Description', short_description: 'Short description',
+        application_norms: 'Application rates',
+        title: 'Title', text: 'Text',
+        price: 'Price', old_price: 'Old price',
+        discount_percent: 'Discount, %', discount_amount: 'Discount, amount',
+        stock: 'Stock',
+        is_active: 'Active', is_approved: 'Approved',
+        is_answered: 'Answered', is_dropshipping: 'Dropshipping',
+        is_hybrid: 'Hybrid', is_notified: 'Notified', is_seen: 'Seen',
+        brand_id: 'Brand', brand: 'Brand',
+        paired_product_id: 'Paired product',
+        packaging_kind: 'Packaging type', sku: 'SKU',
+        bulk_source_id: 'Bulk packaging source',
+        meta_title: 'SEO title', meta_description: 'SEO description',
+        meta_keywords: 'SEO keywords',
+        created_at: 'Created', updated_at: 'Updated',
+        categories: 'Categories', labels: 'Labels',
+        rating: 'Rating', color: 'Color',
+        sort_order: 'Sort order',
+        author: 'Author', email: 'Email', phone: 'Phone',
+        order_number: 'Order number',
+        customer_name: 'Customer name', customer_email: 'Customer email',
+        customer_phone: 'Customer phone',
+        payment_status: 'Payment status', payment_method: 'Payment method',
+        payment_notification: 'Payment notification',
+        payment_screenshot: 'Payment screenshot',
+        payment_changed_at: 'Payment change date',
+        total_price: 'Total price',
+        delivery_type: 'Delivery method',
+        delivery_address: 'Delivery address',
+        unit_size: 'Unit size',
+        product_id: 'Product', bundle_id: 'Bundle', parent_id: 'Parent item',
+        moderation_verdict: 'Moderation verdict',
+        moderation_reason: 'Moderation reason',
+    };
+    var PACKAGING_LABELS = { factory: 'Factory packaging', bulk: 'Repackaged', own: 'Own production' };
+    var PAYMENT_STATUS_LABELS = { paid: 'Paid', pending: 'Not paid' };
+    var MODERATION_LABELS = { pass: 'Passed', flag: 'Sent to moderation', error: 'LLM error' };
+
+    function humanLabel(key) {
+        if (FIELD_LABELS[key]) return FIELD_LABELS[key];
+        var clean = key.replace(/_id$/, '').replace(/_/g, ' ');
+        return clean.charAt(0).toUpperCase() + clean.slice(1);
+    }
+    function pad2(n) { return String(n).padStart(2, '0'); }
+    function isoToHuman(iso) {
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return iso;
+        return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.' + d.getFullYear()
+            + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    }
+    function formatValue(key, v) {
+        if (v === null || v === undefined || v === '') {
+            return '<span class="val-empty">—</span>';
+        }
+        if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+        if (typeof v === 'string') {
+            if (key === 'packaging_kind' && PACKAGING_LABELS[v]) return esc(PACKAGING_LABELS[v]);
+            if (key === 'payment_status' && PAYMENT_STATUS_LABELS[v]) return esc(PAYMENT_STATUS_LABELS[v]);
+            if (key === 'moderation_verdict' && MODERATION_LABELS[v]) return esc(MODERATION_LABELS[v]);
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}/.test(v)) return esc(isoToHuman(v));
+            if (v.length > 120) {
+                var stripped = v.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
+                var preview = stripped.substring(0, 100) + (stripped.length > 100 ? '…' : '');
+                return '<span class="val-dim">' + esc(preview) + '</span>';
+            }
+        }
+        if (Array.isArray(v)) {
+            return v.length ? esc(v.join(', ')) : '<span class="val-empty">—</span>';
+        }
+        return esc(String(v));
+    }
+
+    function readJson(id) {
+        var n = document.getElementById(id);
+        if (!n) return null;
+        var txt = (n.textContent || '').trim();
+        if (!txt) return null;
+        try { return JSON.parse(txt); } catch (e) { return null; }
+    }
+
+    var changesEl = document.getElementById('le-changes');
+    if (!changesEl) return;
+
+    var raw = readJson('_le_cm');
+    var entries;
+    if (typeof raw === 'string') {
+        try { entries = JSON.parse(raw); } catch (e) { entries = []; }
+    } else if (Array.isArray(raw)) {
+        entries = raw;
+    } else {
+        entries = [];
+    }
+    if (!Array.isArray(entries)) entries = [];
+
+    var changeEntries = entries.filter(function (e) { return e.changed || e.added || e.deleted; });
+    var revertEntry   = entries.find(function (e) { return e.revert; });
+
+    var labelMap = readJson('_le_label_map') || {};
+    function resolveAttname(label) {
+        if (!label) return null;
+        var key = String(label).toLowerCase();
+        if (labelMap[key]) return labelMap[key];
+        var cleaned = key.replace(/[_\s]+/g, ' ').trim();
+        if (labelMap[cleaned]) return labelMap[cleaned];
+        return null;
+    }
+
+    var snapBefore = revertEntry && revertEntry.revert ? revertEntry.revert : { fields: {}, m2m: {} };
+    var snapAfter  = readJson('_le_current') || { fields: {}, m2m: {} };
+    if (!snapBefore.fields) snapBefore.fields = {};
+    if (!snapBefore.m2m)    snapBefore.m2m    = {};
+    if (!snapAfter)         snapAfter = { fields: {}, m2m: {} };
+    if (!snapAfter.fields)  snapAfter.fields = {};
+    if (!snapAfter.m2m)     snapAfter.m2m    = {};
+
+    var attnames = [];
+    var m2mNames = [];
+    var extra = [];
+
+    function valuesEqual(a, b) {
+        if (a === b) return true;
+        if (a == null && b == null) return true;
+        if (Array.isArray(a) && Array.isArray(b)) {
+            if (a.length !== b.length) return false;
+            for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+            return true;
+        }
+        return String(a == null ? '' : a) === String(b == null ? '' : b);
+    }
+
+    /* 1) Find the real differences — compare snapshot before vs after.
+       More reliable than entry.changed.fields, because verbose_name doesn't always resolve.
+     */
+    Object.keys(snapBefore.fields || {}).forEach(function (k) {
+        if (!valuesEqual(snapBefore.fields[k], snapAfter.fields[k])) {
+            if (attnames.indexOf(k) === -1) attnames.push(k);
+        }
+    });
+    Object.keys(snapAfter.fields || {}).forEach(function (k) {
+        if (!snapBefore.fields.hasOwnProperty(k)) {
+            if (snapAfter.fields[k] != null && snapAfter.fields[k] !== '') {
+                if (attnames.indexOf(k) === -1) attnames.push(k);
+            }
+        }
+    });
+    Object.keys(snapBefore.m2m || {}).forEach(function (k) {
+        if (!valuesEqual(snapBefore.m2m[k], snapAfter.m2m[k])) {
+            if (m2mNames.indexOf(k) === -1) m2mNames.push(k);
+        }
+    });
+    Object.keys(snapAfter.m2m || {}).forEach(function (k) {
+        if (!snapBefore.m2m.hasOwnProperty(k) && (snapAfter.m2m[k] || []).length) {
+            if (m2mNames.indexOf(k) === -1) m2mNames.push(k);
+        }
+    });
+
+    /* 2) From entry.changed.fields add what is not in the main snapshot fields —
+       for example, changes in related objects (product variants, etc.).
+     */
+    changeEntries.forEach(function (e) {
+        if (e.changed) {
+            var ctype  = e.changed.name || '';
+            var oname  = e.changed.object || '';
+            var fields = e.changed.fields || [];
+            fields.forEach(function (f) {
+                var an = resolveAttname(f);
+                if (an && (snapBefore.fields.hasOwnProperty(an) || snapBefore.m2m.hasOwnProperty(an))) {
+                    return; // already added via snapshot comparison
+                }
+                extra.push({ ctype: ctype, object: oname, label: f });
+            });
+        } else if (e.added) {
+            extra.push({ kind: 'added',
+                ctype: e.added.name || '', object: e.added.object || '' });
+        } else if (e.deleted) {
+            extra.push({ kind: 'deleted',
+                ctype: e.deleted.name || '', object: e.deleted.object || '' });
+        }
+    });
+
+    var html = '';
+
+    function plainTextLength(html) {
+        return String(html || '').replace(/<[^>]+>/g, '').length;
+    }
+
+    /* ── Word-level diff in GitHub style ── */
+    var _decodeBox = document.createElement('textarea');
+    function decodeEntities(s) {
+        _decodeBox.innerHTML = String(s == null ? '' : s);
+        return _decodeBox.value;
+    }
+    function stripHtml(s) {
+        var text = String(s == null ? '' : s)
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/?(p|div)[^>]*>/gi, '\n')
+            .replace(/<[^>]+>/g, '');
+        return decodeEntities(text)
+            .replace(/ /g, ' ')          // nbsp → space
+            .replace(/\n{3,}/g, '\n\n')
+            .replace(/[ \t]+\n/g, '\n')
+            .trim();
+    }
+    function tokenize(s) {
+        // tokens — words, spaces (including \n), punctuation
+        return String(s == null ? '' : s)
+            .split(/(\s+|[.,;:!?()«»\-—…\/\\])/g)
+            .filter(function (t) { return t !== ''; });
+    }
+    /* Line-based diff (as in GitHub) — returns a list of items
+       {type: 'eq'|'del'|'add', text: '...'}
+     */
+    function computeLineDiff(a, b) {
+        var la = String(a == null ? '' : a).split('\n');
+        var lb = String(b == null ? '' : b).split('\n');
+        var n = la.length, m = lb.length;
+        if (n * m > 250000) {
+            // too many lines — return as a single blob
+            return [{ type: 'del', text: a }, { type: 'add', text: b }];
+        }
+        var dp = new Array(n + 1);
+        for (var i = 0; i <= n; i++) { dp[i] = new Array(m + 1); dp[i][0] = 0; }
+        for (var j = 0; j <= m; j++) dp[0][j] = 0;
+        for (var i = 1; i <= n; i++) {
+            for (var j = 1; j <= m; j++) {
+                if (la[i - 1] === lb[j - 1]) dp[i][j] = dp[i - 1][j - 1] + 1;
+                else dp[i][j] = dp[i - 1][j] >= dp[i][j - 1] ? dp[i - 1][j] : dp[i][j - 1];
+            }
+        }
+        var x = n, y = m, out = [];
+        while (x > 0 && y > 0) {
+            if (la[x - 1] === lb[y - 1]) {
+                out.unshift({ type: 'eq', text: la[x - 1] }); x--; y--;
+            } else if (dp[x - 1][y] >= dp[x][y - 1]) {
+                out.unshift({ type: 'del', text: la[x - 1] }); x--;
+            } else {
+                out.unshift({ type: 'add', text: lb[y - 1] }); y--;
+            }
+        }
+        while (x > 0) { out.unshift({ type: 'del', text: la[x - 1] }); x--; }
+        while (y > 0) { out.unshift({ type: 'add', text: lb[y - 1] }); y--; }
+        return out;
+    }
+
+    function renderUnifiedDiff(diffArr) {
+        if (!diffArr.length) {
+            return '<div class="le-udiff"><div class="dl-empty">Values match</div></div>';
+        }
+        var rows = diffArr.map(function (d) {
+            var sign = d.type === 'del' ? '−' : (d.type === 'add' ? '+' : ' ');
+            return '<div class="dl dl-' + d.type + '">'
+                 +   '<span class="dl-sign">' + sign + '</span>'
+                 +   '<span class="dl-text">' + (d.text ? esc(d.text) : '&nbsp;') + '</span>'
+                 + '</div>';
+        }).join('');
+        return '<div class="le-udiff">' + rows + '</div>';
+    }
+
+    function computeWordDiff(a, b) {
+        var tA = tokenize(a);
+        var tB = tokenize(b);
+        var n = tA.length, m = tB.length;
+        // Protection against O(n*m) on gigantic texts
+        if (n * m > 250000) {
+            return [esc(a), esc(b)];
+        }
+        var dp = new Array(n + 1);
+        for (var i = 0; i <= n; i++) {
+            dp[i] = new Array(m + 1);
+            dp[i][0] = 0;
+        }
+        for (var j = 0; j <= m; j++) dp[0][j] = 0;
+        for (var i = 1; i <= n; i++) {
+            for (var j = 1; j <= m; j++) {
+                if (tA[i - 1] === tB[j - 1]) dp[i][j] = dp[i - 1][j - 1] + 1;
+                else dp[i][j] = dp[i - 1][j] >= dp[i][j - 1] ? dp[i - 1][j] : dp[i][j - 1];
+            }
+        }
+        var beforeArr = [], afterArr = [];
+        var x = n, y = m;
+        while (x > 0 && y > 0) {
+            if (tA[x - 1] === tB[y - 1]) {
+                beforeArr.unshift({ t: tA[x - 1], eq: true });
+                afterArr.unshift({ t: tB[y - 1], eq: true });
+                x--; y--;
+            } else if (dp[x - 1][y] >= dp[x][y - 1]) {
+                beforeArr.unshift({ t: tA[x - 1], eq: false });
+                x--;
+            } else {
+                afterArr.unshift({ t: tB[y - 1], eq: false });
+                y--;
+            }
+        }
+        while (x > 0) { beforeArr.unshift({ t: tA[x - 1], eq: false }); x--; }
+        while (y > 0) { afterArr.unshift({ t: tB[y - 1], eq: false }); y--; }
+        // Merge adjacent unequal tokens into one <mark> for compactness
+        function joinAdjacent(arr, cls) {
+            var out = '', buf = '';
+            for (var k = 0; k < arr.length; k++) {
+                if (arr[k].eq) {
+                    if (buf) { out += '<mark class="' + cls + '">' + esc(buf) + '</mark>'; buf = ''; }
+                    out += esc(arr[k].t);
+                } else {
+                    buf += arr[k].t;
+                }
+            }
+            if (buf) out += '<mark class="' + cls + '">' + esc(buf) + '</mark>';
+            return out;
+        }
+        return [
+            joinAdjacent(beforeArr, 'diff-del'),
+            joinAdjacent(afterArr, 'diff-add'),
+        ];
+    }
+
+    function row(attname, isM2m) {
+        var before = isM2m ? snapBefore.m2m[attname] : snapBefore.fields[attname];
+        var after  = isM2m ? snapAfter.m2m[attname]  : snapAfter.fields[attname];
+        var html = '<div class="le-change">'
+            + '<div class="le-change-field">' + esc(humanLabel(attname)) + '</div>';
+
+        var bothStrings = typeof before === 'string' && typeof after === 'string';
+
+        // ── Multi-line / long strings → unified line-based diff (as in GitHub)
+        if (bothStrings) {
+            var bPlain = stripHtml(before);
+            var aPlain = stripHtml(after);
+            var isMultiline = bPlain.indexOf('\n') >= 0 || aPlain.indexOf('\n') >= 0;
+            var isLong = bPlain.length > 40 || aPlain.length > 40;
+            if (isMultiline || isLong) {
+                var diff = computeLineDiff(bPlain, aPlain);
+                html += renderUnifiedDiff(diff);
+                html += '</div>';
+                return html;
+            }
+        }
+
+        // ── Otherwise: compact inline "was → now"
+        var beforeHtml, afterHtml;
+        if (isM2m) {
+            beforeHtml = Array.isArray(before) && before.length
+                ? esc(before.join(', ')) : '<span class="val-empty">—</span>';
+            afterHtml = Array.isArray(after) && after.length
+                ? esc(after.join(', ')) : '<span class="val-empty">—</span>';
+        } else {
+            beforeHtml = formatValue(attname, before);
+            afterHtml  = formatValue(attname, after);
+        }
+        html += '<div class="le-diff-inline">'
+             +    '<span class="v before">' + beforeHtml + '</span>'
+             +    '<span class="arrow">→</span>'
+             +    '<span class="v after">' + afterHtml + '</span>'
+             +  '</div>';
+        html += '</div>';
+        return html;
+    }
+
+    attnames.forEach(function (an) { html += row(an, false); });
+    m2mNames.forEach(function (an) { html += row(an, true); });
+
+    extra.forEach(function (it) {
+        if (it.kind === 'added' || it.kind === 'deleted') {
+            var badgeCls = it.kind === 'added' ? 'le-badge-add' : 'le-badge-delete';
+            var badgeTxt = it.kind === 'added' ? 'Added' : 'Deleted';
+            html += '<div class="le-change related">'
+                 +  '<div class="related-line">'
+                 +    '<span class="le-badge ' + badgeCls + '">' + badgeTxt + '</span> '
+                 +    '<span class="related-ctype">' + esc(it.ctype || '') + '</span>'
+                 +    (it.object ? '<em>' + esc(it.object) + '</em>' : '')
+                 +  '</div></div>';
+        } else {
+            html += '<div class="le-change related">'
+                 +  '<div class="related-line">'
+                 +    '<span class="related-ctype">' + esc(it.ctype || '') + '</span>'
+                 +    (it.object ? '<em>' + esc(it.object) + '</em>' : '')
+                 +    (it.label ? '<span class="related-field">' + esc(it.label) + '</span>' : '')
+                 +  '</div></div>';
+        }
+    });
+
+    if (!html) {
+        html = '<div class="le-empty">Change details were not saved</div>';
+    }
+    changesEl.innerHTML = html;
+})();
+</script>
+{% endblock %}
+
+{% block inline_field_sets %}{% endblock %}
+{% block after_related_objects %}{% endblock %}

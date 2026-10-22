@@ -1,0 +1,2425 @@
+{% extends "admin/change_list.html" %}
+
+{% block extrahead %}{{ block.super }}
+<style>
+/* Hide the standard Django changelist until our JS renders #pv-table */
+#result_list, .results, #toolbar, #changelist-form .actions, #changelist-search { display: none !important; }
+</style>
+{% endblock %}
+
+{% block result_list %}
+{{ block.super }}
+<style>
+#result_list { display: none !important; }
+#toolbar { display: none !important; }
+.results { display: none !important; }
+
+/* ── Table ── */
+#pv-table { table-layout: fixed; width: 100%; border-collapse: collapse !important; border-top: none !important; --hairline-color: transparent; }
+#pv-table td, #pv-table th { border-top: none !important; }
+#pv-table thead th { border-bottom: 1px solid #e5e7eb !important; }
+#pv-table tr.pv-multi .pv-name-cell::before { content: "─"; color: #9ca3af; margin-right: 8px; }
+#pv-table thead tr th {
+    background: #f9fafb !important; border-bottom: 1px solid #e5e7eb !important;
+    border-left: 1px solid #e5e7eb !important; padding: 10px 12px !important;
+    font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important;
+    letter-spacing: 0.4px !important; color: #6b7280 !important; white-space: nowrap !important;
+    vertical-align: middle !important; text-align: left !important;
+}
+#pv-table thead tr th:first-child { border-left: none !important; }
+#pv-table thead tr th.col-cb { padding: 0 0 0 14px !important; width: 44px !important; }
+
+th[data-col] { cursor: pointer !important; user-select: none !important; position: relative !important; }
+#pv-table thead tr th[data-col] { padding-right: 26px !important; }
+#pv-table thead tr th[data-col]:hover, #pv-table thead tr th[data-col].col-open { color: #1f2937 !important; }
+/* Active sort — subtle tint */
+#pv-table thead tr th[data-col].col-on { background: #d1d5db !important; color: #1f2937 !important; }
+/* Badge — absolute right */
+.th-badge { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; pointer-events: none; }
+
+#pv-table tbody tr { border-bottom: 1px solid #e5e7eb !important; height: 56px; }
+#pv-table.tbl-touches-pager tbody tr:last-child { border-bottom: none !important; }
+#pv-table tbody tr.row1 { background: #fff !important; }
+#pv-table tbody tr.row2 { background: #f9fafb !important; }
+#pv-table tbody tr:hover { background: #eef0f3 !important; }
+#pv-table tbody tr.pv-empty-row, #pv-table tbody tr.pv-empty-row:hover { background: #fff !important; cursor: default !important; border-bottom: 1px solid #e5e7eb !important; }
+#pv-table tbody tr.pv-empty-row td { border-bottom: 1px solid #e5e7eb !important; vertical-align: middle !important; text-align: center !important; padding: 0 !important; }
+#pv-table tbody tr:last-child.pv-empty-row { border-bottom: 1px solid #e5e7eb !important; }
+table.tbl-touches-pager tbody tr.pv-empty-row, table.tbl-touches-pager tbody tr.pv-empty-row td { border-bottom: 1px solid #e5e7eb !important; }
+#pv-table tbody td, #pv-table tbody th {
+    padding: 8px 12px !important; font-size: 13px !important; vertical-align: middle !important;
+    border-left: 1px solid #e5e7eb !important; border-bottom: none !important;
+    font-weight: 400 !important; color: #374151 !important; text-align: left !important;
+    overflow: hidden !important; height: 56px !important; box-sizing: border-box !important;
+}
+#pv-table tbody td:first-child, #pv-table tbody th:first-child { border-left: none !important; }
+#pv-table tbody th a { color: #374151 !important; text-decoration: none !important; font-weight: 400 !important; }
+#pv-table td, #pv-table th { white-space: nowrap; }
+#pv-table .col-name  { min-width: 200px; }
+/* Name — up to 3 lines; the cell grows with its content (the row gets taller as needed). */
+#pv-table .col-name a, #pv-table .col-name .col-name-val { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; word-break: break-word; line-height: 1.35; }
+#pv-table tbody th.col-name { height: auto !important; overflow: visible !important; }
+.pv-mixed-badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:600; background:#f59e0b; color:#fff; margin-left:5px; vertical-align:middle; }
+#pv-table .col-cat   { min-width: 160px; max-width: 220px; }
+#pv-table .col-cat .cat-wrap { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; max-height: 38px; white-space: normal; }
+/* Dates column — as wide as the dates themselves (does not stretch). */
+#pv-table .col-dates { width: 1%; white-space: nowrap; }
+#pv-table .col-cb    { width: 44px !important; min-width: 44px !important; max-width: 44px !important; padding: 0 0 0 14px !important; }
+#pv-table .col-active { padding: 6px 12px !important; }
+#pv-table .col-price  { padding: 6px 10px !important; }
+#pv-table .col-stock  { padding: 6px 8px !important; width: 1%; white-space: nowrap; }
+.pv-active-cb { cursor: pointer; width: 16px; height: 16px; accent-color: #374151; }
+
+/* Lightbox */
+#pv-lightbox { display: none; position: fixed; inset: 0; z-index: 999999; background: rgba(0,0,0,0.82); align-items: center; justify-content: center; cursor: zoom-out; }
+#pv-lightbox.open { display: flex; }
+#pv-lightbox img { max-width: 90vw; max-height: 90vh; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+
+/* Photos */
+#pv-table .col-photos { width: 1%; }
+#pv-table thead tr th[data-col="photos"] { padding-right: 12px !important; }
+
+/* ── Column widths (table-layout:fixed) ──
+   Minimum ones (photo/SKU/dates/display/price/stock level + name for 2 lines) — JS measurements
+   in CSS variables; the rest (Categories/Discount/Labels/Brand) split the remainder equally.
+ */
+#pv-table thead th[data-col="photos"]    { width: var(--pw-photos, 70px) !important; }
+#pv-table thead th[data-col="sku"]       { width: var(--pw-sku, 90px) !important; }
+#pv-table thead th[data-col="dates"]     { width: var(--pw-dates, 200px) !important; }
+#pv-table thead th[data-col="is_active"] { width: var(--pw-active, 76px) !important; }
+#pv-table thead th[data-col="price"]     { width: var(--pw-price, 116px) !important; }
+#pv-table thead th[data-col="stock"]     { width: var(--pw-stock, 170px) !important; }
+#pv-table thead th[data-col="discount"]  { width: var(--pw-disc, 80px) !important; }
+#pv-table thead th[data-col="labels"]    { width: var(--pw-labels, 130px) !important; }
+#pv-table thead th[data-col="brand"]     { width: var(--pw-brand, 110px) !important; }
+#pv-table td.col-dates > div > div { white-space: nowrap !important; }
+/* Dynamic hiding of secondary columns on narrow screens (the class is set by JS),
+   so the table fits without horizontal scroll and the name stays full.
+ */
+#pv-table.pv-hide-brand    th[data-col="brand"],    #pv-table.pv-hide-brand    td.col-brand  { display: none !important; }
+#pv-table.pv-hide-labels   th[data-col="labels"],   #pv-table.pv-hide-labels   td.col-labels { display: none !important; }
+#pv-table.pv-hide-discount th[data-col="discount"], #pv-table.pv-hide-discount td.col-disc   { display: none !important; }
+#pv-table.pv-hide-dates    th[data-col="dates"],    #pv-table.pv-hide-dates    td.col-dates  { display: none !important; }
+/* Compact mode (narrow screen): only 1 photo (the stock level stays full — buttons + field). */
+#pv-table.pv-compact td.col-photos .pv-photo-wrap:not(:first-child) { display: none !important; }
+/* Name + Category are flexible: they split the free space (name 2/3, category 1/3)
+   on top of their minimums. Widths are computed by JS (_fitProductCols), updated on resize.
+ */
+#pv-table thead th[data-col="cat"]  { width: var(--pw-cat, 220px) !important; }
+#pv-table thead th[data-col="name"] { width: var(--pw-name, 435px) !important; }
+.pv-photos { display: flex; gap: 3px; }
+.pv-photo-wrap { position: relative; display: inline-block; flex-shrink: 0; }
+.pv-photo-wrap img.pv-thumb { width: 38px; height: 38px; object-fit: cover; border-radius: 4px; border: 1px solid #d1d5db; background: #f3f4f6; display: block; transition: filter .15s; }
+.pv-photo-wrap:hover img.pv-thumb { filter: brightness(0.82); }
+/* .pv-photo-preview — styles moved to base_site.html */
+.pv-cat-tag { display: inline-block; font-size: 13px; background: transparent; border: 1px solid #e5e7eb; border-radius: 3px; padding: 1px 5px; margin: 1px 1px 0 0; color: #6b7280; white-space: nowrap; cursor: default; }
+
+/* Price / stock inputs */
+.pv-edit-cell { display: flex; align-items: center; gap: 4px; }
+#pv-table .pv-edit-input { width: 76px; padding: 0 6px !important; height: 28px !important; border: 1px solid #d1d5db !important; border-radius: 4px !important; font-size: 13px !important; background: #fff !important; color: #374151 !important; box-shadow: none !important; }
+#pv-table .pv-edit-input:focus { border-color: #9ca3af !important; }
+#pv-table .pv-edit-input.saved  { border-color: #16a34a !important; background: #f0fdf4 !important; }
+#pv-table .pv-edit-input.error  { border-color: #dc2626 !important; background: #fef2f2 !important; }
+.pv-currency { font-size: 12px; color: #9ca3af; }
+.delta-wrapper { display: inline-flex; align-items: center; gap: 2px; }
+/* .delta-btn — styles moved to base_site.html */
+#pv-table .delta-input { width: 46px; height: 28px !important; padding: 0 5px !important; border: 1px solid #d1d5db !important; border-radius: 4px !important; font-size: 13px !important; background: #fff !important; color: #374151 !important; box-shadow: none !important; }
+#pv-table .pv-stock-main { width: 60px; height: 28px !important; padding: 0 5px !important; border: 1px solid #d1d5db !important; border-radius: 4px !important; font-size: 13px !important; background: #fff !important; color: #374151 !important; box-shadow: none !important; }
+#pv-table .pv-stock-main.saved { border-color: #16a34a !important; background: #f0fdf4 !important; }
+#pv-table .pv-stock-main.error { border-color: #dc2626 !important; background: #fef2f2 !important; }
+/* Remove the type=number spinner in the stock fields (in Safari it is wider and clips digits;
+   there are +/- buttons for the quantity). Frees up room for digits without widening the column.
+ */
+#pv-table .bulk-stock-qty::-webkit-inner-spin-button, #pv-table .bulk-stock-qty::-webkit-outer-spin-button,
+#pv-table .pv-stock-main::-webkit-inner-spin-button, #pv-table .pv-stock-main::-webkit-outer-spin-button,
+#pv-table .delta-input::-webkit-inner-spin-button, #pv-table .delta-input::-webkit-outer-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
+#pv-table .bulk-stock-qty, #pv-table .pv-stock-main, #pv-table .delta-input { -moz-appearance: textfield; }
+
+
+/* ── Popover ── */
+#flt-pop {
+    display: none; position: fixed; z-index: 9999; background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0 0 6px 6px;
+    box-shadow: 0 6px 16px rgba(0,0,0,.18);
+    overflow: hidden;
+    width: 200px;
+}
+#flt-pop.open { display: block; }
+
+/* Sort rows */
+.fp-sort-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px; border-bottom: 1px solid #ececec;
+    background: #fff; color: #374151; font-size: 13px;
+    cursor: pointer; width: 100%; text-align: left;
+    border-left: none; border-right: none; border-top: none;
+}
+.fp-sort-row:last-of-type { border-bottom: 1px solid #e5e7eb; }
+.fp-sort-row:hover { background: #f5f5f5; }
+.fp-sort-row.on { background: #e5e7eb; color: #374151; }
+.fp-sort-arr { color: #d1d5db; font-size: 18px; line-height: 1; flex-shrink: 0; display: inline-flex; align-items: center; }
+.fp-sort-row.on .fp-sort-arr { color: #374151; }
+
+/* Filter body */
+.fp-pop-body { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+.fp-filter-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #9ca3af; margin-bottom: 6px; }
+.fp-pills { display: flex; gap: 3px; flex-wrap: wrap; }
+.fp-pill { padding: 3px 8px; border: 1px solid #d1d5db; border-radius: 20px; font-size: 11px; color: #6b7280; cursor: pointer; background: #fff; user-select: none; }
+.fp-pill:hover { background: #f9fafb; color: #374151; }
+.fp-pill.on { background: #1f2937; border-color: #1f2937; color: #fff; }
+.fp-search { width: 100%; box-sizing: border-box; height: 28px; padding: 0 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; outline: none; margin-bottom: 0; }
+.fp-search:focus { border-color: #9ca3af; }
+.fp-list { display: flex; flex-direction: column; gap: 10px; max-height: 140px; overflow-y: auto; margin: 0 -10px -10px -10px; padding: 10px; border-radius: 0 0 6px 6px; border-top: 1px solid #e5e7eb; }
+.fp-pop-body > .fp-list:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+.fp-item { display: flex; align-items: center; gap: 6px; padding: 0; font-size: 13px; line-height: 1; color: #374151; border-radius: 3px; position: relative; }
+/* Tree-lines in the category filter. */
+/* 2px lines, same color as the checkbox (#d1d5db). */
+.fp-item .pick-vline { position: absolute; top: -5px; bottom: -5px; width: 2px; background: #d1d5db; pointer-events: none; z-index: 0; }
+.fp-item .pick-vline.is-first { top: -10px; }
+.fp-item .pick-vline.is-last  { bottom: 50%; }
+.fp-item .pick-hline { position: absolute; top: 50%; height: 2px; background: #d1d5db; pointer-events: none; z-index: 0; transform: translateY(-1px); }
+.fp-item .pick-elbow {
+    position: absolute;
+    border-left: 2px solid #d1d5db;
+    border-bottom: 2px solid #d1d5db;
+    border-bottom-left-radius: 5px;
+    pointer-events: none; z-index: 0;
+}
+.fp-item > label { position: relative; z-index: 1; }
+.fp-item input[type=checkbox],
+.fp-item input[type=radio] {
+    appearance: none; -webkit-appearance: none;
+    width: 14px; height: 14px; flex-shrink: 0;
+    border: 1.5px solid #d1d5db;
+    background: #fff; cursor: pointer; position: relative;
+    margin: 0;
+    transition: background .12s, border-color .12s;
+}
+.fp-item input[type=checkbox] { border-radius: 3px; }
+.fp-item input[type=radio]    { border-radius: 50%; }
+.fp-item input[type=checkbox]:hover,
+.fp-item input[type=radio]:hover { border-color: #9ca3af; }
+.fp-item input[type=checkbox]:checked,
+.fp-item input[type=radio]:checked { background: #1f2937; border-color: #1f2937; }
+.fp-item input[type=checkbox]:checked::after,
+.fp-item input[type=radio]:checked::after {
+    content: ''; position: absolute;
+    left: 3px; top: 0px; width: 4px; height: 8px;
+    border: 1.5px solid #fff; border-top: none; border-left: none;
+    transform: rotate(45deg);
+}
+.fp-range { display: flex; align-items: center; gap: 4px; }
+.fp-pop-body:has(> .fp-range:last-child) { padding-bottom: 8px; }
+.fp-range input { flex: 1; min-width: 0; width: 0; height: 28px; padding: 0 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; outline: none; box-sizing: border-box; }
+.fp-range input:focus { border-color: #9ca3af; }
+.fp-range-sep { font-size: 0; color: transparent; width: 8px; height: 1px; background: #9ca3af; align-self: center; flex-shrink: 0; margin-top: -1px; }
+.fp-divider { height: 1px; background: #e5e7eb; margin: 8px 0; }
+/* Clear button inside popover */
+.fp-clear { display: block; margin-top: 8px; padding: 0; border: none; background: none; font-size: 11px; color: #9ca3af; cursor: pointer; text-align: left; }
+.fp-clear:hover { color: #dc2626; }
+
+/* ── Calendar ── */
+.cal-nav { display:flex; align-items:center; justify-content:space-between; padding:8px 10px 4px; }
+.cal-nav-btn { background:#f9fafb; border:1px solid #d1d5db; border-radius:4px; width:26px; height:26px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; color:#374151; font-size:16px; line-height:1; padding:0; flex-shrink:0; transition:background .1s,border-color .1s; }
+.cal-nav-btn:hover { background:#e5e7eb; border-color:#9ca3af; color:#111; }
+.cal-nav-btn:active { background:#d1d5db; }
+.cal-title { font-size:12px; font-weight:600; color:#374151; text-align:center; flex:1; }
+.cal-grid { display:grid; grid-template-columns:repeat(7,1fr); padding:0 6px 0; }
+.cal-dow { font-size:10px; color:#9ca3af; text-align:center; padding:2px 0 5px; font-weight:600; }
+.cal-day { font-size:12px; text-align:center; padding:5px 0; cursor:pointer; color:#374151; user-select:none; border-radius:4px; transition:background .1s; }
+.cal-day.empty { cursor:default; pointer-events:none; }
+.cal-day:not(.empty):not(.sel-start):not(.sel-end):hover { background:#d1d5db; }
+.cal-day.today { font-weight:700; color:#111; }
+.cal-day.sel-start, .cal-day.sel-end { background:#1f2937; color:#fff; border-radius:4px; }
+.cal-day.sel-start:hover, .cal-day.sel-end:hover { background:#374151; }
+.cal-day.in-range { background:#e5e7eb; border-radius:0; }
+.cal-day.in-range:hover { background:#d1d5db; }
+.cal-day.sel-start.has-range { border-radius:4px 0 0 4px; }
+.cal-day.sel-end.has-range   { border-radius:0 4px 4px 0; }
+.cal-reset { display:block; text-align:center; padding:0 10px 10px; font-size:11px; color:#9ca3af; cursor:pointer; background:none; border:none; width:100%; }
+.cal-reset:hover { color:#dc2626; }
+
+/* ── Pager ── */
+#pv-pager {
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    padding: 10px 16px; font-size: 13px; color: #6b7280;
+    border-top: 1px solid #e5e7eb;
+    position: fixed; bottom: 0; right: 0;
+    background: #fff; z-index: 1000;
+}
+#pv-pager .pager-info { font-size: 12px; color: #9ca3af; }
+#pv-pager .pager-nav { display: flex; align-items: center; gap: 4px; justify-self: center; }
+#pv-pager .pg-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; padding: 0; border: 1px solid #d1d5db;
+    border-radius: 4px; background: #fff; color: #374151;
+    font-size: 13px; cursor: pointer; line-height: 1;
+    user-select: none; text-decoration: none !important; box-sizing: border-box; flex-shrink: 0;
+}
+#pv-pager .pg-btn:hover { background: #f3f4f6; border-color: #d1d5db; }
+/* No font-weight on active — otherwise the text button ("Group") changes
+   width on activation and neighboring elements shift.
+ */
+#pv-pager .pg-btn.pg-active { background: #1f2937; color: #fff; border-color: #1f2937; }
+#pv-pager .pg-btn.pg-disabled { opacity: 0.35; pointer-events: none; }
+#pv-pager .pg-btn.pg-arrow { color: #6b7280; }
+#pv-pager .pg-btn.pg-loading { pointer-events: none; }
+#pv-pager .pg-btn.pg-loading > .pg-spinner {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid #d1d5db; border-top-color: #1f2937; border-radius: 50%;
+    animation: pg-spin .7s linear infinite;
+}
+@keyframes pg-spin { to { transform: rotate(360deg); } }
+#pv-pager .pager-nav .pg-dots { padding: 0 2px; color: #9ca3af; font-size: 12px; line-height: 28px; }
+#pv-pager .pager-right { display: flex; align-items: center; gap: 0; justify-self: end; }
+#pv-pager .pager-size { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+#pv-pager .pager-size > span:first-child { color: #9ca3af; }
+#pv-pager .pager-size .pg-btn { width: auto; min-width: 36px; padding: 0 8px; }
+#pv-pager .pager-group { margin-left: 12px; padding-left: 12px; border-left: 1px solid #e5e7eb; }
+#pv-pager .pager-group .pg-btn { width: auto; padding: 0 10px; }
+#pv-table tbody tr.pv-pinned, #pv-table tbody tr.pv-pinned:hover { background: #eff6ff !important; }
+#pv-table tbody tr.pv-pinned-first td, #pv-table tbody tr.pv-pinned-first th { border-top: 2px solid #d1d5db !important; }
+#pv-table tbody tr.pv-pinned-last td, #pv-table tbody tr.pv-pinned-last th { border-bottom: 2px solid #d1d5db !important; }
+
+/* Variants of a grouped product (≥2) — a gray stripe on the left (as in the bundle composition).
+   The photo is NOT shifted — it stays on the same vertical as the header/ungrouped rows.
+   The header row (product name) is left alone — we only remove the heavy outline above
+   it (border-top from .group-start).
+ */
+#pv-table tbody tr.pv-group-header td, #pv-table tbody tr.pv-group-header th { border-top: none !important; }
+#pv-table tbody tr.pv-group-child > td:first-child,
+#pv-table tbody tr.pv-group-child > th:first-child { box-shadow: inset 3px 0 0 #9ca3af; }
+
+/* Group header row (grouping enabled, the group has ≥2 variants) */
+#pv-table tbody tr.pv-group-header,
+#pv-table tbody tr.pv-group-header:hover {
+    background: #f3f4f6 !important; cursor: pointer !important; height: 30px !important;
+}
+#pv-table tbody tr.pv-group-header:hover { background: #eceef1 !important; }
+#pv-table tbody tr.pv-group-header td {
+    height: 30px !important; padding: 4px 12px !important;
+    border-bottom: 1px solid #e5e7eb !important; vertical-align: middle !important;
+}
+#pv-table tbody tr.pv-group-header td.col-cb { padding: 0 0 0 14px !important; }
+.pv-group-cb { cursor: pointer; width: 16px; height: 16px; accent-color: #374151; vertical-align: middle; }
+.pv-group-name-inner { display: flex; align-items: center; min-width: 0; }
+.pv-group-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    margin-right: 8px; flex-shrink: 0; transition: transform .12s;
+}
+.pv-group-toggle svg { display: block; }
+#pv-table tbody tr.pv-group-collapsed .pv-group-toggle { transform: rotate(-90deg); }
+.pv-group-title {
+    font-weight: 600; font-size: 13px; color: #1f2937;
+    flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Counter = "Display" toggle: a click turns is_active on/off for all variants.
+   Struck through = some/all variants are hidden.
+ */
+.pv-group-count {
+    flex-shrink: 0; margin-left: 6px; color: #9ca3af; font-size: 13px; font-weight: 500;
+    cursor: pointer; user-select: none;
+}
+.pv-group-count:hover { color: #4b5563; }
+.pv-group-count.pv-group-count--off { color: #9ca3af; text-decoration: line-through; }
+.pv-group-count.pv-group-count--off:hover { color: #6b7280; }
+
+/* Remove container padding that creates gap above pager */
+#content-main, #content { padding-bottom: 0 !important; }
+
+</style>
+
+<div id="pv-lightbox"><img id="pv-lightbox-img" src="" alt=""></div>
+<div id="flt-pop"></div>
+
+<table id="pv-table"></table>
+<div id="pv-pager"></div>
+
+{# ══ Write-off: recognition (aio standard) + review (#oi-table standard) ══ #}
+<style>
+{% include "admin/_export_modal.css.html" %}
+#wo-overlay { z-index: 100000; padding: 16px; box-sizing: border-box; }
+#wo-foot:empty { display: none; }
+.wo-pad { padding: 18px; }
+.wo-lbl { font-size: 12px; font-weight: 600; color: #6b7280; margin: 0 0 6px; }
+.wo-ta { width: 100%; min-height: 90px; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; font-family: inherit; color: #374151; line-height: 1.4; resize: vertical; box-sizing: border-box; outline: none; }
+.wo-ta:focus { border-color: #6b7280; }
+.wo-drop { margin-top: 14px; border: 1px dashed #d1d5db; border-radius: 4px; padding: 18px; text-align: center; color: #9ca3af; font-size: 13px; cursor: pointer; transition: .12s; }
+.wo-drop:hover, .wo-drop.over { border-color: #9ca3af; color: #6b7280; background: #f9fafb; }
+.wo-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.wo-thumb { position: relative; width: 88px; height: 88px; border-radius: 6px; overflow: hidden; border: 1px solid #d1d5db; background: #fff; }
+.wo-thumb img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; display: block; }
+.wo-thumb-actions { position: absolute; top: 4px; right: 4px; display: flex; gap: 3px; opacity: 0; transition: opacity .15s; }
+.wo-thumb:hover .wo-thumb-actions { opacity: 1; }
+.wo-thumb-actions button { width: 20px; height: 20px; border-radius: 3px; border: none; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; line-height: 1; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; }
+.wo-thumb-actions button:hover { background: rgba(0,0,0,.88); }
+.wo-thumb-actions .wo-thumb-del:hover { background: rgba(185,28,28,.9); }
+.wo-lightbox { position: fixed; inset: 0; z-index: 100001; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; cursor: zoom-out; }
+.wo-lightbox.open { display: flex; }
+.wo-lightbox img { max-width: 100%; max-height: 100%; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,.5); }
+.wo-err { color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; border-radius: 4px; padding: 10px 12px; font-size: 13px; margin-top: 12px; }
+.wo-spin { text-align: center; padding: 36px; color: #6b7280; font-size: 14px; }
+
+/* ── Write-off: review table (#oi-table standard) ── */
+.sim-badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+.sim-high { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.sim-med  { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.sim-low  { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.oi-toolbar { display: flex; align-items: center; gap: 8px; padding: 14px 18px; box-sizing: border-box; }
+.oi-add-inp { padding: 0 10px; border: 1px dashed #d1d5db; border-radius: 4px; font-size: 13px; color: #6b7280; background: #fff; flex: 1; height: 28px; outline: none; margin: 0; box-sizing: border-box; }
+.oi-add-inp::placeholder { color: #9ca3af; }
+.inv-skip-btn { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; padding: 0; border: none; background: transparent; color: #9ca3af; font-size: 20px; cursor: pointer; }
+.inv-skip-btn:hover { color: #dc2626 !important; background: #fef2f2 !important; }
+.inv-skip-cell:hover .inv-skip-btn { color: #dc2626; background: #fef2f2; }
+#wo-table { table-layout: auto; width: 100%; border-collapse: collapse !important; }
+#wo-table .inv-skip-cell { position: relative; width: 59px !important; min-width: 59px !important; padding: 0 !important; }
+#wo-table thead tr th { background: #f9fafb; border-left: 1px solid #e5e7eb; padding: 10px 12px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; white-space: nowrap; vertical-align: middle; text-align: left; }
+#wo-table thead tr th:first-child { border-left: none; }
+#wo-table tbody tr { height: 59px; border-bottom: 1px solid #e5e7eb; }
+#wo-table tbody tr.row1 { background: #fff; }
+#wo-table tbody tr.row2 { background: #f9fafb; }
+#wo-table tbody tr:hover { background: #eef0f3; }
+#wo-table tbody td, #wo-table tbody th { padding: 8px 12px; font-size: 13px; vertical-align: middle; border-left: 1px solid #e5e7eb; border-bottom: none; font-weight: 400; color: #374151; text-align: left; white-space: nowrap; }
+#wo-table tbody td:first-child, #wo-table tbody th:first-child { border-left: none; }
+#wo-table .col-oi-photo { width: 52px !important; min-width: 52px !important; max-width: 52px !important; padding: 0 !important; text-align: center; vertical-align: middle; }
+#wo-table .col-oi-name { white-space: normal; word-break: break-word; min-width: 160px; width: 100%; }
+#wo-table .col-oi-src { width: 1%; white-space: nowrap; }
+#wo-table .col-oi-qty { padding: 6px 8px; }
+.oi-name-flex { display: flex; align-items: center; gap: 8px; }
+.oi-name-flex > :first-child { flex: 1; min-width: 0; }
+.oi-name-flex .em-item-edit-btn { margin-left: 0; }
+.oi-name-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.oi-src-row { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.oi-src-name { font-size: 12px; color: #6b7280; white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.oi-pv-wrap { position: relative; display: inline-block; vertical-align: middle; }
+.oi-pv-wrap img.oi-pv-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; border: 1px solid #d1d5db; background: #f3f4f6; display: block; }
+.oi-qty-wrap { display: inline-flex; align-items: stretch; vertical-align: middle; gap: 2px; }
+.oi-qty-inp { width: 46px; height: 28px; padding: 0 5px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; line-height: 26px; text-align: center; background: #fff; color: #374151; box-sizing: border-box; -moz-appearance: textfield; }
+.oi-qty-inp::-webkit-outer-spin-button, .oi-qty-inp::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+</style>
+
+<div class="em-modal" id="wo-overlay">
+  <div class="em-box">
+    <div class="em-head">
+      <h3>Product write-off</h3>
+      <button type="button" class="em-close" id="wo-close">✕</button>
+    </div>
+    <div class="em-body" id="wo-body"></div>
+    <div class="em-foot" id="wo-foot"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+    var overlay = document.getElementById('wo-overlay');
+    var body = document.getElementById('wo-body');
+    var foot = document.getElementById('wo-foot');
+    if (!overlay) return;
+
+    function csrf() { var m = document.cookie.match(/csrftoken=([^;]+)/); return m ? m[1] : ''; }
+    function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function el(id) { return document.getElementById(id); }
+
+    var files = [];
+    var woItems = null; // [{raw_name, qty, candidates:[{type,id,name,sku,price,stock,photo,score}], _sel}]
+    var srcText = '';
+
+    function open() {
+        overlay.classList.add('open');
+        document.documentElement.style.overflow = 'hidden';
+        document.body.style.overflow = 'hidden';
+    }
+    function close() {
+        overlay.classList.remove('open');
+        document.documentElement.style.overflow = '';
+        document.body.style.overflow = '';
+    }
+    el('wo-close').addEventListener('click', close);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    overlay.addEventListener('input', function (e) { e.stopPropagation(); });
+    overlay.addEventListener('change', function (e) { e.stopPropagation(); });
+
+    document.addEventListener('paste', function (e) {
+        if (!overlay.classList.contains('open') || !el('wo-drop')) return;
+        var items = (e.clipboardData && e.clipboardData.items) || [];
+        var imgs = [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type && items[i].type.indexOf('image/') === 0) {
+                var f = items[i].getAsFile();
+                if (f) imgs.push(f);
+            }
+        }
+        if (imgs.length) { e.preventDefault(); addFiles(imgs); }
+    });
+
+    // ── Phase 1: input ──
+    function openInput() {
+        files = []; woItems = null;
+        body.innerHTML =
+            '<div class="wo-pad">' +
+            '<div class="wo-lbl">Write-off list (text or note)</div>' +
+            '<textarea class="wo-ta" id="wo-text" placeholder="Paste the text here (e.g. Fertilizer 250 ml — 2 pcs, Insecticide 5 ml)…"></textarea>' +
+            '<div class="wo-lbl" style="margin-top:16px;">Or a photo</div>' +
+            '<div class="wo-drop" id="wo-drop">Drag, click or paste (Ctrl+V) a photo</div>' +
+            '<input type="file" id="wo-file" accept="image/*" multiple style="display:none;">' +
+            '<div class="wo-thumbs" id="wo-thumbs"></div>' +
+            '<div id="wo-err-slot"></div>' +
+            '</div>';
+        foot.innerHTML =
+            '<button type="button" class="em-btn" id="wo-cancel">Cancel</button>' +
+            '<button type="button" class="em-btn primary" id="wo-go">Recognize</button>';
+        el('wo-cancel').addEventListener('click', close);
+        el('wo-go').addEventListener('click', runParse);
+        var drop = el('wo-drop'), fileInp = el('wo-file');
+        drop.addEventListener('click', function () { fileInp.click(); });
+        fileInp.addEventListener('change', function () { addFiles(fileInp.files); });
+        ['dragenter', 'dragover'].forEach(function (ev) {
+            drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('over'); });
+        });
+        ['dragleave', 'drop'].forEach(function (ev) {
+            drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('over'); });
+        });
+        drop.addEventListener('drop', function (e) { addFiles(e.dataTransfer.files); });
+        open();
+    }
+    window._woOpenInput = openInput;
+
+    function addFiles(list) {
+        Array.from(list).forEach(function (f) { if (f.type.indexOf('image/') === 0) files.push(f); });
+        renderThumbs();
+    }
+    function renderThumbs() {
+        var wrap = el('wo-thumbs'); if (!wrap) return;
+        wrap.innerHTML = '';
+        files.forEach(function (f, i) {
+            var d = document.createElement('div'); d.className = 'wo-thumb';
+            var img = document.createElement('img'); img.src = URL.createObjectURL(f);
+            img.title = 'Click to view';
+            img.addEventListener('click', function () { openLightbox(img.src); });
+            d.appendChild(img);
+            var acts = document.createElement('div'); acts.className = 'wo-thumb-actions';
+            var rep = document.createElement('button'); rep.type = 'button'; rep.textContent = '✎'; rep.title = 'Replace photo';
+            rep.addEventListener('click', function (e) { e.stopPropagation(); replaceFile(i); });
+            var x = document.createElement('button'); x.type = 'button'; x.className = 'wo-thumb-del'; x.textContent = '✕'; x.title = 'Delete';
+            x.addEventListener('click', function (e) { e.stopPropagation(); files.splice(i, 1); renderThumbs(); });
+            acts.appendChild(rep); acts.appendChild(x);
+            d.appendChild(acts); wrap.appendChild(d);
+        });
+    }
+    function replaceFile(i) {
+        var inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = 'image/*';
+        inp.addEventListener('change', function () {
+            if (inp.files && inp.files[0]) { files[i] = inp.files[0]; renderThumbs(); }
+        });
+        inp.click();
+    }
+    function openLightbox(src) {
+        var lb = el('wo-lightbox');
+        if (!lb) {
+            lb = document.createElement('div'); lb.className = 'wo-lightbox'; lb.id = 'wo-lightbox';
+            lb.appendChild(document.createElement('img'));
+            lb.addEventListener('click', function () { lb.classList.remove('open'); });
+            document.body.appendChild(lb);
+        }
+        lb.querySelector('img').src = src;
+        lb.classList.add('open');
+    }
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        var lb = el('wo-lightbox');
+        if (lb && lb.classList.contains('open')) lb.classList.remove('open');
+    });
+    function showErr(msg) {
+        var slot = el('wo-err-slot'); if (slot) slot.innerHTML = '<div class="wo-err">' + esc(msg) + '</div>';
+    }
+
+    function runParse() {
+        var text = (el('wo-text') ? el('wo-text').value.trim() : '');
+        if (!text && !files.length) { showErr('Add the write-off text or a photo.'); return; }
+        srcText = text;
+        var fd = new FormData();
+        if (text) fd.append('text', text);
+        files.forEach(function (f) { fd.append('photos[]', f); });
+        body.innerHTML = '<div class="wo-spin">Recognizing the list… this may take 10–20 seconds</div>';
+        foot.innerHTML = '';
+        fetch('/admin/orders/parse-writeoff/', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'X-CSRFToken': csrf() }, body: fd
+        })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+            if (!res.ok) { openInput(); showErr(res.d.error || 'Recognition error'); return; }
+            woItems = (res.d.items || []).map(function (it) {
+                // Bundles are not valid write-off candidates (confirm accepts only variant_id).
+                it.candidates = (it.candidates || []).filter(function (c) { return c.type !== 'bundle'; });
+                it._sel = it.candidates.length ? 0 : -1;
+                return it;
+            });
+            if (!woItems.length) { openInput(); showErr('Nothing recognized. Try a different text/photo.'); return; }
+            renderReview();
+        })
+        .catch(function (e) { openInput(); showErr('Network error: ' + e); });
+    }
+
+    // ── Phase 2: review/edit (#oi-table standard) ──
+    function scoreCls(s) { return s >= 0.85 ? 'sim-high' : (s >= 0.75 ? 'sim-med' : 'sim-low'); }
+    function woFmtNum(n) { return isFinite(n) ? n.toFixed(2).replace(/\.?0+$/, '') : ''; }
+    /* Price: the line total (price × qty) large + the breakdown below. With qty 1 — price only. */
+    function priceCellHtml(c, qty) {
+        var price = c ? parseFloat(c.price) : NaN;
+        if (!isFinite(price)) return '<span style="color:#9ca3af;">—</span>';
+        qty = qty || 1;
+        if (qty <= 1) return '<span style="font-size:13px;color:#374151;">' + esc(woFmtNum(price)) + '</span>';
+        return '<div style="display:flex;flex-direction:column;gap:1px;line-height:1.2;">' +
+            '<span style="font-size:13px;font-weight:600;color:#111827;">' + esc(woFmtNum(price * qty)) + '</span>' +
+            '<span style="font-size:11px;color:#9ca3af;white-space:nowrap;">' + esc(woFmtNum(price)) + ' × ' + qty + '</span>' +
+            '</div>';
+    }
+    function palette(name) {
+        var palettes = ['#e0e7ff:#6366f1', '#fce7f3:#db2777', '#dcfce7:#16a34a', '#fef9c3:#ca8a04', '#ffedd5:#ea580c', '#f3e8ff:#9333ea'];
+        var letter = (name || '?')[0].toUpperCase();
+        var pal = palettes[letter.charCodeAt(0) % palettes.length].split(':');
+        return { letter: letter, bg: pal[0], fg: pal[1] };
+    }
+
+    function renderReview() {
+        body.innerHTML =
+            '<div class="oi-toolbar"><input type="text" class="oi-add-inp" id="wo-add-inp" placeholder="Add a product manually…" autocomplete="off"></div>' +
+            '<div style="overflow-x:auto;"><table id="wo-table">' +
+            '<thead><tr>' +
+            '<th class="inv-skip-cell"></th>' +
+            '<th class="col-oi-photo">Photo</th>' +
+            '<th class="col-oi-name">Product</th>' +
+            '<th class="col-oi-src">Recognized</th>' +
+            '<th class="col-oi-sku">SKU</th>' +
+            '<th class="col-oi-price">Price</th>' +
+            '<th class="col-oi-qty">Quantity</th>' +
+            '</tr></thead><tbody id="wo-tbody"></tbody></table></div>';
+        foot.innerHTML =
+            '<button type="button" class="em-btn" id="wo-back">Back</button>' +
+            '<button type="button" class="em-btn primary" id="wo-confirm">Write off</button>';
+        el('wo-back').addEventListener('click', openInput);
+        el('wo-confirm').addEventListener('click', runConfirm);
+        woInitAdd(el('wo-add-inp'));
+        renderRows();
+    }
+
+    function renderRows() {
+        var tbody = el('wo-tbody'); if (!tbody) return;
+        tbody.innerHTML = '';
+        woItems.forEach(function (it, i) { tbody.appendChild(rowHtml(it, i)); });
+        var rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.forEach(function (r, idx) {
+            r.classList.add(idx % 2 === 0 ? 'row1' : 'row2');
+            r.style.borderBottom = '';
+        });
+        // The last row has no border-bottom — otherwise it doubles up with the footer's border-top.
+        if (rows.length) rows[rows.length - 1].style.borderBottom = 'none';
+    }
+
+    function rowHtml(it, i) {
+        var c = (it._sel != null && it._sel >= 0) ? it.candidates[it._sel] : null;
+        var tr = document.createElement('tr');
+        tr.dataset.i = i;
+
+        var tdCh = document.createElement('td'); tdCh.className = 'inv-skip-cell';
+        var skipBtn = document.createElement('button');
+        skipBtn.type = 'button'; skipBtn.className = 'inv-skip-btn'; skipBtn.title = 'Remove';
+        skipBtn.textContent = '✕';
+        skipBtn.addEventListener('click', function () { woItems.splice(i, 1); renderRows(); });
+        tdCh.appendChild(skipBtn); tr.appendChild(tdCh);
+
+        var tdP = document.createElement('td'); tdP.className = 'col-oi-photo';
+        if (c && c.photo) {
+            tdP.innerHTML = '<div class="oi-pv-wrap"><img class="oi-pv-thumb" src="' + esc(c.photo) + '" alt=""></div>';
+        } else {
+            var pal = palette(c ? c.name : it.raw_name);
+            tdP.innerHTML = '<div style="width:40px;height:40px;border-radius:4px;border:1px solid #d1d5db;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;background:' + pal.bg + ';color:' + pal.fg + ';margin:0 auto;">' + pal.letter + '</div>';
+        }
+        tr.appendChild(tdP);
+
+        var thN = document.createElement('th'); thN.className = 'col-oi-name';
+        var nameFlex = document.createElement('div'); nameFlex.className = 'oi-name-flex';
+        var nameSpan = document.createElement('span'); nameSpan.className = 'oi-name-clamp';
+        if (c) { nameSpan.textContent = c.name; nameSpan.style.color = '#374151'; }
+        else { nameSpan.textContent = 'Not found — choose a product'; nameSpan.style.color = '#dc2626'; }
+        nameFlex.appendChild(nameSpan);
+        var replBtn = document.createElement('button');
+        replBtn.type = 'button'; replBtn.className = 'em-item-edit-btn'; replBtn.title = 'Choose a product';
+        replBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M9.5 2L12 4.5L4.5 12L1.5 12.5L2 9.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg>';
+        replBtn.addEventListener('click', function (e) { e.stopPropagation(); openReplace(i, thN); });
+        nameFlex.appendChild(replBtn);
+        thN.appendChild(nameFlex);
+        tr.appendChild(thN);
+
+        var tdSrc = document.createElement('td'); tdSrc.className = 'col-oi-src';
+        var sc = (c && c.score != null) ? Math.round(c.score * 100) : null;
+        var srcName = it.raw_name ? esc(it.raw_name) : '<span style="color:#9ca3af;">Added manually</span>';
+        tdSrc.innerHTML = '<div class="oi-src-row">' +
+            (sc != null ? '<span class="sim-badge ' + scoreCls(c.score) + '">' + sc + '%</span>' : '') +
+            '<span class="oi-src-name" title="' + esc(it.raw_name || '') + '">' + srcName + '</span></div>';
+        tr.appendChild(tdSrc);
+
+        var tdS = document.createElement('td'); tdS.className = 'col-oi-sku';
+        tdS.innerHTML = '<span style="color:#9ca3af;font-size:12px">' + esc(c ? c.sku : '—') + '</span>';
+        tr.appendChild(tdS);
+
+        var tdPr = document.createElement('td'); tdPr.className = 'col-oi-price';
+        tdPr.innerHTML = priceCellHtml(c, it.qty);
+        tr.appendChild(tdPr);
+
+        var tdQ = document.createElement('td'); tdQ.className = 'col-oi-qty';
+        var qWrap = document.createElement('span'); qWrap.className = 'oi-qty-wrap';
+        var minBtn = document.createElement('button'); minBtn.type = 'button'; minBtn.className = 'oi-qty-btn'; minBtn.disabled = (it.qty <= 1);
+        var qInp = document.createElement('input'); qInp.type = 'number'; qInp.className = 'oi-qty-inp'; qInp.value = it.qty; qInp.min = 1;
+        var plusBtn = document.createElement('button'); plusBtn.type = 'button'; plusBtn.className = 'oi-qty-btn is-plus';
+        function syncQty() { qInp.value = it.qty; minBtn.disabled = it.qty <= 1; tdPr.innerHTML = priceCellHtml(c, it.qty); }
+        minBtn.addEventListener('click', function () { it.qty = Math.max(1, (parseInt(qInp.value, 10) || 1) - 1); syncQty(); });
+        plusBtn.addEventListener('click', function () { it.qty = (parseInt(qInp.value, 10) || 1) + 1; syncQty(); });
+        qInp.addEventListener('input', function () { var n = parseInt(qInp.value, 10); it.qty = (isFinite(n) && n > 0) ? n : 1; syncQty(); });
+        qWrap.appendChild(minBtn); qWrap.appendChild(qInp); qWrap.appendChild(plusBtn);
+        tdQ.appendChild(qWrap); tr.appendChild(tdQ);
+
+        return tr;
+    }
+
+    // ── Inline product replacement in a row (.em-item-editor / .ee-sug standard) ──
+    function openReplace(i, thN) {
+        var ed = document.createElement('div'); ed.className = 'em-item-editor';
+        ed.innerHTML =
+            '<input type="text" class="ee-vinput" placeholder="Find a product…" autocomplete="off">' +
+            '<button type="button" class="ee-btn cancel" title="Cancel"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg></button>' +
+            '<div class="ee-sug"></div>';
+        thN.innerHTML = ''; thN.appendChild(ed);
+        var vinp = ed.querySelector('.ee-vinput');
+        var sug = ed.querySelector('.ee-sug');
+        var cancelBtn = ed.querySelector('.ee-btn.cancel');
+        var tmr = null;
+        function positionSug() {
+            var r = vinp.getBoundingClientRect();
+            sug.style.left = r.left + 'px'; sug.style.top = (r.bottom + 2) + 'px'; sug.style.width = Math.max(r.width, 260) + 'px';
+        }
+        function renderSug(list, query) {
+            sug.innerHTML = '';
+            var inner = document.createElement('div'); inner.className = 'ee-sug-scroll';
+            sug.appendChild(inner);
+            if (!list.length) {
+                var r = document.createElement('div'); r.className = 'ee-sug-row empty';
+                r.textContent = (query && query.length >= 2) ? 'Nothing found' : 'Enter at least 2 characters';
+                inner.appendChild(r); positionSug(); sug.classList.add('open'); return;
+            }
+            list.forEach(function (v) {
+                var row = document.createElement('div'); row.className = 'ee-sug-row';
+                var photo = v.photo ? '<img class="ee-sug-photo" src="' + esc(v.photo) + '" alt="">' : '<div class="ee-sug-photo"></div>';
+                var st = parseInt(v.stock, 10) || 0;
+                var stockHtml = st > 0 ? '<span class="ee-sug-stock" style="color:#16a34a">' + st + ' pcs</span>' : '<span class="ee-sug-stock" style="color:#dc2626">None</span>';
+                row.innerHTML = photo + '<div class="ee-sug-info"><span class="ee-sug-name">' + esc(v.name) + '</span>' +
+                    '<span class="ee-sug-meta"><span class="ee-sug-sku">' + esc(v.sku || '—') + '</span>' + stockHtml + '</span></div>';
+                row.addEventListener('mousedown', function (e) {
+                    e.preventDefault(); e.stopPropagation();
+                    var it = woItems[i];
+                    it.candidates = it.candidates || [];
+                    it.candidates.push({ type: 'variant', id: v.id, name: v.name, sku: v.sku || '', price: v.price, stock: v.stock, photo: v.photo || '', score: 1 });
+                    it._sel = it.candidates.length - 1;
+                    renderRows();
+                });
+                inner.appendChild(row);
+            });
+            positionSug(); sug.classList.add('open');
+        }
+        vinp.addEventListener('input', function () {
+            clearTimeout(tmr);
+            var q = vinp.value.trim();
+            if (q.length < 2) { renderSug([], q); return; }
+            tmr = setTimeout(function () {
+                fetch('/admin/catalog/variant-search/?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) { renderSug(data.results || [], q); })
+                    .catch(function () { renderSug([], q); });
+            }, 250);
+        });
+        vinp.addEventListener('blur', function () { setTimeout(function () { if (document.body.contains(vinp)) renderRows(); }, 200); });
+        cancelBtn.addEventListener('mousedown', function (e) { e.preventDefault(); renderRows(); });
+        vinp.addEventListener('keydown', function (e) { if (e.key === 'Escape') renderRows(); });
+        function reposOnScroll() { if (sug.classList.contains('open')) positionSug(); }
+        window.addEventListener('scroll', reposOnScroll, true);
+        window.addEventListener('resize', reposOnScroll);
+        vinp.focus();
+    }
+
+    // ── Add a product manually (the same search in the toolbar) ──
+    function woInitAdd(inp) {
+        if (!inp) return;
+        var wrap = inp.parentNode;
+        wrap.style.position = 'relative';
+        var sug = document.createElement('div'); sug.className = 'ee-sug';
+        wrap.appendChild(sug);
+        var tmr = null;
+        function positionSug() {
+            var r = inp.getBoundingClientRect();
+            sug.style.left = r.left + 'px'; sug.style.top = (r.bottom + 2) + 'px'; sug.style.width = r.width + 'px';
+        }
+        function closeSug() { sug.classList.remove('open'); sug.innerHTML = ''; }
+        inp.addEventListener('input', function () {
+            clearTimeout(tmr);
+            var q = inp.value.trim();
+            if (q.length < 2) { closeSug(); return; }
+            tmr = setTimeout(function () {
+                fetch('/admin/catalog/variant-search/?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        var list = data.results || [];
+                        sug.innerHTML = '';
+                        var inner = document.createElement('div'); inner.className = 'ee-sug-scroll';
+                        sug.appendChild(inner);
+                        if (!list.length) {
+                            var r0 = document.createElement('div'); r0.className = 'ee-sug-row empty'; r0.textContent = 'Nothing found';
+                            inner.appendChild(r0);
+                        } else {
+                            list.forEach(function (v) {
+                                var row = document.createElement('div'); row.className = 'ee-sug-row';
+                                var photo = v.photo ? '<img class="ee-sug-photo" src="' + esc(v.photo) + '" alt="">' : '<div class="ee-sug-photo"></div>';
+                                var st = parseInt(v.stock, 10) || 0;
+                                var stockHtml = st > 0 ? '<span class="ee-sug-stock" style="color:#16a34a">' + st + ' pcs</span>' : '<span class="ee-sug-stock" style="color:#dc2626">None</span>';
+                                row.innerHTML = photo + '<div class="ee-sug-info"><span class="ee-sug-name">' + esc(v.name) + '</span>' +
+                                    '<span class="ee-sug-meta"><span class="ee-sug-sku">' + esc(v.sku || '—') + '</span>' + stockHtml + '</span></div>';
+                                row.addEventListener('mousedown', function (e) {
+                                    e.preventDefault(); e.stopPropagation();
+                                    woItems.push({
+                                        raw_name: '', qty: 1, _sel: 0,
+                                        candidates: [{ type: 'variant', id: v.id, name: v.name, sku: v.sku || '', price: v.price, stock: v.stock, photo: v.photo || '', score: 1 }]
+                                    });
+                                    inp.value = ''; closeSug(); renderRows();
+                                });
+                                inner.appendChild(row);
+                            });
+                        }
+                        positionSug(); sug.classList.add('open');
+                    });
+            }, 250);
+        });
+        inp.addEventListener('blur', function () { setTimeout(closeSug, 200); });
+        window.addEventListener('scroll', function () { if (sug.classList.contains('open')) positionSug(); }, true);
+        window.addEventListener('resize', function () { if (sug.classList.contains('open')) positionSug(); });
+    }
+
+    function runConfirm() {
+        var payload = [];
+        woItems.forEach(function (it) {
+            var c = (it._sel != null && it._sel >= 0) ? it.candidates[it._sel] : null;
+            if (!c || c.type !== 'variant') return;
+            payload.push({ variant_id: c.id, quantity: it.qty });
+        });
+        if (!payload.length) { alert('No product selected.'); return; }
+        var btn = el('wo-confirm');
+        btn.disabled = true; btn.textContent = 'Writing off…';
+        fetch('/admin/orders/confirm-writeoff/', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+            body: JSON.stringify({ items: payload, source_text: srcText })
+        })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+            if (!res.ok) { btn.disabled = false; btn.textContent = 'Write off'; alert(res.d.error || 'Write-off error'); return; }
+            close();
+            window.location.reload();
+        })
+        .catch(function (e) { btn.disabled = false; btn.textContent = 'Write off'; alert('Network error: ' + e); });
+    }
+})();
+</script>
+
+<script>
+(function () {
+    var allData = {{ variants_json|safe }};
+    var catsTree = {{ cats_tree_json|safe }};
+    var allLabels = {{ labels_json|safe }};
+
+    var allBrands = [];
+    (function(){
+        var bs={};
+        allData.forEach(function(v){ if(v.brand) bs[v.brand]=1; });
+        allBrands = Object.keys(bs).sort();
+    })();
+
+    var F = {nameQ:'',skuQ:'',photos:'all',brands:[],cats:[],labels:[],priceMin:null,priceMax:null,stockOnly:false,stockNone:false,stockMin:null,stockMax:null,dateMin:null,dateMax:null,dateMinU:null,dateMaxU:null,status:'all',discount:'all',types:[],printout:'all'};
+
+    /* Convert "DD.MM.YYYY HH:MM" → "YYYY-MM-DD" for string comparison */
+    function toCmpDate(str){ var m=str&&str.match(/^(\d{2})\.(\d{2})\.(\d{4})/); return m?m[3]+'-'+m[2]+'-'+m[1]:null; }
+    var sortField=null, sortDir='asc';
+    var currentPage=1, pageSize=25, currentFiltered=[];
+    var groupByProduct=false;
+    /* Collapsed groups (group keys) — variant rows are hidden. */
+    var collapsedGroups=new Set();
+    /* Persistent selection across client-side pagination (row ids as strings). */
+    var SEL = new Set();
+
+    /* ── Persist state — filters + sorting + grouping + pagination.
+       SEL (row selection) is also restored cross-page. ──
+     */
+    var STATE_KEY = 'catalog_product_list_state_v1';
+    function _saveState(){
+        try {
+            localStorage.setItem(STATE_KEY, JSON.stringify({
+                F: F,
+                sortField: sortField, sortDir: sortDir,
+                groupByProduct: groupByProduct,
+                collapsedGroups: Array.from(collapsedGroups),
+                currentPage: currentPage, pageSize: pageSize,
+                SEL: Array.from(SEL),
+            }));
+        } catch (e) {}
+    }
+    function _loadState(){
+        try {
+            var raw = localStorage.getItem(STATE_KEY);
+            if (!raw) return false;
+            var s = JSON.parse(raw);
+            if (s.F) Object.assign(F, s.F);
+            if (typeof s.sortField      !== 'undefined') sortField      = s.sortField;
+            if (typeof s.sortDir        !== 'undefined') sortDir        = s.sortDir;
+            if (typeof s.groupByProduct !== 'undefined') groupByProduct = !!s.groupByProduct;
+            if (Array.isArray(s.collapsedGroups)) collapsedGroups = new Set(s.collapsedGroups);
+            if (typeof s.currentPage    !== 'undefined') currentPage    = s.currentPage;
+            // "All" (pageSize=0) is NOT restored — to avoid loading all products on reload.
+            if (typeof s.pageSize       !== 'undefined') pageSize       = (s.pageSize === 0 ? 25 : s.pageSize);
+            /* Restore the cross-page selection, dropping ids that are no longer in the data. */
+            if (Array.isArray(s.SEL)) {
+                var exists={}; allData.forEach(function(v){ exists[String(v.id)]=1; });
+                s.SEL.forEach(function(id){ if(exists[String(id)]) SEL.add(String(id)); });
+            }
+            return true;
+        } catch (e) {}
+        return false;
+    }
+    _loadState();
+
+    function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+    function getCsrf(){var el=document.querySelector('[name=csrfmiddlewaretoken]');return el?el.value:'';}
+
+    /* Expand selected category names to include all descendants */
+    function expandCats(names){
+        var nameSet={}, idSet={};
+        names.forEach(function(n){ nameSet[n]=1; });
+        catsTree.forEach(function(c){ if(nameSet[c.name]) idSet[c.id]=1; });
+        var changed=true;
+        while(changed){
+            changed=false;
+            catsTree.forEach(function(c){
+                if(!nameSet[c.name] && c.parent_id && idSet[c.parent_id]){
+                    nameSet[c.name]=1; idSet[c.id]=1; changed=true;
+                }
+            });
+        }
+        return Object.keys(nameSet);
+    }
+
+    function applyFilters(data){
+        var expandedCats=F.cats.length?expandCats(F.cats):[];
+        return data.filter(function(v){
+            if(F.nameQ && (v.name||'').toLowerCase().indexOf(F.nameQ.toLowerCase())===-1) return false;
+            if(F.skuQ  && (v.sku||'').indexOf(F.skuQ)===-1) return false;
+            if(F.photos==='with'    && !(v.photos&&v.photos.length)) return false;
+            if(F.photos==='without' &&  (v.photos&&v.photos.length)) return false;
+            if(F.brands.length && F.brands.indexOf(v.brand||'')===-1) return false;
+            if(F.cats.length && !(v.categories||[]).some(function(c){return expandedCats.indexOf(c)!==-1;})) return false;
+            if(F.labels.length){
+                var _vl=v.labels||[];
+                var _named=F.labels.some(function(n){return n!=='__none__' && _vl.some(function(l){return l.name===n;});});
+                var _none=F.labels.indexOf('__none__')!==-1 && _vl.length===0;
+                if(!(_named||_none)) return false;
+            }
+            var price=parseFloat(v.price)||0;
+            if(F.priceMin!==null && price<F.priceMin) return false;
+            if(F.priceMax!==null && price>F.priceMax) return false;
+            var stock=v.stock!=null?parseInt(v.stock):0;
+            if(F.stockOnly && stock<=0) return false;
+            if(F.stockNone && stock>0) return false;
+            if(F.stockMin!==null && stock<F.stockMin) return false;
+            if(F.stockMax!==null && stock>F.stockMax) return false;
+            if(F.dateMin||F.dateMax){ var cd=v.created_iso||toCmpDate(v.created_at); if(F.dateMin&&(!cd||cd<F.dateMin)) return false; if(F.dateMax&&(!cd||cd>F.dateMax)) return false; }
+            if(F.dateMinU||F.dateMaxU){ var cu=v.updated_iso||toCmpDate(v.updated_at); if(F.dateMinU&&(!cu||cu<F.dateMinU)) return false; if(F.dateMaxU&&(!cu||cu>F.dateMaxU)) return false; }
+            if(F.status==='active' && !v.is_active) return false;
+            if(F.status==='hidden' &&  v.is_active) return false;
+            if(F.discount==='percent' && !v.discount_percent && !v.brand_discount_percent) return false;
+            if(F.discount==='amount'  && !v.discount_amount)  return false;
+            if(F.discount==='none'    && (v.discount_percent||v.discount_amount||v.brand_discount_percent)) return false;
+            if(F.printout==='with'    && !v.printout) return false;
+            if(F.printout==='without' &&  v.printout) return false;
+            if(F.types.length){
+                var match = F.types.some(function(t){
+                    if(t==='hybrid')  return !!v.is_hybrid;
+                    if(t==='factory') return !v.is_own;
+                    if(t==='own')     return !!v.is_own;
+                    if(t==='paired')  return !!v.is_paired;
+                    return false;
+                });
+                if(!match) return false;
+            }
+            return true;
+        });
+    }
+    function applySort(data){
+        if(!sortField) return data;
+        return data.slice().sort(function(a,b){
+            var va,vb;
+            if     (sortField==='name')      {va=(a.name||'').toLowerCase();vb=(b.name||'').toLowerCase();}
+            else if(sortField==='sku')       {va=a.sku||'';vb=b.sku||'';}
+            else if(sortField==='brand')     {va=(a.brand||'').toLowerCase();vb=(b.brand||'').toLowerCase();}
+            else if(sortField==='price')     {va=parseFloat(a.price)||0;vb=parseFloat(b.price)||0;}
+            else if(sortField==='stock')     {va=a.stock!=null?parseInt(a.stock):0;vb=b.stock!=null?parseInt(b.stock):0;}
+            else if(sortField==='created_at'){va=a.created_iso||'';vb=b.created_iso||'';}
+            else if(sortField==='updated_at'){va=a.updated_iso||'';vb=b.updated_iso||'';}
+            else if(sortField==='discount'){
+                if(F.discount==='amount'){va=parseFloat(a.discount_amount)||0;vb=parseFloat(b.discount_amount)||0;}
+                else{va=parseFloat(a.discount_percent||a.brand_discount_percent)||0;vb=parseFloat(b.discount_percent||b.brand_discount_percent)||0;}
+            }
+            else if(sortField==='is_active') {va=a.is_active?0:1;vb=b.is_active?0:1;}
+            else return 0;
+            return va<vb?(sortDir==='asc'?-1:1):va>vb?(sortDir==='asc'?1:-1):0;
+        });
+    }
+    function hasFilters(){
+        return F.nameQ||F.skuQ||F.photos!=='all'||F.printout!=='all'||F.brands.length||F.cats.length||
+               F.priceMin!==null||F.priceMax!==null||F.stockOnly||F.stockNone||F.stockMin!==null||F.stockMax!==null||
+               F.dateMin||F.dateMax||F.dateMinU||F.dateMaxU||F.status!=='all'||F.discount!=='all'||F.labels.length;
+    }
+    function isColFiltered(col){
+        if(col==='photos')    return F.photos!=='all';
+        if(col==='name')      return !!F.nameQ;
+        if(col==='sku')       return !!F.skuQ;
+        if(col==='brand')     return F.brands.length>0;
+        if(col==='cat')       return F.cats.length>0;
+        if(col==='labels')    return F.labels.length>0;
+        if(col==='price')     return F.priceMin!==null||F.priceMax!==null;
+        if(col==='stock')     return F.stockOnly||F.stockNone||F.stockMin!==null||F.stockMax!==null||F.types.length>0||F.printout!=='all';
+        if(col==='dates') return !!(F.dateMin||F.dateMax||F.dateMinU||F.dateMaxU);
+        if(col==='is_active') return F.status!=='all';
+        if(col==='discount')  return F.discount!=='all';
+        return false;
+    }
+
+    var pvTable=document.getElementById('pv-table');
+
+    function applyGroup(data){
+        if(!groupByProduct) return data;
+        var indexed=data.map(function(v,i){return{v:v,i:i};});
+        indexed.sort(function(a,b){
+            var ka=a.v.pair_key||a.v.product_id, kb=b.v.pair_key||b.v.product_id;
+            if(ka!==kb) return ka<kb?-1:1;
+            if(a.v.product_id!==b.v.product_id) return a.v.product_id<b.v.product_id?-1:1;
+            return a.i-b.i;
+        });
+        return indexed.map(function(x){return x.v;});
+    }
+    function updateTable(opts){
+        if (!opts || !opts.preservePage) currentPage=1;
+        _saveState();
+        var filtered=applyGroup(applySort(applyFilters(allData)));
+        pvTable.querySelectorAll('th[data-col]').forEach(function(th){
+            var col=th.dataset.col;
+            var filtered_col=isColFiltered(col), sorted_col=(sortField===col) || (col==='dates' && (sortField==='created_at'||sortField==='updated_at'));
+            th.classList.toggle('col-filtered', filtered_col);
+            th.classList.toggle('col-on', filtered_col || sorted_col);
+            var badge=th.querySelector('.th-badge');
+            if(badge) badge.innerHTML=(filtered_col||sorted_col)?'<svg width="9" height="10" viewBox="0 0 10 11" fill="#374151"><path d="M0 0h10L6.5 5v6h-3V5z"/></svg>':'';
+        });
+        renderRows(filtered);
+    }
+    function resetCol(col){
+        if(col==='name')       F.nameQ='';
+        else if(col==='sku')   F.skuQ='';
+        else if(col==='photos') F.photos='all';
+        else if(col==='brand') F.brands=[];
+        else if(col==='cat')   F.cats=[];
+        else if(col==='labels') F.labels=[];
+        else if(col==='price') { F.priceMin=null; F.priceMax=null; }
+        else if(col==='stock') { F.stockOnly=false; F.stockNone=false; F.stockMin=null; F.stockMax=null; F.types=[]; F.printout='all'; }
+        else if(col==='dates') { F.dateMin=null; F.dateMax=null; F.dateMinU=null; F.dateMaxU=null; if(sortField==='created_at'||sortField==='updated_at'){ sortField=null; sortDir='asc'; } }
+        else if(col==='is_active') F.status='all';
+        else if(col==='discount')  F.discount='all';
+        if(sortField===col){ sortField=null; sortDir='asc'; }
+        updateTable();
+    }
+    function resetFilters(){
+        F={nameQ:'',skuQ:'',photos:'all',brands:[],cats:[],labels:[],priceMin:null,priceMax:null,stockOnly:false,stockNone:false,stockMin:null,stockMax:null,dateMin:null,dateMax:null,dateMinU:null,dateMaxU:null,status:'all',discount:'all',types:[],printout:'all'};
+        sortField=null; sortDir='asc';
+        updateTable();
+    }
+
+    /* ── Popover: click to open/close ── */
+    var pop=document.getElementById('flt-pop'), popOwner=null;
+
+    var popWidths={dates:240,cat:320};
+    function openPop(th, buildFn){
+        if(popOwner===th && pop.classList.contains('open')){ closePop(); return; }
+        if(popOwner) popOwner.classList.remove('col-open');
+        popOwner=th;
+        pop.innerHTML='';
+        buildFn();
+        var resetBar=document.createElement('button'); resetBar.type='button';
+        resetBar.textContent='Reset filter';
+        resetBar.style.cssText='display:block;width:100%;padding:10px;border:none;border-bottom:1px solid #e5e7eb;background:none;color:#dc2626;font-size:13px;font-weight:500;cursor:pointer;text-align:left;';
+        resetBar.addEventListener('click',function(){resetCol(th.dataset.col);closePop();});
+        resetBar.addEventListener('mouseenter',function(){this.style.background='#fef2f2';});
+        resetBar.addEventListener('mouseleave',function(){this.style.background='none';});
+        pop.insertBefore(resetBar,pop.firstChild);
+        pop.classList.add('open');
+        var r=th.getBoundingClientRect();
+        var pw=popWidths[th.dataset.col]||200;
+        pop.style.width=pw+'px';
+        pop.style.left=(window.clFlipLeft?window.clFlipLeft(r,pw,8):Math.max(8,Math.min(r.left,window.innerWidth-pw-8)))+'px';
+        pop.style.top=(window.clFlipTop?window.clFlipTop(r,pop.offsetHeight,0):(r.bottom))+'px';
+        th.classList.add('col-open');
+    }
+    function closePop(){
+        pop.classList.remove('open');
+        if(popOwner){ popOwner.classList.remove('col-open'); popOwner=null; }
+    }
+    document.addEventListener('click',function(e){
+        if(!pop.contains(e.target)&&!e.target.closest('th[data-col]')) closePop();
+    });
+    function popHasFocus(){ return !!pop.querySelector('input:focus,textarea:focus'); }
+    function onLeave(e){
+        var to=e.relatedTarget;
+        if(!to){ if(popHasFocus()) return; closePop(); return; }
+        if(pop.contains(to)||to===pop) return;
+        if(popOwner&&(popOwner===to||popOwner.contains(to))) return;
+        closePop();
+    }
+    /* pop.addEventListener('mouseleave',onLeave); -- disabled: keep popup open on mouseleave */
+    pop.addEventListener('wheel',function(e){
+        var scrollable=e.target.closest('.fp-list,.cal-grid');
+        if(scrollable&&scrollable.scrollHeight>scrollable.clientHeight){
+            var atTop=scrollable.scrollTop===0&&e.deltaY<0;
+            var atBot=scrollable.scrollTop+scrollable.clientHeight>=scrollable.scrollHeight&&e.deltaY>0;
+            if(!atTop&&!atBot) return;
+        }
+        e.preventDefault();
+    },{passive:false});
+
+    /* helpers */
+    function popBody(){
+        var d=document.createElement('div'); d.className='fp-pop-body';
+        pop.appendChild(d); return d;
+    }
+    function sortRows(field, la, ld){
+        [[la,'asc'],[ld,'desc']].forEach(function(p){
+            var btn=document.createElement('button'); btn.type='button';
+            btn.className='fp-sort-row'+(sortField===field&&sortDir===p[1]?' on':'');
+            var sp=document.createElement('span'); sp.textContent=p[0];
+            var arr=document.createElement('span'); arr.className='fp-sort-arr'; arr.textContent='›';
+            btn.appendChild(sp); btn.appendChild(arr);
+            btn.addEventListener('click',function(){
+                sortField=field;sortDir=p[1];
+                pop.querySelectorAll('.fp-sort-row').forEach(function(b){b.classList.remove('on');});
+                btn.classList.add('on');
+                updateTable();
+            });
+            pop.appendChild(btn);
+        });
+    }
+    var _rgSeq = 0;
+    function radioList(cont, opts, getVal, setVal, onSelect){
+        /* A counter, not Date.now(): two radioLists in a row landed in the same
+           millisecond, got the same name and merged into one group — then
+           in "Availability" the stock-level choice got cleared when the printout was
+           set.
+         */
+        var grp='fp-rg-'+(++_rgSeq);
+        opts.forEach(function(o){
+            var row=document.createElement('div'); row.className='fp-item';
+            var lbl=document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+            var rb=document.createElement('input'); rb.type='radio'; rb.name=grp; rb.value=o[0]; rb.checked=getVal()===o[0];
+            rb.addEventListener('change',function(){ if(rb.checked){setVal(o[0]);updateTable();if(onSelect)onSelect();} });
+            lbl.appendChild(rb); lbl.appendChild(document.createTextNode(o[1]));
+            row.appendChild(lbl); cont.appendChild(row);
+        });
+    }
+    function checkList(cont, items, selected, onToggle){
+        if(items.length>6){
+            var inp=document.createElement('input'); inp.type='text'; inp.className='fp-search'; inp.placeholder='Search...';
+            inp.addEventListener('input',function(){renderList(inp.value);});
+            cont.appendChild(inp);
+        }
+        var ld=document.createElement('div'); ld.className='fp-list'; cont.appendChild(ld);
+        function renderList(q){
+            ld.innerHTML='';
+            var sh=q?items.filter(function(i){return i.toLowerCase().indexOf(q.toLowerCase())!==-1;}):items;
+            sh.forEach(function(item){
+                var row=document.createElement('div'); row.className='fp-item';
+                var lbl=document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+                var cb=document.createElement('input'); cb.type='checkbox'; cb.checked=selected.indexOf(item)!==-1;
+                cb.addEventListener('change',function(){onToggle(item,cb.checked);updateTable();});
+                lbl.appendChild(cb); lbl.appendChild(document.createTextNode(item));
+                row.appendChild(lbl); ld.appendChild(row);
+            });
+        }
+        renderList('');
+    }
+    function rangeRow(cont, minV, maxV, onMin, onMax, unit){
+        var wrap=document.createElement('div'); wrap.className='fp-range';
+        var i1=document.createElement('input'); i1.type='number'; i1.placeholder='from'; i1.value=minV!==null?minV:'';
+        var sep=document.createElement('span'); sep.className='fp-range-sep'; sep.textContent='—';
+        var i2=document.createElement('input'); i2.type='number'; i2.placeholder='to'; i2.value=maxV!==null?maxV:'';
+        i1.addEventListener('input',function(){onMin(i1.value!==''?parseFloat(i1.value):null);updateTable();});
+        i2.addEventListener('input',function(){onMax(i2.value!==''?parseFloat(i2.value):null);updateTable();});
+        wrap.appendChild(i1); wrap.appendChild(sep); wrap.appendChild(i2);
+        cont.appendChild(wrap);
+    }
+    function flabel(cont, text){ var d=document.createElement('div'); d.className='fp-filter-label'; d.textContent=text; cont.appendChild(d); }
+    function divider(cont){ var d=document.createElement('div'); d.className='fp-divider'; cont.appendChild(d); }
+    /* builders */
+    function buildPhotosPop(){
+        var b=popBody();
+        radioList(b,[['all','All'],['with','With photo'],['without','Without photo']],function(){return F.photos;},function(v){F.photos=v;});
+    }
+    function buildNamePop(){
+        sortRows('name','A ⟶ Z','Z ⟶ A');
+        var b=popBody();
+        var inp=document.createElement('input'); inp.type='text'; inp.className='fp-search';
+        inp.placeholder='Search by name...'; inp.value=F.nameQ;
+        inp.addEventListener('input',function(){F.nameQ=inp.value;updateTable();});
+        b.appendChild(inp);
+        setTimeout(function(){inp.focus();},40);
+    }
+    function buildSkuPop(){
+        var b=popBody();
+        var inp=document.createElement('input'); inp.type='text'; inp.className='fp-search';
+        inp.placeholder='SKU...'; inp.value=F.skuQ;
+        inp.addEventListener('input',function(){F.skuQ=inp.value;updateTable();});
+        b.appendChild(inp);
+        setTimeout(function(){inp.focus();},40);
+    }
+    function buildBrandPop(){
+        sortRows('brand','A ⟶ Z','Z ⟶ A');
+        var b=popBody();
+        checkList(b,allBrands,F.brands,function(item,on){
+            if(on){if(F.brands.indexOf(item)===-1)F.brands.push(item);}
+            else{F.brands=F.brands.filter(function(x){return x!==item;});}
+        });
+    }
+    function buildCatPop(){
+        var b=popBody();
+
+        var catById={};
+        catsTree.forEach(function(c){ catById[c.id]=c; });
+        function catDepth(c){ var d=0,pid=c.parent_id; while(pid&&catById[pid]){d++;pid=catById[pid].parent_id;} return d; }
+        /* children-by-parent: cascading selection of descendants when an ancestor is clicked. */
+        var kidsByParent={};
+        catsTree.forEach(function(c){
+            if(c.parent_id){ (kidsByParent[c.parent_id]=kidsByParent[c.parent_id]||[]).push(c); }
+        });
+        function descendantsOf(c){
+            var out=[]; var stack=(kidsByParent[c.id]||[]).slice();
+            while(stack.length){ var n=stack.shift(); out.push(n); (kidsByParent[n.id]||[]).forEach(function(k){ stack.push(k); }); }
+            return out;
+        }
+
+        /* Show only the categories actually present in at least one product.
+           Include their ancestors too — so the hierarchy doesn't break.
+         */
+        var usedNames={};
+        (allData||[]).forEach(function(v){
+            (v.categories||[]).forEach(function(c){ usedNames[c]=1; });
+        });
+        var usedIds={};
+        catsTree.forEach(function(c){ if(usedNames[c.name]) usedIds[c.id]=1; });
+        catsTree.forEach(function(c){
+            if(!usedIds[c.id]) return;
+            var pid=c.parent_id;
+            while(pid && catById[pid]){
+                if(usedIds[pid]) break;
+                usedIds[pid]=1;
+                pid=catById[pid].parent_id;
+            }
+        });
+        var visibleTree=catsTree.filter(function(c){ return usedIds[c.id]; });
+
+        var inp=document.createElement('input'); inp.type='text'; inp.className='fp-search'; inp.placeholder='Search...';
+        var ld=document.createElement('div'); ld.className='fp-list'; ld.style.maxHeight='320px';
+        b.appendChild(inp); b.appendChild(ld);
+
+        function renderCatList(q){
+            ld.innerHTML='';
+            var shown=q ? visibleTree.filter(function(c){return c.name.toLowerCase().indexOf(q.toLowerCase())!==-1;}) : visibleTree;
+            /* \u041f\u0435\u0440\u0435\u0440\u0430\u0445\u0443\u043d\u043e\u043a depth \u0434\u043b\u044f \u043a\u043e\u0436\u043d\u043e\u0433\u043e \u0432\u0438\u0434\u0438\u043c\u043e\u0433\u043e \u043f\u0443\u043d\u043a\u0442\u0443 (q=\u043f\u043e\u0448\u0443\u043a \u2014 \u0434\u0435\u043f\u0442=0). */
+            var parsed=shown.map(function(c){ return {c:c, depth: q?0:catDepth(c)}; });
+            function isLastAtDepth(i,d){
+                for(var j=i+1;j<parsed.length;j++){
+                    if(parsed[j].depth<d) return true;
+                    if(parsed[j].depth===d) return false;
+                }
+                return true;
+            }
+            /* LINE_OFFSET = visual center of the checkbox at depth 0.
+               STEP = checkbox indent per level. The lines sit exactly under the checkboxes above.
+             */
+            var STEP=18, BASE_PAD=0, LINE_OFFSET=6;
+            parsed.forEach(function(o,i){
+                var c=o.c, depth=o.depth;
+                var row=document.createElement('div'); row.className='fp-item';
+                if(depth>0){
+                    /* Vlines for all ancestor levels (not for the last one — there it's an elbow or vline+hline). */
+                    for(var lvl=1;lvl<depth;lvl++){
+                        if(isLastAtDepth(i,lvl)) continue;
+                        var v=document.createElement('span');
+                        v.className='pick-vline';
+                        v.style.left=(LINE_OFFSET+(lvl-1)*STEP)+'px';
+                        row.appendChild(v);
+                    }
+                    var isFirst = (i===0 || parsed[i-1].depth<depth);
+                    var isLast  = isLastAtDepth(i,depth);
+                    var ownX    = LINE_OFFSET+(depth-1)*STEP;
+                    if (isLast) {
+                        /* "└" — a single elbow with a rounded corner instead of vline+hline. */
+                        var el=document.createElement('span');
+                        el.className='pick-elbow';
+                        el.style.left = ownX+'px';
+                        el.style.top  = (isFirst ? '-10px' : '-5px');
+                        el.style.height = isFirst ? 'calc(50% + 11px)' : 'calc(50% + 6px)';
+                        el.style.width  = (STEP-6)+'px';
+                        row.appendChild(el);
+                    } else {
+                        /* Middle child: a straight vline (through the whole row) + hline to the checkbox. */
+                        var v=document.createElement('span');
+                        v.className='pick-vline';
+                        v.style.left = ownX+'px';
+                        if (isFirst) v.classList.add('is-first');
+                        row.appendChild(v);
+                        var hl=document.createElement('span');
+                        hl.className='pick-hline';
+                        hl.style.left=ownX+'px';
+                        hl.style.width=(STEP-6)+'px';
+                        row.appendChild(hl);
+                    }
+                    row.style.paddingLeft=(BASE_PAD+depth*STEP)+'px';
+                }
+                var lbl=document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+                var cb=document.createElement('input'); cb.type='checkbox'; cb.checked=F.cats.indexOf(c.name)!==-1;
+                cb.addEventListener('change',function(){
+                    var names=[c.name].concat(descendantsOf(c).map(function(d){return d.name;}));
+                    if(cb.checked){
+                        names.forEach(function(n){ if(F.cats.indexOf(n)===-1) F.cats.push(n); });
+                    } else {
+                        F.cats=F.cats.filter(function(x){ return names.indexOf(x)===-1; });
+                    }
+                    renderCatList(inp.value);
+                    updateTable();
+                });
+                lbl.appendChild(cb);
+                lbl.appendChild(document.createTextNode(c.name));
+                row.appendChild(lbl); ld.appendChild(row);
+            });
+        }
+        inp.addEventListener('input',function(){renderCatList(inp.value);});
+        renderCatList('');
+    }
+    var CAL_MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+    var CAL_DOWS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    function calParseYMD(s){ if(!s) return null; var p=s.split('-'); return new Date(+p[0],+p[1]-1,+p[2]); }
+    function calToYMD(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+    function calSameDay(a,b){ return a&&b&&a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate(); }
+
+    function buildCalPop(getMin, setMin, getMax, setMax){
+        var selStart=calParseYMD(getMin()), selEnd=calParseYMD(getMax());
+        var pickStep=(selStart&&!selEnd)?2:1;
+        var hovDate=null;
+        var now=new Date();
+        var calYear=(selStart||now).getFullYear(), calMonth=(selStart||now).getMonth();
+
+        var b=popBody(); b.style.padding='0';
+        var nav=document.createElement('div'); nav.className='cal-nav';
+        var prevBtn=document.createElement('button'); prevBtn.type='button'; prevBtn.className='cal-nav-btn'; prevBtn.innerHTML='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,1 1,5 5,9"/></svg>';
+        var title=document.createElement('span'); title.className='cal-title';
+        var nextBtn=document.createElement('button'); nextBtn.type='button'; nextBtn.className='cal-nav-btn'; nextBtn.innerHTML='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 1,9"/></svg>';
+        nav.appendChild(prevBtn); nav.appendChild(title); nav.appendChild(nextBtn);
+        b.appendChild(nav);
+        var grid=document.createElement('div'); grid.className='cal-grid'; b.appendChild(grid);
+        var calSep=document.createElement('div'); calSep.style.cssText='height:1px;background:#e5e7eb;margin:0;';
+        b.appendChild(calSep);
+        var resetBtn=document.createElement('button'); resetBtn.type='button'; resetBtn.className='cal-reset'; resetBtn.textContent='Reset';
+        resetBtn.addEventListener('click',function(){ selStart=null; selEnd=null; pickStep=1; setMin(null); setMax(null); updateTable(); renderFull(); });
+        b.appendChild(resetBtn);
+
+        function effRange(){
+            if(pickStep===2 && hovDate && selStart)
+                return hovDate<selStart ? {s:hovDate,e:selStart} : {s:selStart,e:hovDate};
+            return {s:selStart, e:selEnd};
+        }
+        function applyClasses(){
+            var r=effRange(), today=new Date();
+            grid.querySelectorAll('.cal-day[data-d]').forEach(function(cell){
+                var d=calParseYMD(cell.dataset.d);
+                var isS=calSameDay(d,r.s), isE=calSameDay(d,r.e);
+                var inR=r.s&&r.e&&d>r.s&&d<r.e;
+                cell.className='cal-day';
+                if(isS) cell.classList.add('sel-start');
+                if(isE) cell.classList.add('sel-end');
+                if(r.s&&r.e&&!calSameDay(r.s,r.e)&&(isS||isE)) cell.classList.add('has-range');
+                if(inR) cell.classList.add('in-range');
+                if(calSameDay(d,today)) cell.classList.add('today');
+            });
+        }
+        function renderFull(){
+            title.textContent=CAL_MONTHS[calMonth]+' '+calYear;
+            grid.innerHTML='';
+            CAL_DOWS.forEach(function(d){ var c=document.createElement('div'); c.className='cal-dow'; c.textContent=d; grid.appendChild(c); });
+            var firstDay=(new Date(calYear,calMonth,1).getDay()+6)%7;
+            var daysInMonth=new Date(calYear,calMonth+1,0).getDate();
+            for(var i=0;i<firstDay;i++){ var e=document.createElement('div'); e.className='cal-day empty'; grid.appendChild(e); }
+            for(var day=1;day<=daysInMonth;day++){
+                var cell=document.createElement('div');
+                cell.className='cal-day';
+                cell.dataset.d=calToYMD(new Date(calYear,calMonth,day));
+                cell.textContent=day;
+                cell.addEventListener('click',function(){
+                    var date=calParseYMD(this.dataset.d);
+                    if(pickStep===1){
+                        selStart=date; selEnd=date; pickStep=2;
+                        setMin(calToYMD(date)); setMax(calToYMD(date));
+                    } else {
+                        if(date<selStart){selEnd=selStart;selStart=date;}else{selEnd=date;}
+                        pickStep=1; setMin(calToYMD(selStart)); setMax(calToYMD(selEnd));
+                    }
+                    /* Auto-sort when filtering by date: newer → older */
+                    if (typeof sortField !== 'undefined') {
+                        if (window._pvActiveDateField === 'created') { sortField='created_at'; sortDir='desc'; }
+                        else if (window._pvActiveDateField === 'updated') { sortField='updated_at'; sortDir='desc'; }
+                    }
+                    updateTable();
+                    applyClasses();
+                });
+                cell.addEventListener('mouseenter',function(){ hovDate=calParseYMD(this.dataset.d); applyClasses(); });
+                cell.addEventListener('mouseleave',function(){ hovDate=null; applyClasses(); });
+                grid.appendChild(cell);
+            }
+            applyClasses();
+        }
+        prevBtn.addEventListener('click',function(){ calMonth--; if(calMonth<0){calMonth=11;calYear--;} renderFull(); });
+        nextBtn.addEventListener('click',function(){ calMonth++; if(calMonth>11){calMonth=0;calYear++;} renderFull(); });
+        renderFull();
+    }
+
+    function buildDatesPop(){
+        var activeTab=(F.dateMinU||F.dateMaxU||sortField==='updated_at')?'updated':'created';
+        var tabsBar=document.createElement('div');
+        tabsBar.style.cssText='display:flex;border-bottom:1px solid #e5e7eb;';
+        var tCreated=document.createElement('button'); tCreated.type='button'; tCreated.className='fp-date-tab';
+        var tUpdated=document.createElement('button'); tUpdated.type='button'; tUpdated.className='fp-date-tab';
+        var tabBtnCss='flex:1;padding:9px 0;border:none;background:none;cursor:pointer;font-size:13px;color:#6b7280;border-bottom:2px solid transparent;';
+        tCreated.style.cssText=tabBtnCss; tCreated.textContent='Created';
+        tUpdated.style.cssText=tabBtnCss; tUpdated.textContent='Updated';
+        tabsBar.appendChild(tCreated); tabsBar.appendChild(tUpdated);
+        pop.appendChild(tabsBar);
+        var marker=document.createElement('div');
+        pop.appendChild(marker);
+        function clearAfterMarker(){
+            var n=marker.nextSibling;
+            while(n){ var rm=n; n=n.nextSibling; pop.removeChild(rm); }
+        }
+        function dot(active, hasFilter){ return ''; }
+        function paintTabs(which){
+            [tCreated,tUpdated].forEach(function(t){ t.style.color='#6b7280'; t.style.borderBottomColor='transparent'; });
+            var act=which==='created'?tCreated:tUpdated;
+            act.style.color='#1f2937'; act.style.borderBottomColor='#1f2937';
+            var cFilt=!!(F.dateMin||F.dateMax), uFilt=!!(F.dateMinU||F.dateMaxU);
+            tCreated.innerHTML='Created'+dot(which==='created',cFilt);
+            tUpdated.innerHTML='Updated'+dot(which==='updated',uFilt);
+        }
+        function setActive(which){
+            activeTab=which;
+            paintTabs(which);
+            clearAfterMarker();
+            if(which==='created'){
+                window._pvActiveDateField='created';
+                sortRows('created_at','Older ⟶ newer','Newer ⟶ older');
+                buildCalPop(function(){return F.dateMin;},function(v){F.dateMin=v;},function(){return F.dateMax;},function(v){F.dateMax=v;});
+            } else {
+                window._pvActiveDateField='updated';
+                sortRows('updated_at','Older ⟶ newer','Newer ⟶ older');
+                buildCalPop(function(){return F.dateMinU;},function(v){F.dateMinU=v;},function(){return F.dateMaxU;},function(v){F.dateMaxU=v;});
+            }
+        }
+        tCreated.addEventListener('click',function(){setActive('created');});
+        tUpdated.addEventListener('click',function(){setActive('updated');});
+        setActive(activeTab);
+    }
+    function buildStatusPop(){
+        var b=popBody();
+        radioList(b,[['all','All'],['active','Active'],['hidden','Inactive']],function(){return F.status;},function(v){F.status=v;});
+    }
+    function buildPricePop(){
+        sortRows('price','Cheaper ⟶ pricier','Pricier ⟶ cheaper');
+        var b=popBody();
+        rangeRow(b,F.priceMin,F.priceMax,function(v){F.priceMin=v;},function(v){F.priceMax=v;},'');
+    }
+    function buildStockPop(){
+        sortRows('stock','Lower ⟶ higher','Higher ⟶ lower');
+        var b=popBody();
+        var stockVal=F.stockOnly?'only':F.stockNone?'none':'all';
+        radioList(b,[['all','All'],['only','In stock'],['none','Out of stock']],
+            function(){return stockVal;},
+            function(v){stockVal=v;F.stockOnly=(v==='only');F.stockNone=(v==='none');updateTable();});
+        var sepKind=document.createElement('div'); sepKind.style.cssText='height:1px;background:#e5e7eb;margin:0 -10px;';
+        b.appendChild(sepKind);
+        [['hybrid','50/50'],['factory','Factory'],['own','Own packing'],['paired','Paired']].forEach(function(o){
+            var row=document.createElement('div'); row.className='fp-item';
+            var lbl=document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+            var cb=document.createElement('input'); cb.type='checkbox'; cb.checked = F.types.indexOf(o[0]) !== -1;
+            cb.addEventListener('change', function(){
+                var i = F.types.indexOf(o[0]);
+                if(cb.checked && i===-1) F.types.push(o[0]);
+                else if(!cb.checked && i!==-1) F.types.splice(i,1);
+                updateTable();
+            });
+            lbl.appendChild(cb); lbl.appendChild(document.createTextNode(o[1]));
+            row.appendChild(lbl); b.appendChild(row);
+        });
+        var sepPr=document.createElement('div'); sepPr.style.cssText='height:1px;background:#e5e7eb;margin:0 -10px;';
+        b.appendChild(sepPr);
+        radioList(b,[['all','Printout: all'],['with','Has printout'],['without','No printout']],
+            function(){return F.printout;},function(v){F.printout=v;});
+        var sep=document.createElement('div'); sep.style.cssText='height:1px;background:#e5e7eb;margin:0 -10px;';
+        b.appendChild(sep);
+        rangeRow(b,F.stockMin,F.stockMax,
+            function(v){F.stockMin=v!==null?Math.round(v):null;},
+            function(v){F.stockMax=v!==null?Math.round(v):null;},'pcs');
+    }
+
+    function buildDiscountPop(){
+        var b=popBody();
+        radioList(b,[['all','All'],['percent','% discount'],['amount','UAH discount'],['none','No discount']],
+            function(){return F.discount;},
+            function(v){F.discount=v;});
+    }
+    function buildLabelsPop(){
+        var b=popBody();
+        var list=document.createElement('div'); list.className='fp-list';
+        function addRow(value, display){
+            var row=document.createElement('div'); row.className='fp-item';
+            var lbl=document.createElement('label'); lbl.style.cssText='display:inline-flex;align-items:center;gap:6px;cursor:pointer;';
+            var cb=document.createElement('input'); cb.type='checkbox'; cb.checked=F.labels.indexOf(value)!==-1;
+            var sp=document.createElement('span'); sp.textContent=display;
+            cb.addEventListener('change',function(){
+                var idx=F.labels.indexOf(value);
+                if(cb.checked){if(idx===-1) F.labels.push(value);}
+                else{if(idx!==-1) F.labels.splice(idx,1);}
+                updateTable();
+            });
+            lbl.appendChild(cb); lbl.appendChild(sp);
+            row.appendChild(lbl);
+            list.appendChild(row);
+        }
+        // "No label" — products that have no label at all.
+        addRow('__none__','No label');
+        allLabels.forEach(function(l){ addRow(l.name, l.name); });
+        b.appendChild(list);
+    }
+    var colBuilders={photos:buildPhotosPop,name:buildNamePop,sku:buildSkuPop,brand:buildBrandPop,cat:buildCatPop,labels:buildLabelsPop,discount:buildDiscountPop,dates:buildDatesPop,is_active:buildStatusPop,price:buildPricePop,stock:buildStockPop};
+
+    /* lightbox */
+    var lightbox=document.getElementById('pv-lightbox'), lightboxImg=document.getElementById('pv-lightbox-img');
+    lightbox.addEventListener('click',function(){lightbox.classList.remove('open');});
+    document.addEventListener('keydown',function(e){if(e.key==='Escape'){lightbox.classList.remove('open');closePop();}});
+
+    /* thead */
+    var src=document.getElementById('result_list');
+    pvTable.className=src?src.className:'';
+    var thead=document.createElement('thead');
+    function sc(lbl,col){return '<th data-col="'+col+'">'+lbl+'<span class="th-badge"></span></th>';}
+    thead.innerHTML='<tr>'+
+        '<th class="col-cb"><input type="checkbox" id="pv-sel-all"></th>'+
+        sc('Photo','photos')+sc('SKU','sku')+sc('Name','name')+
+        sc('Categories','cat')+sc('Dates','dates')+
+        sc('Discount','discount')+sc('Labels','labels')+sc('Brand','brand')+
+        sc('Display','is_active')+sc('Price','price')+sc('Stock','stock')+
+    '</tr>';
+    pvTable.appendChild(thead);
+
+    /* thead.addEventListener('mouseleave', ...) -- disabled: keep popup open on mouseleave */
+    pvTable.querySelector('thead').addEventListener('click',function(e){
+        var th=e.target.closest('th[data-col]'); if(!th) return;
+        e.stopPropagation();
+        var fn=colBuilders[th.dataset.col]; if(fn) openPop(th,fn);
+    });
+    function _grpKey(v){ return v.pair_key||v.product_id; }
+    /* Page boundaries. When grouping, we pack by whole groups: a page holds
+       ~pageSize rows but does NOT split a group — the tail of a group doesn't go to the next
+       page. A group larger than pageSize takes a whole page of its own.
+     */
+    function _pageBounds(){
+        var data=currentFiltered||[];
+        var n=data.length;
+        if(pageSize===0 || n===0) return [{start:0,end:n}];
+        if(!groupByProduct){
+            var b=[];
+            for(var s=0;s<n;s+=pageSize) b.push({start:s,end:Math.min(s+pageSize,n)});
+            return b;
+        }
+        var bounds=[], pageStart=0, count=0, i=0;
+        while(i<n){
+            var key=_grpKey(data[i]), j=i;
+            while(j<n && _grpKey(data[j])===key) j++;
+            var groupLen=j-i;
+            if(count>0 && count+groupLen>pageSize){ bounds.push({start:pageStart,end:i}); pageStart=i; count=0; }
+            count+=groupLen; i=j;
+        }
+        bounds.push({start:pageStart,end:n});
+        return bounds;
+    }
+    function _pageSlice(){
+        var data=currentFiltered||[];
+        if(pageSize===0) return data;
+        var b=_pageBounds();
+        if(currentPage>b.length) currentPage=b.length;
+        if(currentPage<1) currentPage=1;
+        var pg=b[currentPage-1]||{start:0,end:0};
+        return data.slice(pg.start,pg.end);
+    }
+    document.getElementById('pv-sel-all').addEventListener('change',function(){
+        // Per-page toggle: the selection accumulates across pages. If the whole current
+        // page is selected → deselect it; otherwise → add it to the selection.
+        var pageIds = _pageSlice().map(function(v){ return String(v.id); });
+        var allOn = pageIds.length > 0 && pageIds.every(function(id){ return SEL.has(id); });
+        pageIds.forEach(function(id){ if(allOn) SEL.delete(id); else SEL.add(id); });
+        renderRows(currentFiltered);
+        if(window._updateCounter) window._updateCounter();
+    });
+    /* The header checkbox reflects ONLY the current page — so that on every page
+       the selection can be extended.
+     */
+    function _syncSelAll(){
+        var box=document.getElementById('pv-sel-all'); if(!box) return;
+        var pageIds = _pageSlice().map(function(v){ return String(v.id); });
+        var picked = pageIds.filter(function(id){ return SEL.has(id); }).length;
+        box.indeterminate = (picked > 0 && picked < pageIds.length);
+        box.checked       = (pageIds.length > 0 && picked === pageIds.length);
+    }
+
+    /* saveField */
+    /* Counter of pending saves: block the reload while a POST is "in flight",
+       otherwise the reload GET reads the DB before the save lands (the revision loses the number).
+     */
+    var _pvPending=0;
+    if(!window._pvUnloadGuard){
+        window._pvUnloadGuard=true;
+        window.addEventListener('beforeunload',function(e){
+            if(_pvPending>0){e.preventDefault();e.returnValue='';return '';}
+        });
+    }
+    function saveField(variantId,field,value,inputEl,cb){
+        inputEl.classList.add('saving'); inputEl.classList.remove('saved','error');
+        _pvPending++;
+        fetch('/admin/catalog/save-variant-field/',{
+            method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
+            body:JSON.stringify({id:variantId,field:field,value:value}),
+            keepalive:true,
+        }).then(function(r){return r.json();}).then(function(data){
+            inputEl.classList.remove('saving');
+            if(data.ok){inputEl.classList.add('saved');setTimeout(function(){inputEl.classList.remove('saved');},1500);if(cb)cb(data);}
+            else inputEl.classList.add('error');
+        }).catch(function(){inputEl.classList.remove('saving');inputEl.classList.add('error');})
+          .finally(function(){_pvPending--;});
+    }
+    function makePriceInput(variantId,currentVal){
+        var wrap=document.createElement('div'); wrap.className='pv-edit-cell';
+        var input=document.createElement('input'); input.className='pv-edit-input'; input.type='text'; input.value=currentVal;
+        wrap.appendChild(input); var origVal=currentVal;
+        input.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();doSave();input.blur();}if(e.key==='Escape'){input.value=origVal;input.blur();}});
+        input.addEventListener('blur',function(){if(input.value.trim()!==String(origVal))doSave();});
+        input.addEventListener('click',function(e){e.stopPropagation();});
+        function doSave(){saveField(variantId,'price',input.value.trim(),input,function(){origVal=input.value.trim();});}
+        return wrap;
+    }
+    function makeBulkStockWidget(v) {
+        // In manual mode — show the standard counter (as for a regular product).
+        if (v.stock_manual) {
+            return makeStockWidget(v.id, v.stock);
+        }
+        // Auto: [bulk bag] g → N pcs (just a number, no input field).
+        var wrap = document.createElement('span');
+        wrap.className = 'bulk-stock-row';
+        wrap.dataset.productId = v.product_id;
+        wrap.dataset.variantId = v.id;
+        wrap.style.cssText = 'display:inline-flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap;';
+        var qtyInp = document.createElement('input');
+        qtyInp.type = 'number'; qtyInp.min = '0'; qtyInp.step = '0.001';
+        qtyInp.className = 'bulk-stock-qty';
+        qtyInp.value = v.bag_quantity != null ? v.bag_quantity : '';
+        qtyInp.style.cssText = 'width:70px;height:24px;padding:2px 4px;border:1px solid #d1d5db;border-radius:3px;font-size:12px;';
+        qtyInp.title = 'Bag weight';
+        var unitLbl = v.bag_unit === 'ml' ? 'ml' : (v.bag_unit === 'pcs' ? 'pcs' : 'g');
+        var unitSpan = document.createElement('span'); unitSpan.textContent = unitLbl; unitSpan.style.color = '#6b7280';
+        var arrow = document.createElement('span'); arrow.textContent = '→'; arrow.style.color = '#6b7280';
+        // Calculation from the bulk bag — plain text.
+        var piecesSpan = document.createElement('span');
+        piecesSpan.className = 'bulk-stock-pieces';
+        piecesSpan.style.cssText = 'font-size:12px;color:#374151;';
+        // Packaging tolerance: 1 pack actually consumes sz×(1+%/100). For piece-counted bulk bags —
+        // no tolerance.
+        var bagWaste = (v.bag_unit === 'pcs') ? 0 : (parseFloat(v.bag_waste) || 0);
+        function piecesFor(qty, sz, w) {
+            if (!(qty >= 0 && sz > 0)) return 0;
+            return Math.floor(qty / (sz * (1 + (w || 0) / 100)));
+        }
+        function recalcFromBag() {
+            piecesSpan.textContent = piecesFor(parseFloat(qtyInp.value), parseFloat(v.unit_size), bagWaste);
+        }
+        recalcFromBag();
+        var pcsLbl = document.createElement('span'); pcsLbl.textContent = 'pcs'; pcsLbl.style.color = '#6b7280';
+        function propagate(newQty) {
+            document.querySelectorAll('.bulk-stock-row[data-product-id="' + v.product_id + '"]').forEach(function(row){
+                if (row === wrap) return;
+                var inp = row.querySelector('.bulk-stock-qty');
+                var pcs = row.querySelector('.bulk-stock-pieces');
+                if (inp) inp.value = newQty;
+                if (pcs) {
+                    var sz = parseFloat(inp && inp.dataset.unitSize);
+                    var w = parseFloat(inp && inp.dataset.waste) || 0;
+                    pcs.textContent = piecesFor(parseFloat(newQty), sz, w);
+                }
+            });
+        }
+        qtyInp.dataset.unitSize = v.unit_size != null ? v.unit_size : '';
+        qtyInp.dataset.waste = bagWaste;
+        qtyInp.addEventListener('click', function(e){ e.stopPropagation(); });
+        var _bagT=null;
+        function pushBag() {
+            var csrf = (document.cookie.match(/csrftoken=([^;]+)/)||[])[1] || '';
+            _pvPending++;
+            fetch('/admin/catalog/bulk-sources/link-variant/', {
+                method: 'POST', credentials: 'same-origin', keepalive: true,
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+                body: JSON.stringify({
+                    variant_id: v.id,
+                    unit_size: v.unit_size != null ? v.unit_size : null,
+                    bag_quantity: qtyInp.value !== '' ? qtyInp.value : 0,
+                    product_id: v.product_id
+                })
+            }).then(function(r){ return r.json(); }).then(function(d){
+                if (d && d.bag_quantity != null) v.bag_quantity = d.bag_quantity;
+            }).catch(function(){}).finally(function(){_pvPending--;});
+        }
+        function saveBag(){ if(_bagT){clearTimeout(_bagT);_bagT=null;} recalcFromBag(); propagate(qtyInp.value); pushBag(); }
+        qtyInp.addEventListener('keydown', function(e){
+            if (e.key === 'Enter') { e.preventDefault(); saveBag(); }
+        });
+        // Instant recalculation + debounced save while typing; blur saves immediately.
+        qtyInp.addEventListener('input', function(){
+            recalcFromBag(); propagate(qtyInp.value);
+            if(_bagT)clearTimeout(_bagT); _bagT=setTimeout(function(){_bagT=null;pushBag();},800);
+        });
+        qtyInp.addEventListener('blur', saveBag);
+        wrap.appendChild(qtyInp); wrap.appendChild(unitSpan);
+        wrap.appendChild(arrow);
+        wrap.appendChild(piecesSpan); wrap.appendChild(pcsLbl);
+        return wrap;
+    }
+
+    function makeStockWidget(variantId,currentVal){
+        var wrap=document.createElement('span'); wrap.className='delta-wrapper';
+        var input=document.createElement('input'); input.type='number'; input.className='pv-stock-main'; input.step='1'; input.value=currentVal!=null?currentVal:0;
+        var plus=document.createElement('button'); plus.type='button'; plus.className='delta-btn is-plus'; plus.title='Increase'; plus.textContent='+';
+        var minus=document.createElement('button'); minus.type='button'; minus.className='delta-btn'; minus.title='Decrease'; minus.textContent='−';
+        var delta=document.createElement('input'); delta.type='number'; delta.className='delta-input'; delta.placeholder='0'; delta.min='0'; delta.step='1';
+        wrap.appendChild(input); wrap.appendChild(plus); wrap.appendChild(minus); wrap.appendChild(delta);
+        function getDelta(){return Math.max(1,parseInt(delta.value)||1);}
+        var lastSaved=parseInt(input.value)||0;
+        var _busy=false, _t=null;
+        function doSave(val){saveField(variantId,'stock',val,input);lastSaved=val;}
+        // Before saving the stock level — check recent orders (stock revision): if the
+        // product has already been sold and written off, the modal offers to keep the entered value
+        // or subtract.
+        function commitStock(){
+            if(_t){clearTimeout(_t);_t=null;}
+            if(_busy) return;
+            var val=parseInt(input.value)||0; input.value=val;
+            if(val===lastSaved) return;
+            if(!window.StockDemand){doSave(val);return;}
+            _busy=true;
+            window.StockDemand.check(variantId,val).then(function(res){
+                _busy=false;
+                if(res.action==='cancel'){input.value=lastSaved;return;}
+                input.value=res.value; doSave(res.value);
+            }).catch(function(){_busy=false;doSave(val);});
+        }
+        function scheduleCommit(){if(_t)clearTimeout(_t);_t=setTimeout(function(){_t=null;commitStock();},800);}
+        function applyDelta(sign){var nv=(parseInt(input.value)||0)+sign*getDelta();input.value=nv;delta.value='';scheduleCommit();}
+        plus.addEventListener('click',function(e){e.stopPropagation();applyDelta(1);});
+        minus.addEventListener('click',function(e){e.stopPropagation();applyDelta(-1);});
+        delta.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();applyDelta(1);}e.stopPropagation();});
+        delta.addEventListener('click',function(e){e.stopPropagation();});
+        // Debounce: the user typed a number and didn't press Enter/leave the field — the check
+        // fires after 800ms.
+        input.addEventListener('input',scheduleCommit);
+        input.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();commitStock();}e.stopPropagation();});
+        input.addEventListener('blur',commitStock);
+        input.addEventListener('click',function(e){e.stopPropagation();});
+        return wrap;
+    }
+
+    function renderPager(){
+        var total=currentFiltered.length;
+        var pager=document.getElementById('pv-pager');
+        if(!pager) return;
+        pager.style.display='';
+        var groupBtn='<div class="pager-group"><span class="pg-btn'+(groupByProduct?' pg-active':'')+'" onclick="window._pvToggleGroup()">Group</span></div>';
+        /* Few rows (fit on one page) — keep the bar visible: "Per page"
+           and "Group" are always needed. We hide ONLY the page navigation.
+         */
+        if(total<=25 && pageSize!==0){
+            var info1=total===0?'No records':'1–'+total+' of '+total;
+            pager.innerHTML=
+                '<span class="pager-info">'+info1+'</span>'+
+                '<div class="pager-nav"></div>'+
+                '<div class="pager-right"><div class="pager-size"><span>Per page:</span>'+
+                '<span class="pg-btn'+(pageSize===25?' pg-active':'')+'" onclick="window._pvSetPage(1,25,this)">25</span>'+
+                '<span class="pg-btn'+(pageSize===50?' pg-active':'')+'" onclick="window._pvSetPage(1,50,this)">50</span>'+
+                '<span class="pg-btn" onclick="window._pvSetPage(1,0,this)">All</span></div>'+groupBtn+'</div>';
+            return;
+        }
+        if(pageSize===0){
+            pager.innerHTML=
+                '<span class="pager-info">Showing all '+total+' entries</span>'+
+                '<div class="pager-nav"></div>'+
+                '<div class="pager-right"><div class="pager-size"><span>Per page:</span>'+
+                '<span class="pg-btn" onclick="window._pvSetPage(1,25,this)">25</span>'+
+                '<span class="pg-btn" onclick="window._pvSetPage(1,50,this)">50</span>'+
+                '<span class="pg-btn pg-active">All</span></div>'+groupBtn+'</div>';
+            return;
+        }
+        var bounds=_pageBounds();
+        var pages=bounds.length||1;
+        if(currentPage>pages) currentPage=pages;
+        if(currentPage<1) currentPage=1;
+        var cur=bounds[currentPage-1]||{start:0,end:0};
+        var from=total===0?0:cur.start+1;
+        var to=cur.end;
+        var SVG_PREV='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,1 1,5 5,9"/></svg>';
+        var SVG_NEXT='<svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 1,9"/></svg>';
+        function pgBtn(label,page,active,disabled,arrow){
+            var cls='pg-btn'+(active?' pg-active':'')+(disabled?' pg-disabled':'')+(arrow?' pg-arrow':'');
+            var handler=disabled||active?'':'onclick="window._pvSetPage('+page+','+pageSize+',this)"';
+            return '<span class="'+cls+'" '+handler+'>'+label+'</span>';
+        }
+        var nav='';
+        nav+=pgBtn(SVG_PREV,currentPage-1,false,currentPage===1,true);
+        var pNums=[];
+        if(pages<=7){
+            for(var i=1;i<=pages;i++) pNums.push(i);
+        } else {
+            pNums.push(1);
+            if(currentPage>3) pNums.push('…');
+            for(var i=Math.max(2,currentPage-1);i<=Math.min(pages-1,currentPage+1);i++) pNums.push(i);
+            if(currentPage<pages-2) pNums.push('…');
+            pNums.push(pages);
+        }
+        pNums.forEach(function(p){
+            if(p==='…'){ nav+='<span class="pg-dots">…</span>'; }
+            else { nav+=pgBtn(p,p,p===currentPage,false); }
+        });
+        nav+=pgBtn(SVG_NEXT,currentPage+1,false,currentPage===pages,true);
+        pager.innerHTML=
+            '<span class="pager-info">'+from+'–'+to+' of '+total+'</span>'+
+            '<div class="pager-nav">'+nav+'</div>'+
+            '<div class="pager-right"><div class="pager-size"><span>Per page:</span>'+
+            '<span class="pg-btn'+(pageSize===25?' pg-active':'')+'" onclick="window._pvSetPage(1,25,this)">25</span>'+
+            '<span class="pg-btn'+(pageSize===50?' pg-active':'')+'" onclick="window._pvSetPage(1,50,this)">50</span>'+
+            '<span class="pg-btn" onclick="window._pvSetPage(1,0,this)">All</span></div>'+groupBtn+'</div>';
+    }
+
+    function positionPager(){
+        var pager=document.getElementById('pv-pager');
+        if(!pager||!pvTable) return;
+        var content=document.querySelector('#content-main')||document.body;
+        pager.style.left=(window.clX?window.clX(content.getBoundingClientRect().left):content.getBoundingClientRect().left)+'px';
+        pvTable.style.marginBottom='0'; var __lr=pvTable.querySelector("tbody tr:last-child"); if(__lr){var __rb=__lr.getBoundingClientRect().bottom, __pt=pager.getBoundingClientRect().top; pvTable.classList.toggle("tbl-touches-pager", getComputedStyle(pager).display !== 'none' && __rb >= __pt - 1);} if(window.padChangelistTable) window.padChangelistTable(pvTable); if(pvTable.__padFill) pvTable.__padFill.style.marginBottom=pager.offsetHeight+'px';
+    }
+    positionPager();
+    window.addEventListener('resize',positionPager);
+    window.addEventListener('resize',function(){ try{ _fitProductCols(); }catch(e){} });
+    if(window.ResizeObserver){
+        /* Any change of the container width (window OR sidebar collapse) → recompute the
+           columns, otherwise table-layout:fixed spreads the extra space proportionally and the gaps
+           drift.
+         */
+        new ResizeObserver(function(){ positionPager(); try{ _fitProductCols(); }catch(e){} }).observe(document.querySelector('#content-main')||document.body);
+    }
+    var navSidebar=document.getElementById('nav-sidebar');
+    if(navSidebar) navSidebar.addEventListener('transitionend',positionPager);
+
+    window._pvSetPage=function(page,size,btnEl){
+        // If a button element was passed — show a spinner in it while rendering
+        // (renderRows is synchronous and for "All"/large pages can hang for 100-1000ms).
+        if (btnEl && btnEl.nodeType === 1) {
+            btnEl.dataset._origHtml = btnEl.innerHTML;
+            btnEl.innerHTML = '<span class="pg-spinner"></span>';
+            btnEl.classList.add('pg-loading');
+        }
+        pageSize=size; currentPage=page;
+        // Two rAFs: the first lets the browser paint the spinner,
+        // the second — after the next frame we start the heavy render.
+        requestAnimationFrame(function(){
+            requestAnimationFrame(function(){
+                renderRows(currentFiltered);
+                if(window._updateCounter) window._updateCounter();
+                // after renderRows the pager is rebuilt completely and the button disappears,
+                // so there is no need to restore its html.
+            });
+        });
+    };
+    window._pvToggleGroup=function(){
+        groupByProduct=!groupByProduct;
+        currentPage=1;
+        renderRows(applyGroup(applySort(applyFilters(allData))));
+        if(window._updateCounter) window._updateCounter();
+    };
+
+    function _anyFilterActive(){
+        return !!(
+            F.nameQ || F.skuQ ||
+            (F.photos && F.photos !== 'all') ||
+            (F.brands && F.brands.length) ||
+            (F.cats && F.cats.length) ||
+            (F.labels && F.labels.length) ||
+            (F.types && F.types.length) ||
+            (F.printout && F.printout !== 'all') ||
+            F.priceMin !== null || F.priceMax !== null ||
+            F.stockOnly || F.stockNone ||
+            F.stockMin !== null || F.stockMax !== null ||
+            F.dateMin || F.dateMax || F.dateMinU || F.dateMaxU ||
+            (F.status && F.status !== 'all') ||
+            (F.discount && F.discount !== 'all') ||
+            sortField || groupByProduct
+        );
+    }
+    function _resetFilters(){
+        F.nameQ=''; F.skuQ=''; F.photos='all'; F.cats=[]; F.brands=[]; F.labels=[]; F.types=[];
+        F.priceMin=null; F.priceMax=null;
+        F.stockOnly=false; F.stockNone=false; F.stockMin=null; F.stockMax=null;
+        F.dateMin=null; F.dateMax=null; F.dateMinU=null; F.dateMaxU=null;
+        F.status='all'; F.discount='all'; F.printout='all';
+        sortField=null; sortDir='asc';
+        currentPage=1; groupByProduct=false;
+        updateTable();
+    }
+    function _renderResetBtn(){
+        var bar = document.querySelector('.submit-row.cl-bar'); if (!bar) return;
+        var btn = bar.querySelector('#ds-reset-filters');
+        var active = _anyFilterActive();
+        if (active && !btn) {
+            btn = document.createElement('button');
+            btn.type='button'; btn.id='ds-reset-filters';
+            btn.className='cl-top-btn'; btn.textContent='Reset filters';
+            btn.addEventListener('click', _resetFilters);
+            var del = bar.querySelector('.cl-top-btn-danger');
+            if (del) bar.insertBefore(btn, del); else bar.appendChild(btn);
+        } else if (!active && btn) { btn.remove(); }
+    }
+
+    /* Three toggles: Products (this page, active by default) / Low /
+       Out of stock — at the very start of .cl-bar (before "Add"). The live counters
+       come from the same applyNtfCounts as the sidebar (base_site.html),
+       via setSubBadge by id sub-badge-stock_out/stock_low.
+     */
+    function buildRow(v,rowNum,isGroupStart,pinned){
+        {
+            var tr=document.createElement('tr');
+            tr.className=(rowNum%2===0?'row2':'row1')+(v.multi?' pv-multi':'')+(isGroupStart?' group-start':'')+(pinned?' pv-pinned':'');
+            tr.dataset.vid=v.id;
+            tr.style.cursor='pointer';
+            var editUrl='/admin/catalog/product/'+v.product_id+'/change/#v'+v.id;
+            var photosTd=document.createElement('td'); photosTd.className='col-photos';
+            if(v.photos&&v.photos.length){
+                var photosDiv=document.createElement('div'); photosDiv.className='pv-photos';
+                v.photos.forEach(function(url){
+                    var wrap=document.createElement('div'); wrap.className='pv-photo-wrap';
+                    var thumb=document.createElement('img'); thumb.className='pv-thumb'; thumb.src=url; thumb.onerror=function(){wrap.style.display='none';};
+                    var preview=document.createElement('div'); preview.className='pv-photo-preview';
+                    var pi=document.createElement('img'); pi.src=url; preview.appendChild(pi);
+                    wrap.appendChild(thumb); wrap.appendChild(preview);
+                    wrap.addEventListener('mouseenter',function(){var r=wrap.getBoundingClientRect();preview.style.left=(window.clX?window.clX(r.left):r.left)+'px';preview.style.top=(window.clFlipTop?window.clFlipTop(r,preview.offsetHeight,6):(r.bottom+6))+'px';});
+                    wrap.addEventListener('click',function(e){e.stopPropagation();lightboxImg.src=url;lightbox.classList.add('open');});
+                    photosDiv.appendChild(wrap);
+                });
+                photosTd.appendChild(photosDiv);
+            } else {photosTd.textContent='—';photosTd.style.color='#9ca3af';}
+            var activeTd=document.createElement('td'); activeTd.className='col-active';
+            var activeCb=document.createElement('input'); activeCb.type='checkbox'; activeCb.className='pv-active-cb'; activeCb.checked=!!v.is_active;
+            activeCb.addEventListener('change',function(e){e.stopPropagation();saveField(v.id,'is_active',activeCb.checked,activeCb,function(){
+                /* In-memory + redraw the current page if a status filter/sorting is active
+                   — so that the row immediately disappears/moves to match the filter.
+                 */
+                v.is_active=activeCb.checked;
+                if(isColFiltered('is_active')||sortField==='is_active') updateTable({preservePage:true});
+            });});
+            activeCb.addEventListener('click',function(e){e.stopPropagation();});
+            activeTd.appendChild(activeCb);
+            var catsHtml=(v.categories||[]).map(function(c){return '<span class="pv-cat-tag">'+esc(c)+'</span>';}).join('');
+            if(v.categories_extra) catsHtml+='<span class="pv-cat-tag" style="color:#9ca3af">+'+v.categories_extra+'</span>';
+            var cbTd=document.createElement('td'); cbTd.className='col-cb action-checkbox';
+            cbTd.innerHTML='<input type="checkbox" name="variant_ids" value="'+v.id+'" data-product-id="'+v.product_id+'" class="pv-cb">';
+            (function(){
+                var rowCb=cbTd.querySelector('.pv-cb');
+                rowCb.checked=SEL.has(String(v.id));
+            })();
+            var nameTh=document.createElement('th'); nameTh.className='col-name';
+            var ownBadge=v.is_own?'<span style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;font-weight:600;margin-right:6px;">own</span>':'';
+            var nameHtml='<span class="pv-name-cell" style="display:flex;align-items:center;">'+ownBadge+'<span class="col-name-val copy-on-click" data-copy="'+esc(v.name||'')+'" title="Copy" style="min-width:0;max-width:100%;">'+esc(v.name||'—')+'</span></span>';
+            nameTh.innerHTML=nameHtml;
+            var skuTd=document.createElement('td'); skuTd.className='col-sku';
+            skuTd.innerHTML = v.sku
+                ? '<span class="copy-on-click" data-copy="'+esc(v.sku)+'" title="Copy SKU" style="color:#9ca3af;font-size:12px">'+esc(v.sku)+'</span>'
+                : '<span style="color:#9ca3af;font-size:12px">—</span>';
+            var brandTd=document.createElement('td'); brandTd.className='col-brand'; brandTd.textContent=v.brand||'—';
+            var catTd=document.createElement('td'); catTd.className='col-cat'; catTd.innerHTML=catsHtml?'<div class="cat-wrap">'+catsHtml+'</div>':'—';
+            var labelsTd=document.createElement('td'); labelsTd.className='col-labels';
+            if(v.labels&&v.labels.length){
+                labelsTd.innerHTML=v.labels.map(function(l){
+                    return '<span class="app-label" style="--label-color:'+esc(l.color)+'">'+esc(l.name)+'</span>';
+                }).join('');
+            } else { labelsTd.textContent='—'; labelsTd.style.color='#9ca3af'; }
+            var discTd=document.createElement('td'); discTd.className='col-disc';
+            if(v.discount_percent&&v.discount_amount) discTd.innerHTML='<span>'+esc(v.discount_percent)+'%</span> <span style="color:#9ca3af;font-size:11px">'+esc(v.discount_amount)+'</span>';
+            else if(v.discount_percent) discTd.textContent=v.discount_percent+'%';
+            else if(v.discount_amount)  discTd.textContent=v.discount_amount;
+            else if(v.brand_discount_percent){
+                discTd.innerHTML='<span style="color:#9ca3af">'+esc(v.brand_discount_percent)+'% <span style="font-size:11px">(brand)</span></span>';
+                discTd.title='Inherited from the brand "'+esc(v.brand||'')+'" — the pack has no discount of its own';
+            }
+            else { discTd.textContent='—'; discTd.style.color='#9ca3af'; }
+            var datesTd=document.createElement('td'); datesTd.className='col-dates';
+            datesTd.innerHTML='<div style="font-size:12px;color:#9ca3af;line-height:1.4;height:38px;display:flex;flex-direction:column;justify-content:center;overflow:hidden">'+
+                '<div><span style="color:#374151;display:inline-block;margin-right:6px">Added:</span>'+esc(v.created_at||'—')+'</div>'+
+                '<div><span style="color:#374151;display:inline-block;margin-right:6px">Updated:</span>'+esc(v.updated_at||'—')+'</div>'+
+            '</div>';
+            var priceTd=document.createElement('td'); priceTd.className='col-price'; priceTd.appendChild(makePriceInput(v.id,v.price||''));
+            var stockTd=document.createElement('td'); stockTd.className='col-stock';
+            if (v.is_own) {
+                stockTd.appendChild(makeBulkStockWidget(v));
+            } else {
+                stockTd.appendChild(makeStockWidget(v.id,v.stock));
+            }
+            [cbTd,photosTd,skuTd,nameTh,catTd,datesTd,discTd,labelsTd,brandTd,activeTd,priceTd,stockTd].forEach(function(cell){tr.appendChild(cell);});
+            tr.addEventListener('click',function(e){
+                if(e.button!==0) return;
+                if(e.target.type==='checkbox'||e.target.tagName==='A'||e.target.tagName==='INPUT'||e.target.tagName==='BUTTON') return;
+                if(window._hadSelection) return;
+                window.location.href=editUrl;
+            });
+            return tr;
+        }
+    }
+
+    /* Group header row: a "select the whole group" checkbox + the shared product name.
+       Clicking the row collapses/expands the variants. Only for groups with ≥2 variants.
+     */
+    function buildGroupHeader(items,key,collapsed){
+        var ids=items.map(function(v){return String(v.id);});
+        var allSel=ids.every(function(id){return SEL.has(id);});
+        var someSel=ids.some(function(id){return SEL.has(id);});
+        var tr=document.createElement('tr');
+        tr.className='pv-group-header group-start'+(collapsed?' pv-group-collapsed':'');
+        var cbTd=document.createElement('td'); cbTd.className='col-cb';
+        cbTd.innerHTML='<input type="checkbox" class="pv-group-cb">';
+        var cb=cbTd.querySelector('input');
+        cb.checked=allSel;
+        cb.indeterminate=!allSel&&someSel;
+        cb.addEventListener('click',function(e){e.stopPropagation();});
+        cb.addEventListener('change',function(e){
+            e.stopPropagation();
+            ids.forEach(function(id){ if(cb.checked) SEL.add(id); else SEL.delete(id); });
+            renderRows(currentFiltered);
+            if(window._updateCounter) window._updateCounter();
+        });
+        /* Name (= "Display" toggle) + counter — one cell spanning the full width. */
+        var nameTd=document.createElement('td'); nameTd.colSpan=11;
+        var label=items[0].product_name||items[0].name||'—';
+        var allActive=items.every(function(v){return !!v.is_active;});
+        var someActive=items.some(function(v){return !!v.is_active;});
+        nameTd.innerHTML='<div class="pv-group-name-inner">'+
+            '<span class="pv-group-toggle">'+
+            '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 4.5L6 8L9.5 4.5" stroke="#6b7280" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>'+
+            '<span class="pv-group-title">'+esc(label)+'</span>'+
+            /* Struck through only when ALL variants are hidden (partially hidden — normal). */
+            '<span class="pv-group-count'+(someActive?'':' pv-group-count--off')+'" title="Click — show / hide all variants of the group">('+items.length+')</span>'+
+        '</div>';
+        /* Clicking the counter turns is_active on/off for all variants of the group. */
+        var countEl=nameTd.querySelector('.pv-group-count');
+        countEl.addEventListener('click',function(e){
+            e.stopPropagation();
+            var val=!allActive;
+            items.forEach(function(v){
+                v.is_active=val;
+                saveField(v.id,'is_active',val,countEl);
+                /* Update the row's checkmark in place — WITHOUT renderRows, so the row does not
+                   disappear from under the "Active/Inactive" filter right after
+                   the click.
+                 */
+                var rowCb=pvTable.querySelector('tbody tr[data-vid="'+v.id+'"] .pv-active-cb');
+                if(rowCb) rowCb.checked=val;
+            });
+            allActive=val;
+            countEl.classList.toggle('pv-group-count--off', !items.some(function(v){return !!v.is_active;}));
+        });
+        tr.appendChild(cbTd); tr.appendChild(nameTd);
+        /* Clicking the header (except the selection checkbox and the counter) — collapse/expand. */
+        tr.addEventListener('click',function(e){
+            if(e.target.closest('input,.pv-group-count')) return;
+            if(collapsedGroups.has(key)) collapsedGroups.delete(key);
+            else collapsedGroups.add(key);
+            renderRows(currentFiltered);
+        });
+        return tr;
+    }
+
+    /* ── Dynamic column widths ──────────────────────────────────────── */
+    var _pvFontFam=null;
+    function _pvFam(){ if(!_pvFontFam) _pvFontFam=getComputedStyle(document.body).fontFamily||'sans-serif'; return _pvFontFam; }
+    var _pvCtx=document.createElement('canvas').getContext('2d');
+    function _pvTextW(t,fontCss){ _pvCtx.font=fontCss; return _pvCtx.measureText(String(t||'')).width; }
+
+    var _pvHdr=null;
+    function _pvMeasureHdr(){
+        if(_pvHdr) return _pvHdr;
+        var fam=_pvFam();
+        var sp=document.createElement('span');
+        sp.style.cssText='position:absolute;left:-99999px;top:0;visibility:hidden;white-space:nowrap;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;font-size:10px;';
+        sp.style.fontFamily=fam; document.body.appendChild(sp);
+        function h(t){ sp.textContent=t; return Math.ceil(sp.offsetWidth)+12+26; }  /* text + left padding + reserve for the filter icon */
+        var skuMax=0; (allData||[]).forEach(function(v){ if(v.sku){ var w=_pvTextW(v.sku,'12px '+fam); if(w>skuMax)skuMax=w; } });
+        var r={
+            photosHdr: h('Photo'),
+            datesHdr:  h('Dates'),
+            catHdr:    h('Categories'),
+            discHdr:   h('Discount'),
+            labHdr:    h('Labels'),
+            brandHdr:  h('Brand'),
+            sku:    Math.max(h('SKU'), Math.ceil(skuMax)+24),
+            active: Math.max(h('Display'), 40),
+            priceH: h('Price'),
+            stockH: h('Stock')
+        };
+        document.body.removeChild(sp); _pvHdr=r; return r;
+    }
+
+    var _pvNameW=null;
+    function _pvMeasureName(){
+        if(_pvNameW!=null) return _pvNameW;
+        var fam=_pvFam(), cands=[];
+        (allData||[]).forEach(function(v){ var n=v.name||''; if(n) cands.push({n:n,w:_pvTextW(n,'13px '+fam),own:!!v.is_own,multi:!!v.multi}); });
+        cands.sort(function(a,b){return b.w-a.w;}); cands=cands.slice(0,40);  /* the 40 longest names */
+        /* The probe is an exact copy of the <td>: border-box + 1px border + padding 8/12; inside it
+           pv-name-cell (flex) with the "─" prefix, the "own" badge and .col-name-val
+           (clamp:2).
+           We look for the COLUMN width directly — so that it matches the real cell to the pixel.
+         */
+        var td=document.createElement('div');
+        td.style.cssText='position:absolute;left:-99999px;top:0;visibility:hidden;box-sizing:border-box;border-left:1px solid #e5e7eb;padding:8px 12px;font-size:13px;line-height:1.35;';
+        td.style.fontFamily=fam; document.body.appendChild(td);
+        var cell=document.createElement('span'); cell.style.cssText='display:flex;align-items:center;'; td.appendChild(cell);
+        function build(c){
+            cell.innerHTML='';
+            if(c.multi){ var pre=document.createElement('span'); pre.textContent='─'; pre.style.cssText='margin-right:8px;color:#9ca3af;'; cell.appendChild(pre); }
+            if(c.own){ var b=document.createElement('span'); b.textContent='own'; b.style.cssText='font-size:10px;text-transform:uppercase;letter-spacing:0.4px;font-weight:600;margin-right:6px;'; cell.appendChild(b); }
+            var val=document.createElement('span');
+            val.style.cssText='display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;word-break:break-word;line-height:1.35;min-width:0;max-width:100%;';
+            val.textContent=c.n; cell.appendChild(val); return val;
+        }
+        var need=200;
+        cands.forEach(function(c){
+            var val=build(c);
+            var lo=80, hi=Math.max(160,Math.ceil(c.w)+120), best=hi;  /* min column width at which the name is not cut off yet (≤2 lines) */
+            for(var it=0;it<12;it++){ var mid=Math.floor((lo+hi)/2);
+                td.style.width=mid+'px';
+                if(val.scrollHeight<=val.clientHeight){ best=mid; hi=mid-1; } else { lo=mid+1; } }
+            if(best>need) need=best;
+        });
+        document.body.removeChild(td); _pvNameW=need+2; return _pvNameW;  /* +2 px margin for rounding */
+    }
+
+    /* Categories: show as many tags as fit in 2 lines; the rest → "+N". */
+    function _fitCatTags(){
+        pvTable.querySelectorAll('tbody:not(#pv-sel-hidden) td.col-cat .cat-wrap').forEach(function(wrap){
+            var prev=wrap.querySelector('.pv-cat-more'); if(prev) prev.remove();
+            var tags=Array.prototype.slice.call(wrap.querySelectorAll('.pv-cat-tag:not(.pv-cat-more)'));
+            tags.forEach(function(t){ t.style.display=''; });
+            if(wrap.scrollHeight<=wrap.clientHeight+1) return;          // everything fit in 2 lines
+            var more=document.createElement('span');
+            more.className='pv-cat-tag pv-cat-more'; more.style.color='#9ca3af';
+            wrap.appendChild(more);
+            var hidden=0;
+            for(var i=tags.length-1;i>0;i--){                           // keep at least 1 tag
+                tags[i].style.display='none'; hidden++;
+                more.textContent='+'+hidden;
+                if(wrap.scrollHeight<=wrap.clientHeight+1) break;
+            }
+            if(hidden===0){ more.remove(); }
+        });
+    }
+
+    function _fitProductCols(){
+        var fx=_pvMeasureHdr(), st=pvTable.style, rng=document.createRange();
+        /* reset before measuring: all category tags, all columns, full (non-compact) mode */
+        pvTable.querySelectorAll('tbody:not(#pv-sel-hidden) td.col-cat .cat-wrap').forEach(function(w){
+            var m=w.querySelector('.pv-cat-more'); if(m) m.remove();
+            w.querySelectorAll('.pv-cat-tag').forEach(function(t){ t.style.display=''; });
+        });
+        ['brand','labels','discount','dates'].forEach(function(k){ pvTable.classList.remove('pv-hide-'+k); });
+        pvTable.classList.remove('pv-compact');
+
+        var _host=document.querySelector('#content-main')||pvTable.parentElement;
+        var _avail=_host?_host.clientWidth:pvTable.getBoundingClientRect().width;
+        /* getBoundingClientRect/Range give visual px (smaller than layout px under the Mac zoom),
+           while _avail (clientWidth) and style.width are layout px. So we divide these measurements
+           by zoom.
+           (scrollWidth is already layout px, we do NOT divide it.)
+         */
+        var _zoom=parseFloat(getComputedStyle(document.body).zoom)||1;
+
+        /* --- measurements (full mode) --- */
+        var wPrice=fx.priceH;
+        pvTable.querySelectorAll('tbody:not(#pv-sel-hidden) td.col-price .pv-edit-input').forEach(function(el){ var w=Math.ceil(el.getBoundingClientRect().width/_zoom)+20; if(w>wPrice)wPrice=w; });
+        var wDates=fx.datesHdr;
+        pvTable.querySelectorAll('tbody:not(#pv-sel-hidden) td.col-dates > div > div').forEach(function(el){ rng.selectNodeContents(el); var w=Math.ceil(rng.getBoundingClientRect().width/_zoom)+24; if(w>wDates)wDates=w; });
+        function contentMax(sel, base){ var m=base;
+            pvTable.querySelectorAll('tbody:not(#pv-sel-hidden) '+sel).forEach(function(el){ rng.selectNodeContents(el); var w=Math.ceil(rng.getBoundingClientRect().width/_zoom)+24; if(w>m)m=w; });
+            return m; }
+        var wDisc  = contentMax('td.col-disc', fx.discHdr);
+        var wBrand = contentMax('td.col-brand', fx.brandHdr);
+        var wLab   = Math.min(contentMax('td.col-labels', fx.labHdr), 220);
+        var catMin = Math.min(contentMax('td.col-cat .cat-wrap', fx.catHdr), 300);
+        var thumb=pvTable.querySelector('tbody:not(#pv-sel-hidden) .pv-thumb');
+        var tw=thumb?thumb.getBoundingClientRect().width/_zoom:38;
+        function measureStock(){ var ws=fx.stockH; pvTable.querySelectorAll('tbody:not(#pv-sel-hidden) td.col-stock > *').forEach(function(el){ var w=el.scrollWidth+16; if(w>ws)ws=w; }); return ws; }
+        function measurePhotos(){ var maxN=0; pvTable.querySelectorAll('tbody:not(#pv-sel-hidden) td.col-photos .pv-photos').forEach(function(ph){ var n=0; ph.querySelectorAll('.pv-photo-wrap').forEach(function(x){ if(getComputedStyle(x).display!=='none') n++; }); if(n>maxN)maxN=n; }); var wp=fx.photosHdr; if(maxN>0) wp=Math.max(wp, Math.ceil(maxN*tw + (maxN-1)*3) + 24 + 1); return wp; }
+        var wStock=measureStock();
+        var wPhotos=measurePhotos();
+        var nameMin=_pvMeasureName();
+
+        function fixedSumOf(p,s){ return 44 + p + fx.sku + fx.active + Math.ceil(wPrice) + s
+            + Math.ceil(wDisc) + Math.ceil(wLab) + Math.ceil(wBrand) + Math.ceil(wDates); }
+
+        /* --- COMPACT: if full mode doesn't fit — only 1 photo (stock level stays full) --- */
+        if(fixedSumOf(wPhotos, Math.ceil(wStock)) + nameMin + catMin > _avail){
+            pvTable.classList.add('pv-compact');
+            wPhotos=Math.max(fx.photosHdr, Math.ceil(tw)+24+1);   // one photo
+        }
+
+        /* --- edge case: if it is still tight after compressing — hide the secondary columns
+           (date first; discount/labels/brand are kept until the last) ---
+         */
+        var _wmap={dates:Math.ceil(wDates), brand:Math.ceil(wBrand), labels:Math.ceil(wLab), discount:Math.ceil(wDisc)};
+        var _fixedSum=fixedSumOf(wPhotos, Math.ceil(wStock));
+        var _drop=['dates','brand','labels','discount'];
+        for(var _i=0; _i<_drop.length && (_fixedSum + nameMin + catMin) > _avail; _i++){
+            pvTable.classList.add('pv-hide-'+_drop[_i]);
+            _fixedSum -= _wmap[_drop[_i]];
+        }
+
+        /* --- set the widths --- */
+        st.setProperty('--pw-photos', wPhotos+'px');
+        st.setProperty('--pw-sku',    fx.sku+'px');
+        st.setProperty('--pw-dates',  Math.ceil(wDates)+'px');
+        st.setProperty('--pw-active', fx.active+'px');
+        st.setProperty('--pw-price',  Math.ceil(wPrice)+'px');
+        st.setProperty('--pw-stock',  Math.ceil(wStock)+'px');
+        st.setProperty('--pw-disc',   Math.ceil(wDisc)+'px');
+        st.setProperty('--pw-labels', Math.ceil(wLab)+'px');
+        st.setProperty('--pw-brand',  Math.ceil(wBrand)+'px');
+
+        /* name (2/3) + category (1/3) split the remainder; the name is full, the category shrinks if needed */
+        /* The name takes ALL the free remainder; the category is the minimum for its content,
+           and whatever doesn't fit in 2 lines → a "+N" stub (_fitCatTags).
+         */
+        var _catFloor=catMin, _rem=_avail - _fixedSum - nameMin;
+        if(_rem < _catFloor) _catFloor=Math.max(60, _rem);
+        var extra=Math.max(0, Math.floor(_avail - _fixedSum - nameMin - _catFloor));
+        st.setProperty('--pw-name', (nameMin+extra)+'px');
+        st.setProperty('--pw-cat',  _catFloor+'px');
+        _fitCatTags();
+    }
+
+    function renderRows(data){
+        currentFiltered=data;
+        _saveState();
+        _renderResetBtn();
+        var slice = _pageSlice();
+        var oldTbody=pvTable.querySelector('tbody'); if(oldTbody) oldTbody.remove();
+        var tbody=document.createElement('tbody'), rowNum=1;
+        /* pinned: selected rows from other pages, rendered on top */
+        var visibleIds={}; slice.forEach(function(v){visibleIds[String(v.id)]=1;});
+        var pinned=[];
+        SEL.forEach(function(id){
+            if(visibleIds[id]) return;
+            for(var i=0;i<allData.length;i++){ if(String(allData[i].id)===id){ pinned.push(allData[i]); break; } }
+        });
+        pinned.forEach(function(v,idx){
+            var tr=buildRow(v,rowNum++,false,true);
+            if(idx===0) tr.classList.add('pv-pinned-first');
+            if(idx===pinned.length-1) tr.classList.add('pv-pinned-last');
+            tbody.appendChild(tr);
+        });
+        rowNum=1;
+        if(groupByProduct){
+            /* Collect consecutive rows into groups by key (pair_key|product_id). */
+            var groups=[];
+            slice.forEach(function(v){
+                var key=v.pair_key||v.product_id;
+                var last=groups[groups.length-1];
+                if(last&&last.key===key) last.items.push(v);
+                else groups.push({key:key,items:[v]});
+            });
+            groups.forEach(function(g,gi){
+                if(g.items.length>=2){
+                    /* ≥2 variants — a group header, which also serves as the separator. */
+                    var collapsed=collapsedGroups.has(g.key);
+                    tbody.appendChild(buildGroupHeader(g.items,g.key,collapsed));
+                    g.items.forEach(function(v){
+                        var row=buildRow(v,rowNum++,false,false);
+                        row.classList.add('pv-group-child');
+                        if(collapsed) row.style.display='none';
+                        tbody.appendChild(row);
+                    });
+                } else {
+                    /* A single product — a regular separator on top. */
+                    g.items.forEach(function(v){ tbody.appendChild(buildRow(v,rowNum++,gi>0,false)); });
+                }
+            });
+        } else {
+            slice.forEach(function(v){ tbody.appendChild(buildRow(v,rowNum++,false,false)); });
+        }
+        if (slice.length === 0) {
+            var emptyTr = document.createElement('tr');
+            emptyTr.className = 'pv-empty-row';
+            var emptyTd = document.createElement('td');
+            emptyTd.colSpan = 12;
+            emptyTd.style.cssText = 'text-align:center;color:#9ca3af;font-size:13px;height:56px;box-sizing:border-box;';
+            emptyTd.textContent = 'No results';
+            emptyTr.appendChild(emptyTd);
+            tbody.appendChild(emptyTr);
+        }
+        pvTable.appendChild(tbody);
+        _fitProductCols();
+        _syncHiddenSel();
+        _syncSelAll();
+        renderPager();
+        positionPager();
+        if(window._updateCounter) window._updateCounter();
+    }
+
+    /* Off-page persistence: keep a hidden checked .pv-cb input inside the table
+       for every selected id that is not currently rendered, so the shared
+       bulk-action / delete code in base_site.html (which reads .pv-cb:checked)
+       acts on the full cross-page selection. */
+    function _syncHiddenSel(){
+        var holder=pvTable.querySelector('#pv-sel-hidden');
+        if(holder) holder.remove();
+        holder=document.createElement('tbody');
+        holder.id='pv-sel-hidden';
+        holder.style.display='none';
+        var visible={};
+        pvTable.querySelectorAll('tbody:not(#pv-sel-hidden) .pv-cb').forEach(function(cb){visible[cb.value]=1;});
+        SEL.forEach(function(id){
+            if(visible[id]) return;
+            var v=null;
+            for(var i=0;i<allData.length;i++){ if(String(allData[i].id)===id){ v=allData[i]; break; } }
+            var inp=document.createElement('input');
+            inp.type='checkbox'; inp.className='pv-cb'; inp.name='variant_ids';
+            inp.value=id; inp.checked=true;
+            if(v) inp.dataset.productId=v.product_id;
+            holder.appendChild(inp);
+        });
+        pvTable.appendChild(holder);
+    }
+
+    /* Delegated change listener: keep SEL in sync with row checkboxes. */
+    pvTable.addEventListener('change',function(e){
+        var cb=e.target;
+        if(!cb.classList||!cb.classList.contains('pv-cb')) return;
+        if(cb.parentNode&&cb.parentNode.id==='pv-sel-hidden') return;
+        if(cb.checked) SEL.add(String(cb.value)); else SEL.delete(String(cb.value));
+        renderRows(currentFiltered);
+        if(window._updateCounter) window._updateCounter();
+    });
+
+    updateTable({preservePage: true});
+
+    /* Override the shared counter so it reports the full cross-page selection
+       (SEL.size) out of the whole filtered dataset. base_site sets
+       window._updateCounter on DOMContentLoaded, so we wrap it after that. */
+    function _installCounter(){
+        var counter=document.querySelector('.cl-counter');
+        if(!counter) return;
+        // "Clear selection" — clears the whole cross-page selection (including
+        // other pages).
+        if(!document.getElementById('cl-clear-sel')){
+            var clearBtn=document.createElement('a');
+            clearBtn.href='#'; clearBtn.id='cl-clear-sel'; clearBtn.className='cl-top-btn';
+            clearBtn.textContent='Clear selection';
+            clearBtn.style.marginLeft='10px';
+            clearBtn.style.setProperty('display','none','important');
+            clearBtn.addEventListener('click',function(e){
+                e.preventDefault();
+                // Remove only the selection from OTHER pages, keeping the current page's selection.
+                var pageIds=new Set(_pageSlice().map(function(v){return String(v.id);}));
+                Array.from(SEL).forEach(function(id){ if(!pageIds.has(id)) SEL.delete(id); });
+                renderRows(currentFiltered);
+                if(window._updateCounter) window._updateCounter();
+            });
+            counter.insertAdjacentElement('afterend', clearBtn);
+        }
+        window._updateCounter=function(){
+            // Show the cross-page selection (SEL.size) out of the whole filtered
+            // dataset. Pinned rows are not in currentFiltered — take the max.
+            var total = Math.max((currentFiltered && currentFiltered.length) || 0, SEL.size);
+            counter.textContent='Selected: '+SEL.size+' of '+total;
+            // "Clear selection" — only when there is a selection from OTHER pages
+            // (outside the current one).
+            // .cl-top-btn has display:inline-flex !important — hide it with !important too.
+            var pageIds=_pageSlice().map(function(v){return String(v.id);});
+            var onPage=pageIds.filter(function(id){return SEL.has(id);}).length;
+            var offPage=SEL.size-onPage;
+            var cb=document.getElementById('cl-clear-sel');
+            if(cb){ if(offPage>0) cb.style.removeProperty('display'); else cb.style.setProperty('display','none','important'); }
+        };
+        window._updateCounter();
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _installCounter);
+    } else {
+        _installCounter();
+    }
+    /* The reset button is drawn on DOMContentLoaded — .cl-bar is created there. */
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _renderResetBtn);
+    } else {
+        _renderResetBtn();
+    }
+
+    /* The "Write-off" button — opens the recognition modal (a separate script below).
+       The button itself is only added to .cl-bar here; the handler is window._woOpenInput,
+       which is already defined at click time regardless of script execution order.
+     */
+    function _renderWriteoffBtn(){
+        var bar = document.querySelector('.submit-row.cl-bar'); if (!bar) return;
+        if (document.getElementById('wo-open-btn')) return;
+        var btn = document.createElement('button');
+        btn.type='button'; btn.id='wo-open-btn';
+        btn.className='cl-top-btn';
+        btn.textContent='Write-off';
+        btn.addEventListener('click', function(){ if (window._woOpenInput) window._woOpenInput(); });
+        var counter = bar.querySelector('.cl-counter');
+        if (counter) bar.insertBefore(btn, counter); else bar.appendChild(btn);
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _renderWriteoffBtn);
+    } else {
+        _renderWriteoffBtn();
+    }
+})();
+</script>
+{% endblock %}
